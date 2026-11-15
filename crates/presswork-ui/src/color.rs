@@ -108,12 +108,12 @@ fn luminance(color: Color) -> f32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     const TEXT_MINIMUM: f32 = 4.5;
 
-    fn assert_readable(name: &str, foreground: Color, background: Color) {
+    pub(crate) fn assert_readable(name: &str, foreground: Color, background: Color) {
         let ratio = contrast(foreground, background);
         assert!(
             ratio >= TEXT_MINIMUM,

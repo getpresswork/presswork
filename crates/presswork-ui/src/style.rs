@@ -155,6 +155,7 @@ fn surface(background: Color, colors: &Colors) -> container::Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::color::tests::assert_readable;
     use crate::color::{DARK, LIGHT};
     use crate::theme::{dark, light};
 
@@ -197,5 +198,28 @@ mod tests {
 
         assert_eq!(style.text_color, Some(DARK.danger));
         assert_ne!(style.background, Some(Background::Color(DARK.chrome)));
+    }
+
+    #[test]
+    fn badge_text_is_readable_in_each_tone() {
+        let tones = [
+            Tone::Neutral,
+            Tone::Accent,
+            Tone::Danger,
+            Tone::Warning,
+            Tone::Success,
+            Tone::Info,
+        ];
+        for (name, theme) in [("light", light()), ("dark", dark())] {
+            for tone in tones {
+                let style = badge(tone)(&theme);
+                let (Some(text), Some(Background::Color(background))) =
+                    (style.text_color, style.background)
+                else {
+                    panic!("the {name} {tone:?} badge has no text color or background color");
+                };
+                assert_readable(&format!("{name} {tone:?} badge"), text, background);
+            }
+        }
     }
 }
