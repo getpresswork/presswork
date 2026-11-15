@@ -1,24 +1,30 @@
+use std::time::Instant;
+
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{button, column, container, row, rule, space, text};
 use iced::{Element, Fill, Subscription, Theme, padding, system};
+use presswork_editor::Editor;
 use presswork_log::{Level, LogStore};
+use presswork_text::Unit;
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::theme::{self as ui_theme, Mode};
 use presswork_ui::{font, font_size, size, space as gap};
 
-use crate::i18n::Localizer;
+use crate::i18n::{FluentArgs, Localizer};
 use crate::log_panel::{self, LogPanel};
 use crate::workspace::Workspace;
 
 const MARK_SIZE: f32 = 10.0;
 const DESCRIPTION_WIDTH: f32 = 380.0;
+const SCRATCH: &str = include_str!("../samples/scratch.typ");
 
 pub(crate) struct App {
     localizer: Localizer,
     workspace: Workspace,
     logs: LogPanel,
     mode: Mode,
+    editor: Editor,
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +32,7 @@ pub(crate) enum Message {
     SelectWorkspace(Workspace),
     Logs(log_panel::Message),
     SystemTheme(Mode),
+    Editor(presswork_editor::Action),
 }
 
 impl App {
@@ -35,6 +42,7 @@ impl App {
             workspace: Workspace::default(),
             logs: LogPanel::new(store),
             mode: Mode::None,
+            editor: Editor::new(SCRATCH),
         }
     }
 
@@ -56,6 +64,11 @@ impl App {
             Message::SystemTheme(mode) => {
                 tracing::debug!(?mode, "System theme changed");
                 self.mode = mode;
+            }
+            Message::Editor(action) => {
+                if let Err(error) = self.editor.perform(action, Instant::now()) {
+                    tracing::warn!(%error, "Editor action failed");
+                }
             }
         }
     }
@@ -115,6 +128,12 @@ impl App {
 
     fn main_area(&self) -> Element<'_, Message> {
         let workspace = self.workspace;
+        if workspace == Workspace::Write {
+            let colors = ui_theme::colors(&self.theme());
+            return presswork_editor::view(&self.editor, colors, Message::Editor)
+                .autofocus(true)
+                .into();
+        }
         let content = column![
             icon(workspace.icon())
                 .size(size::ICON_LARGE)
@@ -132,9 +151,29 @@ impl App {
         container(content).center(Fill).style(style::page).into()
     }
 
+    fn cursor_position(&self) -> String {
+        let document = self.editor.document();
+        let head = document.selection().primary().head;
+        let position = document.buffer().line_column(head, Unit::Char);
+        let mut args = FluentArgs::new();
+        args.set("line", position.line + 1);
+        args.set("column", position.column + 1);
+        self.localizer.format("status-position", &args)
+    }
+
     fn status_bar(&self) -> Element<'_, Message> {
         let (errors, warnings) = self.logs.counts();
         let mut indicators = row![].spacing(gap::XS).align_y(Vertical::Center);
+        if self.workspace == Workspace::Write {
+            indicators = indicators.push(
+                container(
+                    text(self.cursor_position())
+                        .size(font_size::SMALL)
+                        .style(style::muted),
+                )
+                .padding([0.0, gap::S]),
+            );
+        }
         if errors > 0 {
             indicators = indicators.push(count_button(
                 Icon::CircleX,
@@ -219,12 +258,45 @@ mod tests {
     }
 
     #[test]
-    fn main_area_describes_the_workspace() {
+    fn main_area_describes_a_workspace_without_content() {
+        let mut app = app();
+        app.update(Message::SelectWorkspace(Workspace::Plan));
+        let mut ui = simulator(app.view());
+
+        let description = app.localizer.text(Workspace::Plan.description_id());
+        assert!(ui.find(description).is_ok());
+    }
+
+    #[test]
+    fn typing_in_the_write_workspace_changes_the_text() {
+        let mut app = app();
+        let mut ui = simulator(app.view());
+
+        ui.typewrite("x");
+        for message in ui.into_messages() {
+            app.update(message);
+        }
+
+        assert!(app.editor.document().buffer().to_string().starts_with('x'));
+    }
+
+    #[test]
+    fn other_workspaces_ignore_typing() {
+        let mut app = app();
+        app.update(Message::SelectWorkspace(Workspace::Plan));
+        let mut ui = simulator(app.view());
+
+        ui.typewrite("x");
+
+        assert_eq!(ui.into_messages().count(), 0);
+    }
+
+    #[test]
+    fn status_bar_shows_the_cursor_position() {
         let app = app();
         let mut ui = simulator(app.view());
 
-        let description = app.localizer.text(Workspace::Write.description_id());
-        assert!(ui.find(description).is_ok());
+        assert!(ui.find("Line 1, column 1").is_ok());
     }
 
     #[test]

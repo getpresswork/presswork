@@ -17,6 +17,7 @@ workspace-typeset-description = This workspace shows the page design tools, the 
 workspace-publish-description = This workspace shows the export profiles, the validation results, and the releases.
 
 status-no-project = No project open
+status-position = Line { $line }, column { $column }
 
 logs-toggle = Logs
 logs-title = Logs

@@ -13,7 +13,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+presswork-editor.workspace = true
 presswork-log.workspace = true
+presswork-text.workspace = true
 presswork-ui.workspace = true
 
 directories.workspace = true

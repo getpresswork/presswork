@@ -1,3 +1,4 @@
+pub(crate) use fluent_bundle::FluentArgs;
 use fluent_bundle::{FluentBundle, FluentResource};
 use unic_langid::langid;
 
@@ -18,6 +19,14 @@ impl Localizer {
     }
 
     pub(crate) fn text(&self, id: &str) -> String {
+        self.message(id, None)
+    }
+
+    pub(crate) fn format(&self, id: &str, args: &FluentArgs<'_>) -> String {
+        self.message(id, Some(args))
+    }
+
+    fn message(&self, id: &str, args: Option<&FluentArgs<'_>>) -> String {
         let Some(pattern) = self
             .bundle
             .get_message(id)
@@ -27,7 +36,7 @@ impl Localizer {
         };
         let mut errors = Vec::new();
         self.bundle
-            .format_pattern(pattern, None, &mut errors)
+            .format_pattern(pattern, args, &mut errors)
             .into_owned()
     }
 }
@@ -44,6 +53,18 @@ mod tests {
     #[test]
     fn text_gives_the_english_message() {
         assert_eq!(Localizer::english().text("app-title"), "Presswork");
+    }
+
+    #[test]
+    fn format_puts_the_arguments_into_the_message() {
+        let mut args = FluentArgs::new();
+        args.set("line", 3);
+        args.set("column", 14);
+
+        assert_eq!(
+            Localizer::english().format("status-position", &args),
+            "Line 3, column 14"
+        );
     }
 
     #[test]

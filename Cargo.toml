@@ -12,6 +12,7 @@ homepage = "https://getpresswork.github.io/presswork/"
 publish = false
 
 [workspace.dependencies]
+presswork-editor = { path = "crates/presswork-editor" }
 presswork-log = { path = "crates/presswork-log" }
 presswork-text = { path = "crates/presswork-text" }
 presswork-ui = { path = "crates/presswork-ui" }
