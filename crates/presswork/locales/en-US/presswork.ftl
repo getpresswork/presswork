@@ -17,6 +17,18 @@ workspace-typeset-description = This workspace shows the page design tools, the 
 workspace-publish-description = This workspace shows the export profiles, the validation results, and the releases.
 
 status-no-project = No project open
+status-project = { $name } · { $file }
+status-not-saved = Not saved
+
+open-folder = Open folder
+open-folder-title = Open a project folder
+
+project-error-no-manifest = This folder is not a Presswork project. A project folder contains a presswork.toml file.
+project-error-invalid-manifest = The presswork.toml file is not correct: { $problem }
+project-error-main-outside = The main file must be in the project folder.
+project-error-main-missing = The main file { $file } does not exist.
+project-error-read = Presswork cannot read { $file }.
+save-error = Presswork cannot save { $file }.
 status-position = Line { $line }, column { $column }
 status-compiled = Compiled in { $milliseconds } ms
 

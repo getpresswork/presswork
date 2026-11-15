@@ -1,5 +1,6 @@
 mod app;
 mod compiler;
+mod files;
 mod i18n;
 mod log_panel;
 mod logging;

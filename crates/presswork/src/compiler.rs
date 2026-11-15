@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use futures::channel::oneshot;
@@ -10,6 +11,7 @@ static FONTS: LazyLock<Arc<Fonts>> = LazyLock::new(|| Arc::new(Fonts::embedded()
 pub(crate) struct Compiler {
     engine: Arc<Mutex<World>>,
     scheduler: Scheduler,
+    generation: u64,
 }
 
 impl Compiler {
@@ -17,7 +19,19 @@ impl Compiler {
         Self {
             engine: Arc::new(Mutex::new(World::new(Arc::clone(&FONTS), today()))),
             scheduler: Scheduler::default(),
+            generation: 0,
         }
+    }
+
+    pub(crate) fn open(&mut self, root: &Path, main: &Path) {
+        let world = World::open(Arc::clone(&FONTS), today(), root.to_path_buf(), main);
+        self.engine = Arc::new(Mutex::new(world));
+        self.scheduler = Scheduler::default();
+        self.generation += 1;
+    }
+
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub(crate) fn request(&mut self) -> bool {

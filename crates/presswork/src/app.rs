@@ -1,12 +1,15 @@
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{button, column, container, row, rule, space, text};
-use iced::{Element, Fill, FillPortion, Subscription, Task, Theme, padding, system};
+use iced::{Element, Fill, FillPortion, Subscription, Task, Theme, keyboard, padding, system};
 use presswork_editor::Editor;
 use presswork_log::{Level, LogStore};
 use presswork_preview::Preview;
+use presswork_project::Project;
 use presswork_text::{Position, Unit};
 use presswork_typst::{Output, Severity};
 use presswork_ui::icon::{Icon, icon};
@@ -15,6 +18,7 @@ use presswork_ui::theme::{self as ui_theme, Mode};
 use presswork_ui::{font, font_size, size, space as gap};
 
 use crate::compiler::{self, Compiler};
+use crate::files;
 use crate::i18n::{FluentArgs, Localizer};
 use crate::log_panel::{self, LogPanel};
 use crate::workspace::Workspace;
@@ -32,6 +36,9 @@ pub(crate) struct App {
     compiler: Compiler,
     preview: Preview,
     compiled: Option<Arc<Output>>,
+    project: Option<Project>,
+    saved: u64,
+    notice: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,22 +47,85 @@ pub(crate) enum Message {
     Logs(log_panel::Message),
     SystemTheme(Mode),
     Editor(presswork_editor::Action),
-    Compiled(Arc<Output>),
+    Compiled {
+        generation: u64,
+        output: Arc<Output>,
+    },
     Preview(presswork_preview::Action),
+    OpenFolder,
+    FolderPicked(Option<PathBuf>),
+    Save,
+    Key(keyboard::Event),
+    DismissNotice,
 }
 
 impl App {
     pub(crate) fn new(store: LogStore) -> Self {
+        let editor = Editor::new(SCRATCH);
         Self {
             localizer: Localizer::english(),
             workspace: Workspace::default(),
             logs: LogPanel::new(store),
             mode: Mode::None,
-            editor: Editor::new(SCRATCH),
+            saved: editor.revision(),
+            editor,
             compiler: Compiler::new(),
             preview: Preview::default(),
             compiled: None,
+            project: None,
+            notice: None,
         }
+    }
+
+    fn open_folder(&self) -> Task<Message> {
+        let title = self.localizer.text("open-folder-title");
+        Task::perform(files::pick_folder(title), Message::FolderPicked)
+    }
+
+    fn open_project(&mut self, root: &Path) -> Task<Message> {
+        match files::open(root) {
+            Ok(opened) => {
+                tracing::info!(root = %root.display(), "Project opened");
+                self.editor = Editor::new(&opened.text);
+                self.saved = self.editor.revision();
+                self.compiler
+                    .open(opened.project.root(), &opened.project.manifest().main);
+                self.preview = Preview::default();
+                self.compiled = None;
+                self.project = Some(opened.project);
+                self.notice = None;
+                self.workspace = Workspace::Write;
+                self.request_compile()
+            }
+            Err(error) => {
+                tracing::warn!(%error, "The folder did not open as a project");
+                self.notice = Some(files::error_text(&self.localizer, &error));
+                Task::none()
+            }
+        }
+    }
+
+    fn save(&mut self) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        let path = project.main();
+        match fs::write(&path, self.editor.document().buffer().to_string()) {
+            Ok(()) => {
+                tracing::info!(path = %path.display(), "File saved");
+                self.saved = self.editor.revision();
+            }
+            Err(error) => {
+                tracing::error!(%error, path = %path.display(), "File not saved");
+                let mut args = FluentArgs::new();
+                args.set("file", path.display().to_string());
+                self.notice = Some(self.localizer.format("save-error", &args));
+            }
+        }
+    }
+
+    fn is_saved(&self) -> bool {
+        self.project.is_none() || self.editor.revision() == self.saved
     }
 
     pub(crate) fn request_compile(&mut self) -> Task<Message> {
@@ -68,8 +138,10 @@ impl App {
 
     fn start_compile(&self) -> Task<Message> {
         let text = self.editor.document().buffer().to_string();
-        Task::perform(self.compiler.job(text), |output| {
-            Message::Compiled(Arc::new(output))
+        let generation = self.compiler.generation();
+        Task::perform(self.compiler.job(text), move |output| Message::Compiled {
+            generation,
+            output: Arc::new(output),
         })
     }
 
@@ -77,7 +149,10 @@ impl App {
     pub(crate) fn compile_now(&mut self) {
         let text = self.editor.document().buffer().to_string();
         let output = self.compiler.run_now(&text);
-        let _ = self.update(Message::Compiled(Arc::new(output)));
+        let _ = self.update(Message::Compiled {
+            generation: self.compiler.generation(),
+            output: Arc::new(output),
+        });
     }
 
     fn problem(&self, output: &Output) -> Option<String> {
@@ -127,7 +202,10 @@ impl App {
                     return self.request_compile();
                 }
             }
-            Message::Compiled(output) => {
+            Message::Compiled { generation, output } => {
+                if generation != self.compiler.generation() {
+                    return Task::none();
+                }
                 tracing::debug!(
                     duration_ms = output.duration.as_millis(),
                     diagnostics = output.diagnostics.len(),
@@ -141,6 +219,21 @@ impl App {
                 }
             }
             Message::Preview(action) => self.preview.perform(action),
+            Message::OpenFolder => return self.open_folder(),
+            Message::FolderPicked(Some(root)) => return self.open_project(&root),
+            Message::Save => self.save(),
+            Message::Key(keyboard::Event::KeyPressed {
+                key,
+                physical_key,
+                modifiers,
+                ..
+            }) if modifiers.command() => match key.to_latin(physical_key) {
+                Some('s') => self.save(),
+                Some('o') => return self.open_folder(),
+                _ => {}
+            },
+            Message::FolderPicked(None) | Message::Key(_) => {}
+            Message::DismissNotice => self.notice = None,
         }
         Task::none()
     }
@@ -149,6 +242,7 @@ impl App {
         Subscription::batch([
             self.logs.subscription().map(Message::Logs),
             system::theme_changes().map(Message::SystemTheme),
+            keyboard::listen().map(Message::Key),
         ])
     }
 
@@ -171,12 +265,30 @@ impl App {
             .into_iter()
             .map(|workspace| self.workspace_tab(workspace)))
         .spacing(gap::XXS);
-        container(
-            row![mark, title, space().width(gap::XL), tabs]
-                .spacing(gap::S)
-                .align_y(Vertical::Center),
+        let open = button(
+            row![
+                icon(Icon::FolderOpen).size(size::ICON_SMALL),
+                text(self.localizer.text("open-folder")).size(font_size::SMALL)
+            ]
+            .spacing(gap::XS)
+            .align_y(Vertical::Center),
         )
-        .padding([0.0, gap::L])
+        .padding([gap::XS, gap::S])
+        .style(style::ghost)
+        .on_press(Message::OpenFolder);
+        container(
+            row![
+                mark,
+                title,
+                space().width(gap::XL),
+                tabs,
+                space().width(Fill),
+                open
+            ]
+            .spacing(gap::S)
+            .align_y(Vertical::Center),
+        )
+        .padding(padding::left(gap::L).right(gap::S))
         .width(Fill)
         .height(size::TOP_BAR)
         .align_y(Vertical::Center)
@@ -199,6 +311,13 @@ impl App {
     }
 
     fn main_area(&self) -> Element<'_, Message> {
+        match &self.notice {
+            Some(notice) => column![notice_bar(notice), self.workspace_area()].into(),
+            None => self.workspace_area(),
+        }
+    }
+
+    fn workspace_area(&self) -> Element<'_, Message> {
         let workspace = self.workspace;
         if workspace == Workspace::Write {
             let colors = ui_theme::colors(&self.theme());
@@ -229,6 +348,16 @@ impl App {
         .spacing(gap::S)
         .align_x(Horizontal::Center);
         container(content).center(Fill).style(style::page).into()
+    }
+
+    fn location(&self) -> String {
+        let Some(project) = &self.project else {
+            return self.localizer.text("status-no-project");
+        };
+        let mut args = FluentArgs::new();
+        args.set("name", project.manifest().name.clone());
+        args.set("file", project.manifest().main.display().to_string());
+        self.localizer.format("status-project", &args)
     }
 
     fn cursor_position(&self) -> String {
@@ -271,22 +400,32 @@ impl App {
             ));
         }
         indicators = indicators.push(self.logs.toggle_button(&self.localizer).map(Message::Logs));
-        container(
-            row![
-                text(self.localizer.text("status-no-project"))
-                    .size(font_size::SMALL)
-                    .style(style::muted),
-                space().width(Fill),
-                indicators,
-            ]
-            .align_y(Vertical::Center),
-        )
-        .padding(padding::left(gap::L).right(gap::S))
-        .width(Fill)
-        .height(size::STATUS_BAR)
-        .align_y(Vertical::Center)
-        .style(style::chrome)
-        .into()
+        let mut location = row![
+            text(self.location())
+                .size(font_size::SMALL)
+                .style(style::muted)
+        ]
+        .spacing(gap::S)
+        .align_y(Vertical::Center);
+        if !self.is_saved() {
+            location = location.push(
+                button(
+                    text(self.localizer.text("status-not-saved"))
+                        .size(font_size::SMALL)
+                        .style(style::tone(Tone::Warning)),
+                )
+                .padding([gap::XXS, gap::XS])
+                .style(style::ghost)
+                .on_press(Message::Save),
+            );
+        }
+        container(row![location, space().width(Fill), indicators].align_y(Vertical::Center))
+            .padding(padding::left(gap::L).right(gap::S))
+            .width(Fill)
+            .height(size::STATUS_BAR)
+            .align_y(Vertical::Center)
+            .style(style::chrome)
+            .into()
     }
 }
 
@@ -297,6 +436,30 @@ fn hairline<'a>() -> Element<'a, Message> {
 #[cfg(test)]
 pub(crate) fn send(app: &mut App, message: Message) {
     let _ = app.update(message);
+}
+
+fn notice_bar(notice: &str) -> Element<'_, Message> {
+    container(
+        row![
+            icon(Icon::CircleAlert)
+                .size(size::ICON_SMALL)
+                .style(style::tone(Tone::Danger)),
+            text(notice)
+                .size(font_size::SMALL)
+                .style(style::tone(Tone::Danger)),
+            space().width(Fill),
+            button(icon(Icon::X).size(size::ICON_SMALL))
+                .padding(gap::XXS)
+                .style(style::ghost)
+                .on_press(Message::DismissNotice),
+        ]
+        .spacing(gap::XS)
+        .align_y(Vertical::Center),
+    )
+    .padding([gap::XS, gap::L])
+    .width(Fill)
+    .style(style::badge(Tone::Danger))
+    .into()
 }
 
 fn status_text<'a>(content: String) -> Element<'a, Message> {
@@ -336,7 +499,117 @@ mod tests {
     }
 
     fn compiled(output: Output) -> Message {
-        Message::Compiled(Arc::new(output))
+        Message::Compiled {
+            generation: 0,
+            output: Arc::new(output),
+        }
+    }
+
+    fn project_folder(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let folder = tempfile::tempdir().unwrap();
+        for (path, text) in files {
+            fs::write(folder.path().join(path), text).unwrap();
+        }
+        folder
+    }
+
+    fn book() -> tempfile::TempDir {
+        project_folder(&[
+            ("presswork.toml", "[project]\nname = \"The Book\"\n"),
+            ("main.typ", "= Book"),
+        ])
+    }
+
+    fn open(app: &mut App, folder: &tempfile::TempDir) {
+        send(
+            app,
+            Message::FolderPicked(Some(folder.path().to_path_buf())),
+        );
+    }
+
+    #[test]
+    fn opening_a_project_folder_shows_its_main_file() {
+        let folder = book();
+        let mut app = app();
+
+        open(&mut app, &folder);
+
+        assert_eq!(app.editor.document().buffer().to_string(), "= Book");
+        let mut ui = simulator(app.view());
+        assert!(ui.find("The Book · main.typ").is_ok());
+    }
+
+    #[test]
+    fn a_folder_that_is_not_a_project_shows_a_notice() {
+        let folder = project_folder(&[("notes.txt", "")]);
+        let mut app = app();
+
+        open(&mut app, &folder);
+
+        let mut ui = simulator(app.view());
+        let notice = "This folder is not a Presswork project. A project folder contains a presswork.toml file.";
+        assert!(ui.find(notice).is_ok());
+        assert!(ui.find("No project open").is_ok());
+    }
+
+    #[test]
+    fn a_notice_goes_away_when_dismissed() {
+        let folder = project_folder(&[("notes.txt", "")]);
+        let mut app = app();
+        open(&mut app, &folder);
+
+        send(&mut app, Message::DismissNotice);
+
+        assert_eq!(app.notice, None);
+    }
+
+    #[test]
+    fn save_writes_the_text_to_the_main_file() {
+        let folder = book();
+        let mut app = app();
+        open(&mut app, &folder);
+        send(&mut app, insert("x"));
+        assert!(simulator(app.view()).find("Not saved").is_ok());
+
+        send(&mut app, Message::Save);
+
+        let saved = fs::read_to_string(folder.path().join("main.typ")).unwrap();
+        assert_eq!(saved, "x= Book");
+        assert!(simulator(app.view()).find("Not saved").is_err());
+    }
+
+    #[test]
+    fn control_and_s_saves_the_file() {
+        let folder = book();
+        let mut app = app();
+        open(&mut app, &folder);
+        send(&mut app, insert("x"));
+
+        send(
+            &mut app,
+            Message::Key(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character("s".into()),
+                modified_key: keyboard::Key::Character("s".into()),
+                physical_key: keyboard::key::Physical::Code(keyboard::key::Code::KeyS),
+                location: keyboard::Location::Standard,
+                modifiers: keyboard::Modifiers::COMMAND,
+                text: None,
+                repeat: false,
+            }),
+        );
+
+        assert!(app.is_saved());
+    }
+
+    #[test]
+    fn a_result_from_an_older_compiler_is_ignored() {
+        let folder = book();
+        let mut app = app();
+        open(&mut app, &folder);
+
+        send(&mut app, compiled(Output::default()));
+
+        assert!(app.compiled.is_none());
     }
 
     #[test]
