@@ -14,7 +14,8 @@ This chapter tells how Presswork records events, so that persons can find the ca
 
 ## Log panel
 
-- The log panel shows the log entries live.
+- The log panel shows the log entries live, in columns: time, level, area, and message with its fields.
+- The status bar shows the number of errors and the number of warnings. Click a number to open the log panel at that level.
 - Filters select entries by level, area, project, and time.
 - A search finds text in the entries.
 - Each entry links to its object, for example a file, a task, a job, or a build report.

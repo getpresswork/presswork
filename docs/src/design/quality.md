@@ -94,3 +94,11 @@ Presswork does not collect usage data. After a crash, it writes a crash report t
 
 - Each new view gets a design review before its release. The review uses the design tokens and the [Interface](interface.md) chapter.
 - Each release has a release checklist: snapshots, performance, accessibility, and STE text.
+
+The `render_screens` test makes images of the main screens in the light theme and in the dark theme. Use these images for design reviews. The test does not run with the other tests. To make the images, run this command:
+
+```sh
+cargo test --package presswork render_screens -- --ignored
+```
+
+The test writes the images to `target/screens`. To use a different folder, set the `PRESSWORK_SCREENS` environment variable.
