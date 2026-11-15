@@ -14,4 +14,5 @@ workspace = true
 
 [dependencies]
 presswork-text.workspace = true
+typst-syntax.workspace = true
 unicode-segmentation.workspace = true

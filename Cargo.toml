@@ -32,7 +32,8 @@ tempfile = "3.27.0"
 thiserror = "2.0.21"
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
-tracing-subscriber = { version = "0.3.23", default-features = false, features = ["std", "registry", "env-filter", "tracing-log"] }
+typst-syntax = "0.15.1"
+tracing-subscriber ={ version = "0.3.23", default-features = false, features = ["std", "registry", "env-filter", "tracing-log"] }
 unic-langid = "0.9.6"
 unicode-segmentation = "1.13.3"
 

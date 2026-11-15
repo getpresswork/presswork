@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use presswork_text::{
@@ -8,8 +9,11 @@ use presswork_text::{
 use crate::action::{Action, Deletion, Motion};
 use crate::boundary;
 
+static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
 #[derive(Debug, Clone)]
 pub struct Editor {
+    id: u64,
     document: Document,
     revision: u64,
     goal: Option<f32>,
@@ -19,10 +23,16 @@ impl Editor {
     #[must_use]
     pub fn new(text: &str) -> Self {
         Self {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             document: Document::new(text),
             revision: 0,
             goal: None,
         }
+    }
+
+    #[must_use]
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     #[must_use]
