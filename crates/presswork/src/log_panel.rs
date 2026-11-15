@@ -1,12 +1,14 @@
 use std::collections::VecDeque;
 
-use iced::alignment::Vertical;
+use iced::alignment::{Horizontal, Vertical};
 use iced::futures::StreamExt;
 use iced::widget::{button, column, container, row, scrollable, space, text, text_input};
-use iced::{Element, Fill, Font, Subscription, Theme};
+use iced::{Element, Fill, Subscription};
 use jiff::tz::TimeZone;
 use presswork_log::{Level, LogEntry, LogFilter, LogStore};
-use presswork_ui::{font_size, space as gap};
+use presswork_ui::icon::{Icon, icon};
+use presswork_ui::style::{self, Tone};
+use presswork_ui::{font, font_size, size, space as gap};
 
 use crate::i18n::Localizer;
 
@@ -18,11 +20,10 @@ const LEVELS: [Level; 5] = [
     Level::Trace,
 ];
 
-const PANEL_HEIGHT: f32 = 240.0;
-const SEARCH_WIDTH: f32 = 240.0;
-const TIME_WIDTH: f32 = 112.0;
-const LEVEL_WIDTH: f32 = 56.0;
-const AREA_WIDTH: f32 = 104.0;
+const SEARCH_WIDTH: f32 = 220.0;
+const TIME_WIDTH: f32 = 96.0;
+const LEVEL_WIDTH: f32 = 52.0;
+const AREA_WIDTH: f32 = 96.0;
 
 #[derive(Debug)]
 pub(crate) struct LogPanel {
@@ -37,6 +38,7 @@ pub(crate) struct LogPanel {
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
     Toggle,
+    Close,
     Changed,
     LevelSelected(Level),
     SearchChanged(String),
@@ -63,6 +65,7 @@ impl LogPanel {
     pub(crate) fn update(&mut self, message: Message) {
         match message {
             Message::Toggle => self.open = !self.open,
+            Message::Close => self.open = false,
             Message::Changed => self.load(),
             Message::LevelSelected(level) => self.filter.minimum = level,
             Message::SearchChanged(text) => self.filter.text = text,
@@ -76,40 +79,32 @@ impl LogPanel {
     }
 
     pub(crate) fn toggle_button(&self, localizer: &Localizer) -> Element<'_, Message> {
-        let style: fn(&Theme, button::Status) -> button::Style = if self.open {
-            button::primary
-        } else {
-            button::text
-        };
-        button(text(localizer.text("logs-toggle")))
-            .style(style)
+        let content = row![
+            icon(Icon::ScrollText).size(size::ICON_SMALL),
+            text(localizer.text("logs-toggle")).size(font_size::SMALL)
+        ]
+        .spacing(gap::XS)
+        .align_y(Vertical::Center);
+        button(content)
+            .padding([gap::XXS, gap::S])
+            .style(style::tab(self.open))
             .on_press(Message::Toggle)
             .into()
     }
 
     pub(crate) fn view(&self, localizer: &Localizer) -> Element<'_, Message> {
-        let levels = row(LEVELS
-            .into_iter()
-            .map(|level| level_button(level, self.filter.minimum, localizer)))
-        .spacing(gap::XS);
-        let search = text_input(&localizer.text("logs-find"), &self.filter.text)
-            .on_input(Message::SearchChanged)
-            .width(SEARCH_WIDTH);
-        let header = row![
-            text(localizer.text("logs-level")),
-            levels,
-            space().width(Fill),
-            search
-        ]
-        .spacing(gap::S)
-        .align_y(Vertical::Center);
-
         let rows: Vec<Element<'_, Message>> = self
             .visible()
             .map(|entry| entry_row(entry, &self.time_zone))
             .collect();
         let body: Element<'_, Message> = if rows.is_empty() {
-            text(localizer.text("logs-empty")).into()
+            container(
+                text(localizer.text("logs-empty"))
+                    .size(font_size::SMALL)
+                    .style(style::muted),
+            )
+            .center(Fill)
+            .into()
         } else {
             scrollable(column(rows).spacing(gap::XS))
                 .anchor_bottom()
@@ -117,11 +112,47 @@ impl LogPanel {
                 .into()
         };
 
-        container(column![header, body].spacing(gap::S))
-            .padding(gap::S)
+        container(column![self.header(localizer), columns(localizer), body].spacing(gap::S))
+            .padding([gap::S, gap::L])
             .width(Fill)
-            .height(PANEL_HEIGHT)
+            .height(size::PANEL)
+            .style(style::chrome)
             .into()
+    }
+
+    fn header(&self, localizer: &Localizer) -> Element<'_, Message> {
+        let levels = row(LEVELS
+            .into_iter()
+            .map(|level| level_tab(level, self.filter.minimum, localizer)))
+        .spacing(gap::XXS);
+        let search = text_input(&localizer.text("logs-find"), &self.filter.text)
+            .on_input(Message::SearchChanged)
+            .icon(text_input::Icon {
+                font: font::ICONS,
+                code_point: Icon::Search.unicode(),
+                size: Some(size::ICON_SMALL.into()),
+                spacing: gap::XS,
+                side: text_input::Side::Left,
+            })
+            .size(font_size::SMALL)
+            .padding([gap::XS, gap::S])
+            .width(SEARCH_WIDTH)
+            .style(style::field);
+        let close = button(icon(Icon::X))
+            .padding(gap::XS)
+            .style(style::ghost)
+            .on_press(Message::Close);
+        row![
+            text(localizer.text("logs-title")).font(font::UI_SEMIBOLD),
+            space().width(gap::M),
+            levels,
+            space().width(Fill),
+            search,
+            close
+        ]
+        .spacing(gap::S)
+        .align_y(Vertical::Center)
+        .into()
     }
 
     fn visible(&self) -> impl Iterator<Item = &LogEntry> {
@@ -142,16 +173,29 @@ impl LogPanel {
     }
 }
 
-fn level_button<'a>(level: Level, minimum: Level, localizer: &Localizer) -> Element<'a, Message> {
-    let style: fn(&Theme, button::Status) -> button::Style = if level == minimum {
-        button::primary
-    } else {
-        button::text
-    };
-    button(text(localizer.text(level_text_id(level))))
-        .style(style)
+fn level_tab<'a>(level: Level, minimum: Level, localizer: &Localizer) -> Element<'a, Message> {
+    button(text(localizer.text(level_text_id(level))).size(font_size::SMALL))
+        .padding([gap::XXS, gap::S])
+        .style(style::tab(level == minimum))
         .on_press(Message::LevelSelected(level))
         .into()
+}
+
+fn columns<'a>(localizer: &Localizer) -> Element<'a, Message> {
+    let heading = |id: &str| {
+        text(localizer.text(id))
+            .size(font_size::CAPTION)
+            .font(font::UI_MEDIUM)
+            .style(style::muted)
+    };
+    row![
+        heading("logs-column-time").width(TIME_WIDTH),
+        heading("logs-column-level").width(LEVEL_WIDTH),
+        heading("logs-column-area").width(AREA_WIDTH),
+        heading("logs-column-message"),
+    ]
+    .spacing(gap::S)
+    .into()
 }
 
 fn level_text_id(level: Level) -> &'static str {
@@ -161,6 +205,15 @@ fn level_text_id(level: Level) -> &'static str {
         Level::Info => "logs-level-info",
         Level::Debug => "logs-level-debug",
         Level::Trace => "logs-level-trace",
+    }
+}
+
+fn level_tone(level: Level) -> Tone {
+    match level {
+        Level::Error => Tone::Danger,
+        Level::Warn => Tone::Warning,
+        Level::Info => Tone::Info,
+        Level::Debug | Level::Trace => Tone::Neutral,
     }
 }
 
@@ -176,37 +229,35 @@ fn entry_row<'a>(entry: &'a LogEntry, time_zone: &TimeZone) -> Element<'a, Messa
         .map(|(name, value)| format!("{name}={value}"))
         .collect::<Vec<_>>()
         .join(" ");
+    let badge = container(
+        text(entry.level.as_str())
+            .font(font::MONO)
+            .size(font_size::CAPTION),
+    )
+    .width(LEVEL_WIDTH)
+    .align_x(Horizontal::Center)
+    .style(style::badge(level_tone(entry.level)));
     row![
         text(time)
-            .font(Font::MONOSPACE)
+            .font(font::MONO)
             .size(font_size::SMALL)
+            .style(style::muted)
             .width(TIME_WIDTH),
-        text(entry.level.as_str())
-            .font(Font::MONOSPACE)
-            .size(font_size::SMALL)
-            .style(level_style(entry.level))
-            .width(LEVEL_WIDTH),
+        badge,
         text(entry.area())
-            .font(Font::MONOSPACE)
+            .font(font::MONO)
             .size(font_size::SMALL)
+            .style(style::muted)
             .width(AREA_WIDTH),
         text(entry.message.as_str()).size(font_size::SMALL),
         text(fields)
-            .font(Font::MONOSPACE)
+            .font(font::MONO)
             .size(font_size::SMALL)
-            .style(text::secondary),
+            .style(style::muted),
     ]
     .spacing(gap::S)
     .align_y(Vertical::Center)
     .into()
-}
-
-fn level_style(level: Level) -> fn(&Theme) -> text::Style {
-    match level {
-        Level::Error => text::danger,
-        Level::Warn => text::warning,
-        Level::Info | Level::Debug | Level::Trace => text::base,
-    }
 }
 
 #[cfg(test)]
@@ -326,9 +377,18 @@ mod tests {
     #[test]
     fn each_text_of_the_panel_has_english_text() {
         let localizer = Localizer::english();
-        let ids = ["logs-toggle", "logs-level", "logs-find", "logs-empty"]
-            .into_iter()
-            .chain(LEVELS.into_iter().map(level_text_id));
+        let ids = [
+            "logs-toggle",
+            "logs-title",
+            "logs-find",
+            "logs-empty",
+            "logs-column-time",
+            "logs-column-level",
+            "logs-column-area",
+            "logs-column-message",
+        ]
+        .into_iter()
+        .chain(LEVELS.into_iter().map(level_text_id));
 
         for id in ids {
             assert_ne!(localizer.text(id), id);
