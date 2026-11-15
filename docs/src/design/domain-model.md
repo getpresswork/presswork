@@ -6,23 +6,35 @@ This chapter tells the main records of Presswork and their relations.
 
 ```text
 Organization
-+-- Teams ............... groups of users
-+-- Roles ............... named sets of permissions
-+-- Role assignments .... roles for users and teams, in a scope
-+-- Collections ......... series, periodicals, journals
++-- Teams, roles, and role assignments
++-- Collections ............. book series, periodicals, journals
 |   +-- Publications
-+-- Publications
-|   +-- Project ......... the Typst sources
-|   +-- Components ...... chapters, articles, sections
++-- Publications ............ books, issues, manuals, papers
+|   +-- Project ............. the Typst sources
+|   +-- Components .......... chapters, articles, sections
+|   +-- Revisions and suggestions
+|   +-- Tasks, tickets, milestones, and checklists
 |   +-- Workflow instances
-|   +-- Revisions
-|   +-- Tickets and tasks
-|   +-- Checklists
-+-- Workflow definitions
-+-- Checklist templates
-+-- Routines
-+-- Reports
+|   +-- Budget, clearances, and identifiers
++-- Library ................. works, editions, files, standard editions
++-- Research notes
++-- Asset library ........... assets and renditions
++-- Language ................ dictionaries, house style, termbase, translation memory
++-- Chat .................... channels and direct messages
++-- Calls for papers ........ submissions and reviews
++-- Workflow definitions, checklist templates, and schedule templates
++-- Routines and reports
 ```
+
+This chapter shows the core records. These chapters tell the other areas:
+
+| Area | Chapter |
+| --- | --- |
+| Library, annotations, and research notes | [Library](library.md) |
+| Views, planning, time, and budgets | [Tasks and schedules](schedules.md) |
+| Suggestions, spelling, house style, termbase, index, and translation | [Editorial tools](editorial.md) |
+| Assets, clearances, identifiers, and metadata | [Production](production.md) |
+| Chat, inbox, portal, and submissions | [Communication](communication.md) |
 
 ## Organizations and people
 
