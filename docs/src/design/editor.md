@@ -41,6 +41,16 @@ The `presswork-editor` crate contains the iced widget. The widget does these thi
 
 Each editor command is a pure function from the editor state to a transaction. Thus tests can run all commands without a window.
 
+## Scripts and input
+
+- The editor supports bidirectional text, for example Arabic or Hebrew mixed with Latin text. The cursor moves in the visual sequence of the line.
+- The editor supports the input methods for Chinese, Japanese, and Korean, with the composition text in the line.
+- Line breaks, word selection, and cursor movement follow the Unicode rules for each script.
+
+## Vim mode
+
+An optional Vim mode gives the Vim keys and modes for movement and editing. The Vim commands are editor commands. Thus they also make transactions, and undo operates in the same way.
+
 ## Preview widget
 
 The `presswork-preview` crate contains the page preview. The preview does these things:
