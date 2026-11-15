@@ -17,6 +17,7 @@
 - [Quality](design/quality.md)
 - [Delivery](design/delivery.md)
 - [Roadmap](design/roadmap.md)
+- [Decisions](design/decisions.md)
 
 # Contributing
 
