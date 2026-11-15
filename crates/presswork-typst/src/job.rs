@@ -42,7 +42,7 @@ mod tests {
 
     fn world() -> Mutex<World> {
         let today = Datetime::from_ymd(2026, 11, 15).unwrap();
-        Mutex::new(World::new(Arc::new(Fonts::embedded()), today))
+        Mutex::new(World::new(Arc::new(Fonts::embedded()), Some(today)))
     }
 
     #[test]

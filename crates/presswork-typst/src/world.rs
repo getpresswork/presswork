@@ -15,12 +15,12 @@ pub struct World {
     library: LazyHash<Library>,
     fonts: Arc<Fonts>,
     main: Source,
-    today: Datetime,
+    today: Option<Datetime>,
 }
 
 impl World {
     #[must_use]
-    pub fn new(fonts: Arc<Fonts>, today: Datetime) -> Self {
+    pub fn new(fonts: Arc<Fonts>, today: Option<Datetime>) -> Self {
         Self {
             library: LazyHash::new(Library::default()),
             fonts,
@@ -79,6 +79,6 @@ impl typst::World for World {
 
     fn today(&self, offset: Option<Duration>) -> Option<Datetime> {
         let _ = offset;
-        Some(self.today)
+        self.today
     }
 }

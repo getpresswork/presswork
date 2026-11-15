@@ -79,7 +79,7 @@ mod tests {
 
     fn world(text: &str) -> World {
         let today = Datetime::from_ymd(2026, 11, 15).unwrap();
-        let mut world = World::new(Arc::new(Fonts::embedded()), today);
+        let mut world = World::new(Arc::new(Fonts::embedded()), Some(today));
         world.set_main_text(text);
         world
     }
@@ -136,6 +136,14 @@ mod tests {
         let text = "#assert.eq(datetime.today(), datetime(year: 2026, month: 11, day: 15))";
 
         assert_eq!(compile(&world(text)).diagnostics, []);
+    }
+
+    #[test]
+    fn a_world_without_a_date_gives_an_error_for_today() {
+        let mut world = World::new(Arc::new(Fonts::embedded()), None);
+        world.set_main_text("#datetime.today()");
+
+        assert_eq!(errors(&compile(&world)).len(), 1);
     }
 
     #[test]

@@ -37,7 +37,7 @@ mod tests {
 
     fn document(text: &str) -> PagedDocument {
         let today = Datetime::from_ymd(2026, 11, 15).unwrap();
-        let mut world = World::new(Arc::new(Fonts::embedded()), today);
+        let mut world = World::new(Arc::new(Fonts::embedded()), Some(today));
         world.set_main_text(text);
         compile(&world).document.unwrap()
     }
