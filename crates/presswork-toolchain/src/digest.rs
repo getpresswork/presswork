@@ -148,6 +148,43 @@ mod tests {
     }
 
     #[test]
+    fn the_included_list_agrees_with_the_digests_that_scoop_records() {
+        let known = KnownDigests::included();
+
+        for (version, hex) in [
+            (
+                "0.11.0",
+                "bed0f4868b39dcecc29f5e654589cdd1fbb334f11965d1fe704ae29e29ab1a45",
+            ),
+            (
+                "0.11.1",
+                "6f6896f199649717f0e1ff4aff0d5f62531e140796c1891304168fd546be2516",
+            ),
+            (
+                "0.12.0",
+                "07dceb7666b8418d5f7a0b7ebacdf0ca4a4372c0588926374e60976d55b415ff",
+            ),
+            (
+                "0.13.0",
+                "c0f8f10a4a4b83867d57abd21f2ddf245c9234f4e93186ccd49f15d4d465ce2d",
+            ),
+            (
+                "0.13.1",
+                "44170d0632298ba68cbabc43dbfb6908b17ca9236859e0767b0e5d54b2d19f48",
+            ),
+        ] {
+            assert_eq!(
+                known.get(
+                    &Version::parse(version).unwrap(),
+                    "typst-x86_64-pc-windows-msvc.zip"
+                ),
+                Digest::from_hex(hex),
+                "{version}"
+            );
+        }
+    }
+
+    #[test]
     fn a_github_digest_must_use_sha256() {
         assert_eq!(
             Digest::from_github(&format!("sha256:{HEX}")),
