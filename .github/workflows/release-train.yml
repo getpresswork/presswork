@@ -44,7 +44,8 @@ jobs:
           last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2> /dev/null || true)
           range="HEAD"
           if [[ -n "${last}" ]]; then range="${last}..HEAD"; fi
-          if git log --format=%s "${range}" | grep -Eq '^(feat|fix|perf)(\([a-z0-9-]+\))?!?: '; then
+          subjects=$(git log --format=%s "${range}")
+          if grep -Eq '^(feat|fix|perf)(\([a-z0-9-]+\))?!?: ' <<< "${subjects}"; then
             echo "release=true" >> "${GITHUB_OUTPUT}"
           else
             echo "No feat, fix, or perf commits since ${last:-the first commit}." >> "${GITHUB_STEP_SUMMARY}"
