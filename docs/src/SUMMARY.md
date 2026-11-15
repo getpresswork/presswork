@@ -10,6 +10,7 @@
 - [Toolchains](design/toolchains.md)
 - [Editor and preview](design/editor.md)
 - [Collaboration](design/collaboration.md)
+- [Server](design/server.md)
 
 # Contributing
 
