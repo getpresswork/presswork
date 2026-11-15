@@ -13,11 +13,15 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+lzma-rust2.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+tar.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
+lzma-rust2 = { workspace = true, features = ["encoder"] }
