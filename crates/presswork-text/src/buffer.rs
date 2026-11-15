@@ -87,7 +87,7 @@ impl Buffer {
         (index < self.line_count()).then(|| {
             text_of(
                 self.rope
-                    .byte_slice(self.rope.line_to_byte(index)..self.line_end(index)),
+                    .byte_slice(self.rope.line_to_byte(index)..self.content_end(index)),
             )
         })
     }
@@ -120,7 +120,7 @@ impl Buffer {
             return Position::new(self.len());
         }
         let start = self.rope.line_to_byte(line);
-        let end = self.line_end(line);
+        let end = self.content_end(line);
         let offset = match unit {
             Unit::Byte => self.floor((start + column).min(end)),
             Unit::Char => {
@@ -147,7 +147,28 @@ impl Buffer {
         self.rope.char_to_utf16_cu(self.rope.byte_to_char(offset))
     }
 
-    fn line_end(&self, line: usize) -> usize {
+    #[must_use]
+    pub fn line_of(&self, position: Position) -> usize {
+        self.rope.byte_to_line(self.floor(position.offset()))
+    }
+
+    #[must_use]
+    pub fn line_start(&self, line: usize) -> Position {
+        if line >= self.line_count() {
+            return Position::new(self.len());
+        }
+        Position::new(self.rope.line_to_byte(line))
+    }
+
+    #[must_use]
+    pub fn line_end(&self, line: usize) -> Position {
+        if line >= self.line_count() {
+            return Position::new(self.len());
+        }
+        Position::new(self.content_end(line))
+    }
+
+    fn content_end(&self, line: usize) -> usize {
         let slice = self.rope.line(line);
         let mut end = self.rope.line_to_byte(line) + slice.len_bytes();
         let mut chars = slice.chars_at(slice.len_chars()).reversed();
@@ -234,6 +255,27 @@ mod tests {
 
         assert_eq!(lines(&buffer), ["a", ""]);
         assert_eq!(buffer.line(2), None);
+    }
+
+    #[test]
+    fn line_bounds_leave_out_the_line_break() {
+        let buffer = Buffer::from("ab\r\ncd\n");
+
+        assert_eq!(buffer.line_of(Position::new(5)), 1);
+        assert_eq!(buffer.line_start(1), Position::new(4));
+        assert_eq!(buffer.line_end(0), Position::new(2));
+        assert_eq!(buffer.line_end(1), Position::new(6));
+        assert_eq!(buffer.line_start(2), Position::new(7));
+        assert_eq!(buffer.line_end(2), Position::new(7));
+    }
+
+    #[test]
+    fn line_bounds_after_the_last_line_stop_at_the_end_of_the_text() {
+        let buffer = Buffer::from("ab");
+
+        assert_eq!(buffer.line_of(Position::new(9)), 0);
+        assert_eq!(buffer.line_start(4), Position::new(2));
+        assert_eq!(buffer.line_end(4), Position::new(2));
     }
 
     #[test]
