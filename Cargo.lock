@@ -4089,6 +4089,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "presswork-server"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
+ "toml 1.2.1+spec-1.1.0",
+]
+
+[[package]]
 name = "presswork-text"
 version = "0.1.0"
 dependencies = [
