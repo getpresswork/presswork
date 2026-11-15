@@ -8,8 +8,13 @@ use presswork_log::{Level, LogEntry, LogStore};
 use presswork_ui::theme::Mode;
 use presswork_ui::{font, font_size};
 
+use presswork_editor::{Action as EditorAction, Motion};
+use presswork_preview::Action as PreviewAction;
+use presswork_text::Position;
+
 use crate::app::{App, Message, send};
 use crate::log_panel;
+use crate::workspace::Workspace;
 
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 800.0;
@@ -125,4 +130,100 @@ fn render_screens() {
     );
     app.compile_now();
     render(&mut app, "write-error");
+
+    let book = folder(&[
+        ("presswork.toml", "[project]\nname = \"Field Notes\"\n"),
+        ("main.typ", BOOK),
+    ]);
+    send(
+        &mut app,
+        Message::FolderPicked(Some(book.path().to_path_buf())),
+    );
+    send(
+        &mut app,
+        Message::Editor(EditorAction::Move {
+            motion: Motion::DocumentEnd,
+            extend: false,
+        }),
+    );
+    send(
+        &mut app,
+        Message::Editor(EditorAction::Insert(
+            "\nThe last proof goes to the printer.\n".to_owned(),
+        )),
+    );
+    app.compile_now();
+    let sentence = "Good books start with good paper.";
+    let start = BOOK.find(sentence).unwrap();
+    select(&mut app, start, start + sentence.len());
+    render(&mut app, "project");
+
+    send(&mut app, Message::Preview(PreviewAction::ZoomIn));
+    send(&mut app, Message::Preview(PreviewAction::ZoomIn));
+    render(&mut app, "preview-zoom");
+    send(&mut app, Message::Preview(PreviewAction::FitWidth));
+
+    let notes = folder(&[("notes.txt", "")]);
+    send(
+        &mut app,
+        Message::FolderPicked(Some(notes.path().to_path_buf())),
+    );
+    render(&mut app, "notice");
+
+    send(&mut app, Message::DismissNotice);
+    send(&mut app, Message::SelectWorkspace(Workspace::Plan));
+    render(&mut app, "plan-workspace");
+}
+
+const BOOK: &str = r#"#set page(paper: "a5", margin: (x: 1.8cm, y: 2cm), numbering: "1")
+#set text(font: "Libertinus Serif", size: 10.5pt, lang: "en")
+#set par(justify: true)
+#set heading(numbering: "1.1")
+
+#align(center)[
+  #text(size: 20pt, weight: "bold")[Field Notes]
+  #v(-4pt)
+  #text(size: 11pt, style: "italic")[A small handbook for printers]
+]
+
+= Paper and ink <paper>
+
+Good books start with good paper. The weight, the grain, and the color of the paper change how the type looks on the page. Test each paper with the ink of your press before you print the full edition.
+
+== Weights
+
+#table(
+  columns: 3,
+  [*Use*], [*Weight*], [*Feel*],
+  [Text], [90 g/m²], [Soft],
+  [Cover], [250 g/m²], [Firm],
+  [Plates], [150 g/m²], [Smooth],
+)
+
+== Ink
+
+The ink must dry before you fold the sheets. @paper tells why the paper comes first.#footnote[Most inks dry in 24 hours.]
+
+$ "coverage" = "ink area" / "page area" $
+"#;
+
+fn folder(files: &[(&str, &str)]) -> tempfile::TempDir {
+    let folder = tempfile::tempdir().unwrap();
+    for (path, text) in files {
+        std::fs::write(folder.path().join(path), text).unwrap();
+    }
+    folder
+}
+
+fn select(app: &mut App, start: usize, end: usize) {
+    for (offset, extend) in [(start, false), (end, true)] {
+        send(
+            app,
+            Message::Editor(EditorAction::MoveTo {
+                position: Position::new(offset),
+                extend,
+                goal: None,
+            }),
+        );
+    }
 }
