@@ -30,6 +30,7 @@ iced_test = "0.14.0"
 jiff = "0.2.45"
 lzma-rust2 = { version = "0.25.0", default-features = false, features = ["std", "xz"] }
 lucide-icons = { version = "1.73.0", default-features = false }
+png = "0.18.1"
 proptest = "1.12.0"
 reqwest = "0.13.5"
 rfd = "0.18.0"

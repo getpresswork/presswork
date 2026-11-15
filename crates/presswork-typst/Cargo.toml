@@ -14,10 +14,11 @@ workspace = true
 
 [dependencies]
 comemo.workspace = true
+png.workspace = true
+semver.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
 typst.workspace = true
 typst-assets.workspace = true
 typst-layout.workspace = true
 typst-render.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true

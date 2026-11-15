@@ -4119,7 +4119,10 @@ name = "presswork-typst"
 version = "0.1.0"
 dependencies = [
  "comemo",
+ "png",
+ "semver",
  "tempfile",
+ "thiserror 2.0.21",
  "typst",
  "typst-assets",
  "typst-layout",
