@@ -1,2 +1,16 @@
 Presswork
 Copyright 2026 The Presswork Authors
+
+This product includes the Inter typeface.
+Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+Licensed under the SIL Open Font License, Version 1.1.
+Refer to crates/presswork-ui/fonts/Inter-LICENSE.txt.
+
+This product includes the JetBrains Mono typeface.
+Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+Licensed under the SIL Open Font License, Version 1.1.
+Refer to crates/presswork-ui/fonts/JetBrainsMono-LICENSE.txt.
+
+This product includes Lucide icons (https://lucide.dev).
+Copyright (c) Lucide Contributors and Cole Bemis (Feather).
+Licensed under the ISC License, with portions under the MIT License.

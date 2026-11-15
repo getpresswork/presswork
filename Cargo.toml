@@ -21,6 +21,7 @@ futures = "0.3.34"
 iced = "0.14.0"
 iced_test = "0.14.0"
 jiff = "0.2.45"
+lucide-icons = { version = "1.73.0", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tempfile = "3.27.0"
@@ -28,6 +29,7 @@ thiserror = "2.0.21"
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["std", "registry", "env-filter", "tracing-log"] }
+ttf-parser = "0.25.1"
 unic-langid = "0.9.6"
 
 [workspace.lints.rust]
