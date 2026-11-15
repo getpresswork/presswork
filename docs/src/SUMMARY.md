@@ -22,6 +22,7 @@
 - [Server](design/server.md)
 - [Domain model](design/domain-model.md)
 - [Tasks and schedules](design/schedules.md)
+- [Contacts and contracts](design/contacts.md)
 - [Interface](design/interface.md)
 - [Security](design/security.md)
 - [Quality](design/quality.md)
