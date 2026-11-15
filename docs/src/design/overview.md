@@ -58,7 +58,7 @@ Presswork does not try to do these things:
 - Be a general code editor for all programming languages.
 - Collect usage data. Presswork has no telemetry.
 - Print, sell, or distribute publications. Other services do these jobs.
-- Make marketing outputs, for example catalogs, sell sheets, websites, newsletters, or audiobooks.
+- Make outputs for sales and promotion, for example catalogs, sell sheets, websites, newsletters, or audiobooks.
 
 ## Terms
 

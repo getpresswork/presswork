@@ -87,7 +87,7 @@ Milestone 1 makes a small version of each part, from end to end. The goal is to 
 - Hyphenation exceptions.
 - The asset library and clearances.
 - Budgets and costs.
-- Brand kits, the template gallery, the chart builder, and package and template authoring.
+- Brand kits, the template gallery, the chart builder, and the tools for packages and templates.
 - Version migration and the compile profiler.
 
 ## Milestone 7: language, reuse, and intake (0.7)

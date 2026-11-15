@@ -55,7 +55,7 @@ Presence data is temporary. The server does not store it. It contains:
 
 Cursor ranges use Loro stable cursors. Thus a remote cursor stays at the correct text when other persons edit the document.
 
-In follow mode, your view follows the view and the cursor of a different member, for example during an editorial meeting. The member sees who follows them.
+In follow mode, your view follows the view and the cursor of a different member, for example when the team examines a chapter together. The member sees who follows them.
 
 ## History slider
 

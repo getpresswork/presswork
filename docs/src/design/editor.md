@@ -49,7 +49,7 @@ Each editor command is a pure function from the editor state to a transaction. T
 
 ## Vim mode
 
-An optional Vim mode gives the Vim keys and modes for movement and editing. The Vim commands are editor commands. Thus they also make transactions, and undo operates in the same way.
+An optional Vim mode gives the Vim keys and modes for movement and edits. The Vim commands are editor commands. Thus they also make transactions, and undo operates in the same way.
 
 ## Preview widget
 

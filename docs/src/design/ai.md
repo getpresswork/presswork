@@ -81,7 +81,7 @@ An administrator sets the AI policy of the organization:
 
 - Which functions are on.
 - Which provider can get the content of which collections, publications, and parts of the library.
-- Which data is sensitive. A request with sensitive data needs a confirmation each time.
+- Which data is sensitive. A person must confirm each request with sensitive data.
 - The inference region, where the provider supports it.
 
 Before each request, the AI panel shows the content that Presswork sends and the provider that gets it. The person can stop the request. The AI audit log records each request.

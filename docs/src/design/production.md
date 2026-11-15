@@ -35,7 +35,7 @@ The cover tool makes print covers and ebook covers:
 
 ## JATS and ORCID
 
-- For journals, Presswork exports articles as JATS XML for repositories and indexing services.
+- For journals, Presswork exports articles as JATS XML for repositories and article databases.
 - Contributors can have ORCID identifiers. Presswork adds them to the metadata, to the JATS files, and to the Crossref deposits.
 
 ## Print plans

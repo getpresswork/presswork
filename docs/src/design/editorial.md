@@ -85,7 +85,7 @@ The results show in the preflight panel. A checklist item can use them. The audi
 
 ## Controlled language checks
 
-- An organization can turn on controlled language rules, for example the writing rules of ASD-STE100.
+- An organization can turn on controlled language rules, for example the rules of ASD-STE100 for text.
 - The rules examine the sentence length, the -ing forms, the passive voice, the noun clusters, and the lists of approved and forbidden words.
 - The organization loads its own dictionary. Presswork does not include the ASD-STE100 dictionary, because ASD owns its copyright.
 - Problems show in the editor, in the same way as spelling problems. AI assistance can propose a rewrite.

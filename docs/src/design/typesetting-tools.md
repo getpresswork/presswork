@@ -27,7 +27,7 @@ The lift function rebuilds content from an area of a PDF page as Typst code. The
 | Content | Method | Result |
 | --- | --- | --- |
 | Chart | Presswork reads the vector graphics: the axes, the ticks, the labels, and the marks. It finds the chart type and calculates the data values from the positions and the axis scales. | A data file and a Typst chart that uses it. The chart opens in the chart builder. |
-| Chart, as a fallback | If Presswork cannot find the chart type, it copies the vector paths and the text. | Typst drawing code that you can edit. |
+| Chart, as a fallback | If Presswork cannot find the chart type, it copies the vector paths and the text. | Typst code for the shapes and the text, which you can edit. |
 | Chart in an image | AI assistance reads the image and proposes the data values. A person checks each value. | A draft data file and a Typst chart. |
 | Table | Presswork finds the cells, the rows, the columns, the spans, and the header rows from the text positions. For scanned pages, it uses the OCR result. | A Typst table. It opens in the table builder. |
 | Equation | Presswork uses the glyphs and their positions in vector PDF files. For images, it uses AI assistance. | Typst math. It opens in the math builder. |
@@ -90,7 +90,7 @@ The version migration moves a project to a new Typst version in these steps:
 
 Typst records the time of each step of a compilation. The compile profiler shows these times as a flame chart. Each bar links to its source location.
 
-## Package and template authoring
+## Packages and templates
 
 - A package project has a `typst.toml` manifest.
 - Presswork tests a package with example documents and page snapshots.

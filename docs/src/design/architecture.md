@@ -25,7 +25,7 @@ External services:
   Local model servers ... AI functions inside the organization
   Email servers ......... Summary emails and the email bridge
   Calendar services ..... Two-way calendar sync
-  OpenTelemetry ......... The monitoring system of the operator
+  OpenTelemetry ......... The trace and metrics system of the operator
 ```
 
 The desktop application, the command-line tool, and the server are three programs. They use the same crates for the Typst engine, the domain model, the sync protocol, the search, and the API types.
