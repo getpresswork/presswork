@@ -7,7 +7,7 @@ This chapter gives the milestones. The release train makes a release every two w
 Milestone 1 makes a small version of each part, from end to end. The goal is to find design problems between the parts early.
 
 1. Cargo workspace, CI, release builds, the release train, and this book.
-2. Desktop application: a main window with the workspace bar.
+2. Desktop application: a main window with the workspace bar, and the design system with tokens, themes, fonts, and icons.
 3. Logs: structured logs, log files, and a first log panel.
 4. Text model: buffer, positions, edits, selections, and history.
 5. Editor widget: one cursor, text input, deletion, cursor movement, selection, scroll, and Typst syntax colors.
