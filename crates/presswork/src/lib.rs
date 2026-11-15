@@ -2,6 +2,8 @@ mod app;
 mod i18n;
 mod log_panel;
 mod logging;
+#[cfg(test)]
+mod screens;
 mod workspace;
 
 use app::App;
