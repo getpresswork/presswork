@@ -1,7 +1,7 @@
 use semver::Version;
 use serde::Deserialize;
 
-use crate::digest::Digest;
+use crate::digest::{Digest, KnownDigests};
 use crate::error::ToolchainError;
 use crate::platform::Platform;
 
@@ -50,6 +50,13 @@ struct GithubAsset {
 }
 
 pub fn parse_releases(json: &str) -> Result<Vec<Release>, ToolchainError> {
+    parse_releases_with(json, &KnownDigests::included())
+}
+
+pub(crate) fn parse_releases_with(
+    json: &str,
+    known: &KnownDigests,
+) -> Result<Vec<Release>, ToolchainError> {
     let releases: Vec<GithubRelease> = serde_json::from_str(json)
         .map_err(|error| ToolchainError::InvalidReleaseList(error.to_string()))?;
     Ok(releases
@@ -61,10 +68,14 @@ pub fn parse_releases(json: &str) -> Result<Vec<Release>, ToolchainError> {
                 .assets
                 .into_iter()
                 .map(|asset| ReleaseFile {
+                    digest: asset
+                        .digest
+                        .as_deref()
+                        .and_then(Digest::from_github)
+                        .or_else(|| known.get(&version, &asset.name)),
                     name: asset.name,
                     url: asset.browser_download_url,
                     size: asset.size,
-                    digest: asset.digest.as_deref().and_then(Digest::from_github),
                 })
                 .collect();
             Some(Release { version, files })
@@ -119,6 +130,18 @@ mod tests {
             }
         );
         assert_eq!(release.files[1].digest, None);
+    }
+
+    #[test]
+    fn a_known_digest_completes_a_file_without_a_digest() {
+        let known = KnownDigests::parse(&format!(
+            "0.15.1 typst-x86_64-apple-darwin.tar.xz {DIGEST}\n"
+        ))
+        .unwrap();
+
+        let releases = parse_releases_with(&list(), &known).unwrap();
+
+        assert_eq!(releases[0].files[1].digest, Digest::from_hex(DIGEST));
     }
 
     #[test]

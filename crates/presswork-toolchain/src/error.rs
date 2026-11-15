@@ -4,4 +4,6 @@ pub enum ToolchainError {
     InvalidPin { pin: String, reason: String },
     #[error("the list of Typst releases is not valid: {0}")]
     InvalidReleaseList(String),
+    #[error("the list of known digests has an error on line {0}")]
+    InvalidDigestList(usize),
 }

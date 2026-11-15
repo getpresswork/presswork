@@ -1,0 +1,3 @@
+# SHA-256 digests of the Typst release files that GitHub publishes without a digest.
+# The "Typst digests" workflow calculates these lines. Refer to docs/src/design/toolchains.md.
+# version file sha256
