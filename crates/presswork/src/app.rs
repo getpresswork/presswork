@@ -1,7 +1,8 @@
 use iced::widget::{button, column, row, rule, space, text};
-use iced::{Element, Fill, Subscription, Theme};
+use iced::{Element, Fill, Subscription, Theme, system};
 use presswork_log::LogStore;
 use presswork_ui::space as gap;
+use presswork_ui::theme::{self as ui_theme, Mode};
 
 use crate::i18n::Localizer;
 use crate::log_panel::{self, LogPanel};
@@ -11,12 +12,14 @@ pub(crate) struct App {
     localizer: Localizer,
     workspace: Workspace,
     logs: LogPanel,
+    mode: Mode,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
     SelectWorkspace(Workspace),
     Logs(log_panel::Message),
+    SystemTheme(Mode),
 }
 
 impl App {
@@ -25,11 +28,16 @@ impl App {
             localizer: Localizer::english(),
             workspace: Workspace::default(),
             logs: LogPanel::new(store),
+            mode: Mode::None,
         }
     }
 
     pub(crate) fn title(&self) -> String {
         self.localizer.text("app-title")
+    }
+
+    pub(crate) fn theme(&self) -> Theme {
+        ui_theme::for_mode(self.mode)
     }
 
     pub(crate) fn update(&mut self, message: Message) {
@@ -39,11 +47,18 @@ impl App {
                 self.workspace = workspace;
             }
             Message::Logs(message) => self.logs.update(message),
+            Message::SystemTheme(mode) => {
+                tracing::debug!(?mode, "System theme changed");
+                self.mode = mode;
+            }
         }
     }
 
     pub(crate) fn subscription(&self) -> Subscription<Message> {
-        self.logs.subscription().map(Message::Logs)
+        Subscription::batch([
+            self.logs.subscription().map(Message::Logs),
+            system::theme_changes().map(Message::SystemTheme),
+        ])
     }
 
     pub(crate) fn view(&self) -> Element<'_, Message> {
@@ -103,6 +118,17 @@ mod tests {
     #[test]
     fn starts_in_the_write_workspace() {
         assert_eq!(app().workspace, Workspace::Write);
+    }
+
+    #[test]
+    fn theme_follows_the_system_mode() {
+        let mut app = app();
+
+        app.update(Message::SystemTheme(Mode::Dark));
+        assert!(app.theme().extended_palette().is_dark);
+
+        app.update(Message::SystemTheme(Mode::Light));
+        assert!(!app.theme().extended_palette().is_dark);
     }
 
     #[test]

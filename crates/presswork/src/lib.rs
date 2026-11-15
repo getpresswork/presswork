@@ -6,6 +6,7 @@ mod workspace;
 
 use app::App;
 use presswork_log::LogStore;
+use presswork_ui::{font, font_size};
 
 pub fn run() -> iced::Result {
     let logging = logging::start();
@@ -14,8 +15,22 @@ pub fn run() -> iced::Result {
         || LogStore::with_capacity(1),
         |logging| logging.store.clone(),
     );
-    iced::application(move || App::new(store.clone()), App::update, App::view)
+    let boot = move || {
+        (
+            App::new(store.clone()),
+            iced::system::theme().map(app::Message::SystemTheme),
+        )
+    };
+    iced::application(boot, App::update, App::view)
+        .settings(iced::Settings {
+            fonts: font::all(),
+            default_font: font::UI,
+            default_text_size: font_size::BODY.into(),
+            antialiasing: true,
+            ..iced::Settings::default()
+        })
         .subscription(App::subscription)
+        .theme(App::theme)
         .title(App::title)
         .window_size((1280.0, 800.0))
         .centered()
