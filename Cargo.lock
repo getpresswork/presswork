@@ -3777,6 +3777,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "presswork-toolchain"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "presswork-typst"
 version = "0.1.0"
 dependencies = [
