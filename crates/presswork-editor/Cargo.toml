@@ -1,0 +1,17 @@
+[package]
+name = "presswork-editor"
+description = "The Presswork text editor: commands, Typst syntax colors, and the iced widget"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+presswork-text.workspace = true
+unicode-segmentation.workspace = true

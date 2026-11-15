@@ -2676,6 +2676,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "presswork-editor"
+version = "0.1.0"
+dependencies = [
+ "presswork-text",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "presswork-log"
 version = "0.1.0"
 dependencies = [

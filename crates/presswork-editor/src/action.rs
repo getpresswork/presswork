@@ -1,0 +1,42 @@
+use presswork_text::Position;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Action {
+    Move {
+        motion: Motion,
+        extend: bool,
+    },
+    MoveTo {
+        position: Position,
+        extend: bool,
+        goal: Option<f32>,
+    },
+    SelectAll,
+    SelectWord(Position),
+    SelectLine(Position),
+    Insert(String),
+    Newline,
+    Delete(Deletion),
+    Undo,
+    Redo,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Motion {
+    Left,
+    Right,
+    WordLeft,
+    WordRight,
+    LineStart,
+    LineEnd,
+    DocumentStart,
+    DocumentEnd,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Deletion {
+    Backward,
+    Forward,
+    WordBackward,
+    WordForward,
+}
