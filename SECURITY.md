@@ -2,7 +2,7 @@
 
 ## Report a vulnerability
 
-Do not report a security problem in a public issue.
+Do not report a security problem in a public GitHub issue.
 
 Use the private vulnerability report of GitHub:
 

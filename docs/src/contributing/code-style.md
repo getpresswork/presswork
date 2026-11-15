@@ -5,7 +5,7 @@ This chapter gives the rules for Rust code in Presswork.
 ## General rules
 
 - Format all code with `cargo fmt`. Do not change the formatter settings without a decision in the [decision log](../design/decisions.md).
-- Correct all Clippy warnings. The workspace turns on the Clippy `pedantic` group.
+- Correct all Clippy warnings. The Cargo workspace turns on the Clippy `pedantic` group.
 - Write comments only where the code cannot tell the reason. Do not repeat the code in a comment.
 - Do not add license headers to source files. The `LICENSE` and `NOTICE` files apply to the full repository.
 - Use clear names. A long clear name is better than a short unclear name.
@@ -23,7 +23,7 @@ This chapter gives the rules for Rust code in Presswork.
 - Library crates return typed errors. Use `thiserror` to make them.
 - Do not use `unwrap` or `expect` outside of tests. If a value is always present, show this with a type.
 - To allow a lint in one location, use `#[expect(lint, reason = "...")]`. Write the reason in the attribute, not in a comment.
-- Do not use `unsafe` code. The workspace lints forbid it.
+- Do not use `unsafe` code. The lints of the Cargo workspace forbid it.
 
 ## Tests
 

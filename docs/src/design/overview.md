@@ -4,7 +4,7 @@ This chapter gives the purpose, the users, and the principles of Presswork.
 
 ## Purpose
 
-Publishing teams use many tools. Authors write in word processors. Typesetters use layout programs. Managers use task trackers and spreadsheets. Presswork puts all of this work into one workbench.
+Publishing teams use many tools. Authors write in word processors. Typesetters use layout programs. Managers use task trackers and spreadsheets. Presswork puts all of these jobs into one workbench.
 
 Presswork uses [Typst](https://typst.app) for all typesetting. Typst is a markup-based typesetting system. It compiles fast and gives high-quality pages.
 
@@ -12,7 +12,7 @@ Presswork uses [Typst](https://typst.app) for all typesetting. Typst is a markup
 
 These persons use Presswork:
 
-| Role | Work |
+| Role | Activities |
 | --- | --- |
 | Author | Writes and corrects the content. |
 | Editor | Examines the structure and the content. Sends queries to the author. |
@@ -33,7 +33,7 @@ Presswork has templates for four kinds of publication. All kinds use the same da
 | Kind | Examples | Structure |
 | --- | --- | --- |
 | Book | Novel, nonfiction book, textbook | Parts and chapters |
-| Periodical | Magazine, newsletter, journal | Editions and articles |
+| Periodical | Magazine, newsletter, journal | Issues and articles |
 | Technical documentation | Manual, specification, guide | Versions, variants, and sections |
 | Academic | Paper, thesis, journal article | Sections, citations, and review rounds |
 
@@ -42,10 +42,10 @@ Presswork has templates for four kinds of publication. All kinds use the same da
 These principles control all design decisions.
 
 1. **Typst first.** Presswork gives full access to Typst. It does not put a different language in front of Typst.
-2. **Local first.** The desktop application does all typesetting work without a server. The server adds team functions.
+2. **Local first.** The desktop application does all typesetting without a server. The server adds team functions.
 3. **No lock-in.** A Presswork project is a normal Typst project. You can compile it with the Typst command-line tool.
 4. **One workbench.** Content, typesetting, review, and production management are in one application.
-5. **Simple by default.** Each role sees the tools for its work first. All other tools stay available.
+5. **Simple by default.** Each role sees its own tools first. All other tools stay available.
 6. **Reproducible output.** A project can pin its Typst version. Thus the same sources always give the same output.
 7. **All platforms.** Windows, Linux, and macOS get the same functions and the same quality.
 8. **Open.** Presswork is open source under the Apache License 2.0. Anyone can operate a Presswork server.
@@ -57,7 +57,7 @@ Presswork does not try to do these things:
 - Replace Typst markup with a visual page layout program.
 - Be a general code editor for all programming languages.
 - Collect usage data. Presswork has no telemetry.
-- Print, sell, or distribute publications. Other services do this work.
+- Print, sell, or distribute publications. Other services do these jobs.
 
 ## Terms
 

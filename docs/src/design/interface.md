@@ -10,7 +10,7 @@ The interface has one pane system. A workspace is a saved layout of panes for on
 | --- | --- | --- |
 | Write | Authors and editors | Outline, editor, preview |
 | Typeset | Typesetters | Files, editor, preview with guides, styles, fonts, preflight |
-| Review | Editors, proofreaders, and reviewers | Preview, comments, issues, revision compare |
+| Review | Editors, proofreaders, and reviewers | Preview, comments, tickets, revision compare |
 | Plan | Production managers | Tasks, schedule, workflow board, reports |
 | Publish | Production managers and typesetters | Export profiles, preflight, validation, releases |
 
@@ -32,7 +32,7 @@ The workspace bar at the top shows all workspaces. Select a workspace to change 
 
 - Each pane has tabs.
 - You can split, move, and close panes with the mouse or with commands.
-- Each panel can open in each pane. The panels are: project files, outline, editor, preview, diagnostics, build log, issues, tasks, checklists, workflow, revisions, comments, fonts, packages, toolchains, preflight, reports, and team.
+- Each panel can open in each pane. The panels are: project files, outline, editor, preview, diagnostics, build log, tickets, tasks, checklists, workflow, revisions, comments, fonts, packages, toolchains, preflight, reports, and team.
 
 ## Commands
 
@@ -42,7 +42,7 @@ All actions are commands. A command has an identifier, a title, an optional shor
 - Menus, toolbars, and shortcuts run the same commands.
 - You can change all shortcuts.
 
-Thus each action has one source, and you can do all work with the keyboard.
+Thus each action has one origin, and you can use all functions with the keyboard.
 
 ## Visual design
 
@@ -66,7 +66,7 @@ On the start screen, you can:
 
 ## Accessibility
 
-- You can do all work with the keyboard.
+- You can use all functions with the keyboard.
 - All themes have a contrast ratio of 4.5:1 or more for text.
 - The interface scale can change from 75% to 200%.
 - iced does not have screen reader support at this time. Presswork will add it when iced gets AccessKit integration.

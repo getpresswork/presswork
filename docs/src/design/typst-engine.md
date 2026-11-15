@@ -18,8 +18,8 @@ The managed toolchain runs the official Typst command-line tool. It gives the ex
 ## Version rules
 
 1. A project can pin a Typst version in its manifest, for example `typst = "0.14"`.
-2. If the project has no pin, Presswork uses the embedded engine for all work.
-3. If the pin accepts the embedded version, Presswork uses the embedded engine for all work.
+2. If the project has no pin, Presswork uses the embedded engine for all functions.
+3. If the pin accepts the embedded version, Presswork uses the embedded engine for all functions.
 4. If the pin does not accept the embedded version, Presswork uses the managed toolchain for exports. The preview shows a message with the two versions.
 5. In this condition, the user can also select a pinned preview. The pinned preview uses the managed toolchain. It is slower, but it shows the exact output of the pinned version.
 

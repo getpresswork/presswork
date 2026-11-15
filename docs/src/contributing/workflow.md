@@ -1,6 +1,6 @@
 # Workflow
 
-This chapter tells how to work on Presswork.
+This chapter tells how to make changes to Presswork.
 
 ## Prepare your computer
 

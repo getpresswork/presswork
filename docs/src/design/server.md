@@ -29,7 +29,7 @@ You can deploy the server as a container image, or as one executable with system
 
 ## Permissions
 
-- To do an API operation, a user must have its permission, for example `issue.create` or `document.write`.
+- To do an API operation, a user must have its permission, for example `ticket.create` or `document.write`.
 - A role is a named set of permissions. Each organization can make its own roles from templates.
 - A role assignment gives a role to a user or to a team, in a scope. The scope is the organization, a collection, a publication, or a component.
 - The `presswork-domain` crate contains the permission check. It is a pure function, so tests can examine all rules.

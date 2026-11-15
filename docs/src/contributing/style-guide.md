@@ -4,7 +4,7 @@ All Presswork text follows ASD-STE100 Simplified Technical English (STE). This r
 
 - The README and the other files in the repository root.
 - This book.
-- Issue templates and pull request templates.
+- GitHub issue templates and pull request templates.
 - Interface text: labels, messages, and tooltips.
 - Commit messages.
 
@@ -77,7 +77,8 @@ Some words have a different meaning in daily language. In Presswork text, use th
 | --- | --- | --- |
 | issue | One number of a periodical | An item in the ticket list. Use "ticket". |
 | ticket | An item in the ticket list | |
-| edition | A published form of a work in the library | A number of a periodical. Use "issue". |
+| edition | A published form of a work in the library | A number of a periodical. Use "issue". For the Rust language, write "Rust edition". |
+| query | A ticket type: a question to the author | Database statements. Write "SQL statement". |
 | work | A text as an abstract creation, in the library | Labor or activity. Use "task", "job", or a verb. |
 | workspace | A pane layout in the desktop application | The Cargo workspace. Write "Cargo workspace". |
 | digest | The SHA-256 hash of a file | An email with many events. Use "summary email". |

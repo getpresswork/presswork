@@ -6,7 +6,7 @@ This chapter gives the milestones. Each milestone ends with a release.
 
 Milestone 1 makes a small version of each part, from end to end. The goal is to find design problems early.
 
-1. Workspace, CI, release builds, and this book.
+1. Cargo workspace, CI, release builds, and this book.
 2. Desktop application: a main window with the workspace bar.
 3. Text model: buffer, positions, edits, selections, and history.
 4. Editor widget: one cursor, text input, deletion, cursor movement, selection, scroll, and Typst syntax colors.
@@ -30,7 +30,7 @@ Milestone 1 makes a small version of each part, from end to end. The goal is to 
 
 - Presence with remote cursors.
 - Revisions, with text compare and page compare.
-- Issues and comments with text anchors and page anchors.
+- Tickets and comments with text anchors and page anchors.
 - The offline queue and conflict messages.
 - The Git bridge.
 
@@ -39,7 +39,7 @@ Milestone 1 makes a small version of each part, from end to end. The goal is to 
 - Roles, permissions, and teams.
 - Configurable workflows and the workflow board.
 - Checklists with manual and automatic items.
-- Templates for books, periodicals, technical documentation, and academic work.
+- Templates for books, periodicals, technical documentation, and academic publications.
 
 ## Milestone 5: automation and reports (0.5)
 

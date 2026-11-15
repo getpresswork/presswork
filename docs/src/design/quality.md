@@ -4,7 +4,7 @@ This chapter tells how Presswork keeps its code correct and healthy.
 
 ## Test-driven development
 
-All work is test-driven:
+All changes are test-driven:
 
 1. Write a test that fails.
 2. Write the simplest code that makes the test pass.
@@ -40,9 +40,9 @@ The desktop application uses the Elm architecture of iced. It has a state, messa
 ## Code health
 
 - `cargo fmt` and `cargo clippy` run before each commit, through the Git hooks, and in CI. Clippy warnings are errors.
-- The workspace turns on the Clippy `pedantic` group.
-- The workspace lints forbid `unsafe` code.
+- The Cargo workspace turns on the Clippy `pedantic` group.
+- The lints of the Cargo workspace forbid `unsafe` code.
 - Comments occur only where they are necessary. Names and types tell what the code does.
 - Each crate and each module has one purpose. Functions stay short.
-- All crates get their dependencies from the workspace dependency table. Thus all crates use the same versions.
+- All crates get their dependencies from the dependency table of the Cargo workspace. Thus all crates use the same versions.
 - `cargo deny` examines licenses and security advisories.

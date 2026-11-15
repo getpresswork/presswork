@@ -67,16 +67,16 @@ Presswork can show the differences between two revisions, file by file and page 
 
 ## Anchors
 
-Issues and comments can attach to a text range or to an area of a page.
+Tickets and comments can attach to a text range or to an area of a page.
 
 - A text anchor uses two Loro stable cursors. The anchor moves with its text when other persons edit the document.
-- If a person deletes all of the text of an anchor, the anchor becomes detached. Presswork keeps the original text and shows the issue as detached.
+- If a person deletes all of the text of an anchor, the anchor becomes detached. Presswork keeps the original text and shows the ticket as detached.
 - A page anchor records the revision, the page number, and a rectangle. It also records a text anchor for the source at that point, if the engine can find one.
 
-## Offline work
+## Offline operation
 
 - All edits go into the local Loro documents first. The network status does not change the edit procedure.
-- Issues, tasks, and checklists also have a local copy. Changes to them go into a local queue.
+- Tickets, tasks, and checklists also have a local copy. Changes to them go into a local queue.
 - When the client connects again, it sends the queue in sequence. If the server does not accept a change, Presswork shows the change and the reason. For example, a permission can change while you are offline.
 
 ## Git

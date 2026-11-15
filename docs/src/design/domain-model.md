@@ -16,7 +16,7 @@ Organization
 |   +-- Components ...... chapters, articles, sections
 |   +-- Workflow instances
 |   +-- Revisions
-|   +-- Issues and tasks
+|   +-- Tickets and tasks
 |   +-- Checklists
 +-- Workflow definitions
 +-- Checklist templates
@@ -39,17 +39,17 @@ Organization
 | Record | Description |
 | --- | --- |
 | Collection | An optional group of publications: a book series, a periodical, a journal, or a documentation set. |
-| Publication | One work that you can publish: a book, an edition of a periodical, a manual, or a paper. It has metadata and export profiles. |
+| Publication | A book, an issue of a periodical, a manual, or a paper that a team makes and publishes. It has metadata and export profiles. |
 | Project | The Typst sources of a publication. Each publication has one project. |
 | Component | A part of a publication with its own workflow stage: a chapter, an article, or a section. It refers to one or more files of the project. |
 
-The publication kind sets the default labels. For example, the periodical template calls a publication "Edition" and a component "Article". Each organization can change these labels.
+The publication kind sets the default labels. For example, the periodical template calls a publication "Issue" and a component "Article". Each organization can change these labels.
 
-Presswork uses the word "edition" for one number of a periodical. The word "issue" always means an item in the issue list.
+Presswork uses the word "issue" for one number of a periodical, the word "ticket" for an item in the ticket list, and the word "edition" for a published form of a work in the library. Refer to the [style guide](../contributing/style-guide.md#words-with-one-meaning).
 
-## Issues and tasks
+## Tickets and tasks
 
-Issues and tasks have a common base:
+Tickets and tasks have a common base:
 
 - A title, a description, and labels.
 - A status, assignees, and watchers.
@@ -60,10 +60,10 @@ Each kind adds its own data:
 
 | Kind | Purpose | Data |
 | --- | --- | --- |
-| Issue | A problem, a question, or a correction in the content. Author queries are issues. | Anchor, issue type, severity, resolution |
-| Task | Planned work for a person. | Start date, due date, estimate, dependencies, subtasks, checklists |
+| Ticket | A problem, a question, or a correction in the content. Author queries are tickets. | Anchor, ticket type, severity, resolution |
+| Task | An assignment for a person, with dates and a status. | Start date, due date, estimate, dependencies, subtasks, checklists |
 
-Each organization can add issue types, for example "Query", "Correction", or "Fact check".
+Each organization can add ticket types, for example "Query", "Correction", or "Fact check".
 
 ## Checklists
 
@@ -116,18 +116,18 @@ A routine is a sequence of steps. A schedule or an event starts it.
 | Steps | Make tasks from a template. Attach a checklist. Move a stage. Compile and export. Run preflight. Validate with veraPDF. Send a notification. Call a webhook. |
 | Scope | An organization, a collection, or a publication. |
 
-For example, a newsletter routine runs each Monday. It makes the next edition from a template, makes a task for each article, and sends a notification to the editor.
+For example, a newsletter routine runs each Monday. It makes the next issue from a template, makes a task for each article, and sends a notification to the editor.
 
 Each run records its steps, its output files, and its log.
 
 ## Reports
 
-A report is a saved query and a layout for its results. Presswork supplies these reports:
+A report is a saved filter and a layout for its results. Presswork supplies these reports:
 
 - Publication status: each component and its stage.
 - Schedule: milestones, due dates, and late tasks.
 - Workload: the open tasks of each person.
-- Issue trend: the open and closed issues in a period.
+- Ticket trend: the open and closed tickets in a period.
 - Content metrics: the words and pages of each component over time.
 - Preflight summary: the problems of each publication.
 

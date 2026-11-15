@@ -17,8 +17,8 @@ Do not change what an accepted decision says. You can correct its language. To c
 ## D2. Local-first desktop application
 
 - **Status:** Accepted, 2026-11-14. **Origin:** Project owner.
-- **Decision:** The desktop application does all typesetting work without a server. A server connection adds the team functions. Offline edits sync when the client connects again.
-- **Reason:** Persons who work alone can use Presswork without a server. Teams can work during network problems.
+- **Decision:** The desktop application does all typesetting without a server. A server connection adds the team functions. Offline edits sync when the client connects again.
+- **Reason:** A person without a team can use Presswork without a server. Teams can continue to edit during network problems.
 - **Other options:** A server for all projects. Separate local and server modes without offline sync.
 
 ## D3. Live edits with Loro and revisions on the server
@@ -26,7 +26,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Status:** Accepted, 2026-11-14. **Origin:** Project owner.
 - **Decision:** Use the Loro CRDT for live edits, with remote cursors and presence. The server records named revisions for review and approval. A bridge exports revisions to Git.
 - **Reason:** Publishing teams frequently edit together at the same time. Formal review and approval must use fixed revisions.
-- **Other options:** Asynchronous work with Git only. A lock on each file, as in classic publishing systems.
+- **Other options:** Asynchronous changes with Git only. A lock on each file, as in classic publishing systems.
 
 ## D4. PostgreSQL for the server
 
@@ -38,7 +38,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 ## D5. Four publication kinds on one model
 
 - **Status:** Accepted, 2026-11-14. **Origin:** Project owner.
-- **Decision:** Supply templates for books, periodicals, technical documentation, and academic work. All kinds use the same records: collections, publications, and components.
+- **Decision:** Supply templates for books, periodicals, technical documentation, and academic publications. All kinds use the same records: collections, publications, and components.
 - **Reason:** One generic model is simpler to keep correct than four special models.
 - **Other options:** Start with one kind only.
 
@@ -53,7 +53,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 - **Status:** Accepted, 2026-11-14. **Origin:** Project owner.
 - **Decision:** A routine is a sequence of steps. A schedule or an event starts it.
-- **Reason:** Periodicals have work that occurs again at intervals. All kinds can use automatic checks and exports.
+- **Reason:** Periodicals have tasks that occur again at intervals. All kinds can use automatic checks and exports.
 - **Other options:** Schedules only. Events only. Manual procedures only.
 
 ## D8. Role workspaces on one pane system
@@ -112,10 +112,10 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Reason:** mdBook is the standard tool for Rust projects. It has search, and it operates without other runtimes.
 - **Other options:** Zola. Typst HTML export, which is experimental.
 
-## D16. A pinned Rust toolchain and the 2024 edition
+## D16. A pinned Rust toolchain and the Rust 2024 edition
 
 - **Status:** Accepted, 2026-11-14. **Origin:** Default.
-- **Decision:** `rust-toolchain.toml` pins Rust 1.100.0. All crates use the 2024 edition.
+- **Decision:** `rust-toolchain.toml` pins Rust 1.100.0. All crates use the Rust 2024 edition.
 - **Reason:** All contributors and CI get the same compiler and the same lints.
 - **Other options:** The current stable version without a pin.
 
@@ -154,12 +154,12 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Reason:** Code health is a main goal of the project.
 - **Other options:** The default Clippy lints.
 
-## D22. SQL queries that tests check
+## D22. SQL statements that tests check
 
 - **Status:** Accepted, 2026-11-14. **Origin:** Default.
-- **Decision:** Use `sqlx` queries that the database checks at run time. Each query has database tests.
-- **Reason:** A build of the workspace operates without a database or a query cache.
-- **Other options:** The `sqlx` compile-time macros with an offline query cache.
+- **Decision:** Use `sqlx` statements that the database checks at run time. Each statement has database tests.
+- **Reason:** A build of the Cargo workspace operates without a database or a cache of SQL metadata.
+- **Other options:** The `sqlx` compile-time macros with an offline cache of SQL metadata.
 
 ## D23. One blob store interface
 

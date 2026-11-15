@@ -54,7 +54,7 @@ All crates are in the `crates` folder. Each crate has one purpose. This table sh
 | `presswork-sync` | Service | Connects the text model to Loro documents and sends updates. |
 | `presswork-text` | Domain | Text buffer, positions, edits, selections, and history. |
 | `presswork-project` | Domain | The project manifest and the project file tree. |
-| `presswork-domain` | Domain | Organizations, roles, publications, issues, tasks, checklists, workflows, routines, and reports. |
+| `presswork-domain` | Domain | Organizations, roles, publications, tickets, tasks, checklists, workflows, routines, and reports. |
 | `presswork-api` | Domain | The request, response, and event types of the server API. |
 
 ## Data flow
@@ -80,7 +80,7 @@ If you make more edits during a compilation, the engine does one more compilatio
 ## Threads and tasks
 
 - The iced runtime runs the `update` and `view` functions on the main thread. These functions must return quickly.
-- Long work runs in iced tasks on the Tokio runtime.
+- Long operations run in iced tasks on the Tokio runtime.
 - The Typst engine compiles on one dedicated thread, because the Typst compiler is synchronous.
 - The engine renders pages on a thread pool.
 - The server runs Typst compilations in separate worker processes. Thus a slow document cannot stop the server.
