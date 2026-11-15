@@ -31,6 +31,9 @@ const MIN_TEXT_WIDTH: f32 = 80.0;
 const CARET_WIDTH: f32 = 2.0;
 const BLINK: Duration = Duration::from_millis(500);
 const WHEEL_LINES: f32 = 3.0;
+const MARK_THICKNESS: f32 = 1.5;
+const MARK_OFFSET: f32 = 4.0;
+const EMPTY_MARK_WIDTH: f32 = 6.0;
 const TAB: &str = "  ";
 
 pub struct EditorView<'a, Message> {
@@ -38,6 +41,19 @@ pub struct EditorView<'a, Message> {
     colors: &'a Colors,
     on_action: Box<dyn Fn(Action) -> Message + 'a>,
     autofocus: bool,
+    marks: Vec<Mark>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkKind {
+    Error,
+    Warning,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mark {
+    pub range: std::ops::Range<Position>,
+    pub kind: MarkKind,
 }
 
 pub fn view<'a, Message>(
@@ -50,6 +66,7 @@ pub fn view<'a, Message>(
         colors,
         on_action: Box::new(on_action),
         autofocus: false,
+        marks: Vec::new(),
     }
 }
 
@@ -58,6 +75,54 @@ impl<Message> EditorView<'_, Message> {
     pub fn autofocus(mut self, autofocus: bool) -> Self {
         self.autofocus = autofocus;
         self
+    }
+
+    #[must_use]
+    pub fn marks(mut self, marks: Vec<Mark>) -> Self {
+        self.marks = marks;
+        self
+    }
+
+    fn draw_marks(
+        &self,
+        state: &State,
+        renderer: &mut Renderer,
+        origin: Point,
+        visible: &std::ops::Range<f32>,
+    ) {
+        for mark in &self.marks {
+            let color = match mark.kind {
+                MarkKind::Error => self.colors.editor.error,
+                MarkKind::Warning => self.colors.warning,
+            };
+            let rows = if mark.range.start < mark.range.end {
+                state.layout.selection(mark.range.clone())
+            } else {
+                let caret = state.layout.caret(mark.range.start);
+                vec![Rectangle::new(
+                    caret.position(),
+                    Size::new(EMPTY_MARK_WIDTH, caret.height),
+                )]
+            };
+            for row in rows {
+                if row.y + row.height < visible.start || row.y > visible.end {
+                    continue;
+                }
+                renderer.fill_quad(
+                    Quad {
+                        bounds: Rectangle::new(
+                            Point::new(
+                                origin.x + row.x,
+                                origin.y + row.y + row.height - MARK_OFFSET,
+                            ),
+                            Size::new(row.width, MARK_THICKNESS),
+                        ),
+                        ..Quad::default()
+                    },
+                    color,
+                );
+            }
+        }
     }
 
     fn snap(&self, position: Position) -> Position {
@@ -430,6 +495,7 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
                     bounds,
                 );
             }
+            self.draw_marks(state, renderer, origin, &visible);
             if state.focus.is_some_and(|focus| focus.caret_visible()) {
                 for range in selection.ranges() {
                     let caret = state.layout.caret(range.head);
@@ -724,6 +790,25 @@ mod tests {
         let actions = actions("abc\ndef", press(Point::new(300.0, 600.0)));
 
         assert_eq!(actions, [move_to(7, false, None)]);
+    }
+
+    #[test]
+    fn marks_draw_under_the_text() {
+        load_fonts();
+        let editor = Editor::new("#let x = \nmore text");
+        let marks = vec![
+            Mark {
+                range: Position::new(5)..Position::new(6),
+                kind: MarkKind::Error,
+            },
+            Mark {
+                range: Position::new(12)..Position::new(12),
+                kind: MarkKind::Warning,
+            },
+        ];
+        let mut ui = simulator(view(&editor, &LIGHT, |action| action).marks(marks));
+
+        assert!(ui.snapshot(&presswork_ui::theme::light()).is_ok());
     }
 
     #[test]
