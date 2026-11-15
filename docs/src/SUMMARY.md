@@ -12,6 +12,7 @@
 - [Editor and preview](design/editor.md)
 - [Collaboration](design/collaboration.md)
 - [Library](design/library.md)
+- [Editorial tools](design/editorial.md)
 - [Server](design/server.md)
 - [Domain model](design/domain-model.md)
 - [Tasks and schedules](design/schedules.md)
