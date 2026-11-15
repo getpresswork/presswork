@@ -46,13 +46,39 @@ The manager does not change the system `PATH`. Presswork always runs a tool thro
 
 ## Version selection
 
-The manager selects a version in this sequence:
+A project can pin a Typst version in its manifest. A pin is a version requirement, for example `0.14` or `=0.14.2`. Presswork selects the version in this sequence:
 
-1. The pin in the project manifest. A pin is a version requirement, for example `0.14` or `=0.14.2`.
-2. The default version in the user settings.
-3. The installed version with the highest number.
+1. If the project has no pin, or if the pin accepts the built-in version, Presswork uses the built-in engine. Refer to [Typst engine](typst-engine.md).
+2. If not, Presswork uses the installed version with the highest number that agrees with the pin.
+3. If no installed version agrees with the pin, the status bar shows a warning. The Toolchains panel shows the versions that you can install.
 
-If the pin accepts none of the installed versions, Presswork asks the user to install a version.
+The command "Use for this project" writes an exact pin, for example `=0.14.2`. You can write a range pin, such as `0.14`, in the manifest by hand. Presswork keeps the comments and the layout of the manifest when it writes a pin.
+
+## Digests
+
+For Typst 0.14.0 and later, the manager compares each download with the SHA-256 digest that GitHub publishes for the file.
+
+GitHub does not publish digests for older files. For Typst 0.11.0 to 0.13.1, Presswork includes the file `crates/presswork-toolchain/digests.txt`. The manager cannot install a release that has no digest. Thus the list shows only Typst 0.11.0 and later.
+
+To make or extend the list of digests, do these steps:
+
+1. Start the "Typst digests" workflow on GitHub. Its input is the list of versions.
+2. The workflow downloads each release file, makes sure that its size agrees with GitHub, and calculates its digest.
+3. Compare some digests with a record that is independent of the workflow, for example the history of the Typst manifest in the Scoop main bucket.
+4. Copy the result of the workflow into `digests.txt`, and add a test for the digests that you compared.
+
+## Network access
+
+Presswork connects to GitHub only when you open the Toolchains panel, click "Try again", or install a version. It reads the release list from `api.github.com` and downloads the release files from `github.com`. The requests contain no personal data. They identify the application as "Presswork" with its version.
+
+## Milestone 1
+
+In milestone 1, the toolchain manager does these things:
+
+- It installs, lists, and removes Typst versions. Pandoc, veraPDF, and the Java runtime come later.
+- It shows only stable releases. If the pin of the project agrees only with a release candidate, the panel also shows that candidate.
+- It installs the versions into the `toolchains` folder in the local data folder of Presswork.
+- Exports do not use the managed versions yet.
 
 ## Typst packages
 

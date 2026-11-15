@@ -68,7 +68,8 @@ The editor underlines the range. The diagnostics panel shows a list of all diagn
 In milestone 1, the engine has these limits:
 
 - The world gives only the fonts that Typst supplies: Libertinus Serif, New Computer Modern, and DejaVu Sans Mono. Thus the output is the same on all computers.
-- The world contains only the scratch document. Project files and packages come with the project model.
+- The world reads the files of the open project folder. It does not read packages yet.
+- The managed toolchain installs Typst versions, but exports do not use it yet. The Toolchains panel, not the preview, shows the message with the two versions.
 - The engine renders all pages after each compilation, at 2 pixels for each point.
 
 ## IDE functions

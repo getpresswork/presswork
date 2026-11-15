@@ -107,7 +107,10 @@ In milestone 1, the status bar shows these items:
 - The project name and the open file, or "No project open".
 - "Not saved" if the open file has changes that are not saved. Click it to save the file.
 - The duration of the last compilation and the position of the cursor, in the Write workspace.
+- The Typst version that the project uses. If no installed version agrees with the pin of the project, the item shows a warning. Click it to open the Toolchains panel.
 - The number of log errors and warnings, and the Logs button.
+
+The Toolchains panel and the log panel open at the bottom of the window. Only one of them is open at a time.
 
 ## Projects
 
