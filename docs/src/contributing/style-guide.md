@@ -69,36 +69,63 @@ Write the summary of a commit as a command, with approved words: `fix(toolchain)
 
 STE lets each project add technical names and technical verbs. These are the Presswork words. Add a word here before you use it in the documentation.
 
+### Words with one meaning
+
+Some words have a different meaning in daily language. In Presswork text, use them only with these meanings:
+
+| Word | Presswork meaning | Do not use it for |
+| --- | --- | --- |
+| issue | One number of a periodical | An item in the ticket list. Use "ticket". |
+| ticket | An item in the ticket list | |
+| edition | A published form of a work in the library | A number of a periodical. Use "issue". |
+| work | A text as an abstract creation, in the library | Labor or activity. Use "task", "job", or a verb. |
+| workspace | A pane layout in the desktop application | The Cargo workspace. Write "Cargo workspace". |
+| digest | The SHA-256 hash of a file | An email with many events. Use "summary email". |
+| thread | A thread of a program | Replies in the chat. Use "replies" or "comments". |
+| component | A part of a publication | WebAssembly modules. Use "WebAssembly module". |
+| source | The original text from which a result comes: Typst source files, or the source text of a translation | Items in the library. Use "work" or "edition". |
+| index | A back-of-book index | The search index. Write "search index". |
+| permission | The right to do an operation in Presswork | The right to reuse a text or an image. Use "clearance". |
+
 ### Technical verbs
 
 | Verb | Meaning |
 | --- | --- |
 | approve | To accept a revision in a workflow, as a person with the necessary role. |
-| assign | To give a task or an issue to a person. |
+| assign | To give a task or a ticket to a person. |
+| bump | To increase the version number of a release. |
 | cache | To keep a copy of data for fast access. |
 | clone | To make a local copy of a Git repository. |
 | commit | To record changes in Git. |
 | compile | To make a document from Typst sources. |
 | configure | To set the options of a program. |
 | create | To make a new record, file, or project in a program. |
+| decrypt | To make encrypted data readable with a key. |
 | delete | To remove data. You cannot get it back. |
 | deploy | To install a server program on its computer. |
+| detach | To move a pane into its own window. |
 | download | To copy a file from a server to the local computer. |
 | edit | To change the content of a file or a record. |
+| encrypt | To make data unreadable for persons without the key. |
 | export | To write a document to a file format, for example PDF. |
+| highlight | To mark a part of the text on a page of a library file. |
 | implement | To write the code for a trait, an interface, or a function. |
 | import | To read a file from a different format into a project. |
 | install | To put a program on a computer so that it can operate. |
+| mention | To refer to a person or an object in a text with `@`, `#`, or `[[`. |
 | merge | To make one set of changes from two sets of changes. |
 | parse | To read text and find its structure. |
-| publish | To make a package, an image, or a site available to other persons. |
+| publish | To make a package, an image, a release, or a site available to other persons. |
 | push | To send Git commits to a remote repository. |
 | render | To make an image from a page of a document. |
-| schedule | To set the time when a routine starts. |
+| schedule | To set the time when a routine or a task starts. |
 | scroll | To move the visible part of a view. |
+| sign | To add a cryptographic signature to a file. |
 | sign in | To give your account data to a server to get access. |
+| sign off | To record that a manual checklist item is complete. |
 | store | To keep data in a database or on a disk. |
 | sync | To make two copies of data the same. |
+| track | To record the progress, the time, or the costs of a job. |
 | translate | To write content in a different language. |
 | typeset | To put text and images on pages in a layout. |
 | unpack | To get the files out of an archive. |
@@ -109,28 +136,61 @@ STE lets each project add technical names and technical verbs. These are the Pre
 
 | Name | Meaning |
 | --- | --- |
-| anchor | The link between an issue or a comment and a text range or a page area. |
+| anchor | The link between a ticket or a comment and a text range or a page area. |
+| annotation | A highlight or a note on a page of a library file. |
+| asset | An image or a graphic in the asset library, with its credits and its rights data. |
 | blob | A binary file that the server keeps by its digest. |
+| budget | The planned costs of a publication. |
+| channel | A named conversation in the team chat, for example `#production`. |
 | checklist | A list of items that persons or automatic checks must complete. |
+| clearance | A record of the agreement of a rights holder to the use of a text or an image. |
 | collection | A group of publications, for example a periodical or a book series. |
-| component | A part of a publication with its own workflow stage, for example a chapter. |
+| component | A part of a publication with its own workflow stage, for example a chapter or an article. |
+| concordance | A map between the page numbers of two editions of a work. |
+| cost item | One planned or actual cost in a budget. |
 | CRDT | Conflict-free replicated data type. A data structure that merges concurrent edits automatically. |
+| dependency | A relation between two tasks: one task cannot start or finish before the other task. |
+| device key | The key pair of one computer of a user, for encrypted projects. |
 | digest | The SHA-256 hash of a file. |
-| edition | One number of a periodical. |
-| issue | An item in the issue list: a problem, a question, or a correction. |
+| direct message | A chat conversation between two or more persons, outside of channels. |
+| edition | One published form of a work, for example an original, a translation, or a reprint. It has its own page numbers. |
+| inbox | The list of mentions, assignments, replies, and approvals for one person. |
+| issue | One number of a periodical, for example Issue 42. |
 | manifest | The `presswork.toml` file of a project. |
+| milestone | A date in a schedule that marks the end of a phase, for example "Proofs to author". |
+| nightly build | A prerelease build that CI makes each day when `main` changes. |
+| OCR | Optical character recognition. It makes a text layer from the images of scanned pages. |
 | overlay | Text from the editor that replaces a file on disk during compilation. |
+| page map | The relation between the pages of a file and the printed page numbers of its edition. |
 | pin | A Typst version requirement in a project manifest. |
+| portal | The web site of a Presswork server for persons who do not use the desktop application. |
 | preflight | The checks before an export. |
-| publication | One work that you can publish, for example a book or an edition. |
-| publishing | The work that makes publications and makes them available. |
-| query | An issue type: a question to the author. |
+| project key | The key that encrypts the content of an encrypted project. |
+| publication | A book, an issue of a periodical, a manual, or a paper that a team makes and publishes. |
+| publishing | The production and the distribution of publications. |
+| purpose | The use of a standard edition, for example "English quotations". |
+| query | A ticket type: a question to the author. |
+| release train | The scheduled release that CI makes every two weeks. |
+| rendition | A different form of an asset, for example a thumbnail or a CMYK version. |
+| research note | A text with links to works, editions, chapters, and tasks. |
 | revision | A named point in the history of a project. |
+| rights holder | A person or an organization that owns the rights to a text or an image. |
 | role | A named set of permissions. |
 | routine | A sequence of steps that a schedule or an event starts. |
+| segment | A sentence or a short part of a text in the translation workspace. |
 | stage | A state in a workflow, for example Copyedit. |
-| task | Planned work for a person. |
+| standard edition | An edition that a team selects for a work and a purpose. |
+| submission | A manuscript that a person sends through a call for papers. |
+| suggestion | A proposed insertion or deletion in suggestion mode. The author accepts or rejects it. |
+| summary email | One email that contains the events of a day or a week. |
+| task | An assignment for a person, with dates and a status. |
+| termbase | The approved and forbidden terms of a team, with definitions and translations. |
+| text layer | The text of a PDF page that tools can find and copy. |
+| ticket | An item in the ticket list: a query, a correction, a problem, or a different type that the team adds. |
+| timesheet | The time entries of one person for a period. |
 | toolchain | One installed version of an external tool, for example Typst 0.14.2. |
-| typesetting | The work that puts text and images on pages. |
+| translation memory | A store of source segments and their approved translations. |
+| typesetting | The layout of text and images on pages. |
+| work | A text as an abstract creation, for example *War and Peace*. A work has one or more editions. |
 | workflow | A set of stages and transitions for a publication or a component. |
 | workspace | A saved pane layout for one activity, for example Write. |
