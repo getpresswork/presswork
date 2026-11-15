@@ -183,7 +183,7 @@ fn render_screens() {
     send(&mut app, Message::SelectWorkspace(Workspace::Write));
     send(
         &mut app,
-        Message::Toolchains(ToolchainMessage::Use(Version::new(0, 14, 2))),
+        Message::Toolchains(ToolchainMessage::Use(Version::new(0, 14, 1))),
     );
     send(&mut app, Message::Toolchains(ToolchainMessage::Toggle));
     send(
