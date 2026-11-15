@@ -13,5 +13,6 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+futures.workspace = true
 jiff.workspace = true
 tracing.workspace = true

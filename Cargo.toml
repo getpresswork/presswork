@@ -15,6 +15,7 @@ publish = false
 presswork-ui = { path = "crates/presswork-ui" }
 
 fluent-bundle = "0.16.0"
+futures = "0.3.34"
 iced = "0.14.0"
 iced_test = "0.14.0"
 jiff = "0.2.45"

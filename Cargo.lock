@@ -2509,6 +2509,7 @@ dependencies = [
 name = "presswork-log"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "jiff",
  "tracing",
 ]
