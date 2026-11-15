@@ -19,6 +19,13 @@ This chapter tells how team members and outside contributors communicate in Pres
 - Each person selects which events make a notification: in the application, through the operating system, or by email.
 - A person can get a summary email each day or each week, in place of single emails.
 
+## Email bridge
+
+- Each publication can have an email address on the server.
+- Presswork can send queries to an author by email. The reply of the author becomes a comment on the query.
+- Files that persons send to the address of a publication become uploads, or tickets with attachments.
+- The email bridge accepts mail only from known contacts. Other mail goes to a review list.
+
 ## Webhooks
 
 An administrator can send events to other systems through webhooks, for example to Matrix, Slack, or Discord. Each webhook has a filter for the event types.
@@ -32,6 +39,14 @@ The web portal is a web site on the Presswork server. It is for persons who do n
 - The server renders the proof pages. Thus the browser does not run Typst.
 - The portal uses HTML that the server renders, with small scripts. It follows WCAG 2.2 at level AA.
 - The portal is not available for encrypted projects.
+- Members can also use the portal on a phone for the inbox, approvals, tasks, and chat. Typesetting stays on the desktop.
+- Web push notifications go to phones and browsers without an app store.
+
+## Watermarked proofs
+
+- Each proof PDF that a person downloads or gets has a watermark with their name and the date.
+- A share link for proofs has an expiry date. You can close a link at any time.
+- The audit log records each download.
 
 ## Submissions
 
