@@ -1,9 +1,9 @@
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 
 use crate::error::ProjectError;
-use crate::manifest::{MANIFEST, Manifest};
+use crate::manifest::{MANIFEST, Manifest, with_pin};
 
 #[derive(Debug, Clone)]
 pub struct Project {
@@ -62,6 +62,21 @@ impl Project {
     #[must_use]
     pub fn files(&self) -> &[PathBuf] {
         &self.files
+    }
+
+    pub fn set_pin(&mut self, pin: &str) -> Result<(), ProjectError> {
+        let path = self.root.join(MANIFEST);
+        let io_error = |source| ProjectError::Io {
+            path: path.clone(),
+            source,
+        };
+        let text = with_pin(&fs::read_to_string(&path).map_err(io_error)?, pin)?;
+        let manifest = Manifest::parse(&text)?;
+        let mut file = tempfile::NamedTempFile::new_in(&self.root).map_err(io_error)?;
+        file.write_all(text.as_bytes()).map_err(io_error)?;
+        file.persist(&path).map_err(|error| io_error(error.error))?;
+        self.manifest = manifest;
+        Ok(())
     }
 }
 
@@ -150,6 +165,24 @@ mod tests {
         let error = Project::open(folder.path()).unwrap_err();
 
         assert!(matches!(error, ProjectError::MainMissing(_)));
+    }
+
+    #[test]
+    fn a_pin_changes_the_manifest_file_and_the_project() {
+        let folder = folder(&[(MANIFEST, "[project]\nname = \"A\"\n"), ("main.typ", "")]);
+        let mut project = Project::open(folder.path()).unwrap();
+
+        project.set_pin("0.14").unwrap();
+
+        assert_eq!(project.manifest().typst.as_deref(), Some("0.14"));
+        assert_eq!(
+            Project::open(folder.path())
+                .unwrap()
+                .manifest()
+                .typst
+                .as_deref(),
+            Some("0.14")
+        );
     }
 
     #[test]
