@@ -5,7 +5,9 @@ use std::time::Instant;
 
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{button, column, container, row, rule, space, text};
-use iced::{Element, Fill, FillPortion, Subscription, Task, Theme, keyboard, padding, system};
+use iced::{
+    Element, Fill, FillPortion, Size, Subscription, Task, Theme, keyboard, padding, system, window,
+};
 use presswork_editor::{Editor, Mark, MarkKind};
 use presswork_log::{Level, LogStore};
 use presswork_preview::Preview;
@@ -27,6 +29,8 @@ use crate::workspace::Workspace;
 
 const MARK_SIZE: f32 = 10.0;
 const DESCRIPTION_WIDTH: f32 = 380.0;
+const MAIN_WINDOW: Size = Size::new(1280.0, 800.0);
+const PREVIEW_WINDOW: Size = Size::new(720.0, 900.0);
 const SCRATCH: &str = include_str!("../samples/scratch.typ");
 
 pub(crate) struct App {
@@ -43,6 +47,8 @@ pub(crate) struct App {
     project: Option<Project>,
     saved: u64,
     notice: Option<String>,
+    main_window: window::Id,
+    preview_window: Option<window::Id>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +74,7 @@ pub(crate) enum Message {
     Save,
     Key(keyboard::Event),
     DismissNotice,
+    WindowClosed(window::Id),
 }
 
 impl App {
@@ -93,7 +100,67 @@ impl App {
             compiled_revision: None,
             project: None,
             notice: None,
+            main_window: window::Id::unique(),
+            preview_window: None,
         }
+    }
+
+    pub(crate) fn open_main_window(&mut self) -> Task<Message> {
+        let (id, opened) = window::open(window::Settings {
+            size: MAIN_WINDOW,
+            position: window::Position::Centered,
+            ..window::Settings::default()
+        });
+        self.main_window = id;
+        opened.discard()
+    }
+
+    fn detach_preview(&mut self) -> Task<Message> {
+        if let Some(id) = self.preview_window {
+            return window::gain_focus(id);
+        }
+        let (id, opened) = window::open(window::Settings {
+            size: PREVIEW_WINDOW,
+            ..window::Settings::default()
+        });
+        self.preview_window = Some(id);
+        self.preview.set_detached(true);
+        tracing::debug!("Preview window opened");
+        opened.discard()
+    }
+
+    pub(crate) fn window_closed(&mut self, id: window::Id) -> bool {
+        if self.preview_window == Some(id) {
+            self.preview_window = None;
+            self.preview.set_detached(false);
+            return false;
+        }
+        id == self.main_window
+    }
+
+    pub(crate) fn view_window(&self, id: window::Id) -> Element<'_, Message> {
+        if self.preview_window == Some(id) {
+            return self.preview.view(self.preview_text(), Message::Preview);
+        }
+        self.view()
+    }
+
+    pub(crate) fn window_title(&self, id: window::Id) -> String {
+        if self.preview_window != Some(id) {
+            return self.title();
+        }
+        match &self.project {
+            Some(project) => {
+                let mut args = FluentArgs::new();
+                args.set("name", project.manifest().name.clone());
+                self.localizer.format("preview-window-title", &args)
+            }
+            None => self.localizer.text("preview-window-title-scratch"),
+        }
+    }
+
+    pub(crate) fn window_theme(&self, _id: window::Id) -> Theme {
+        self.theme()
     }
 
     pub(crate) fn marks(&self) -> Vec<Mark> {
@@ -420,6 +487,15 @@ impl App {
                 return self.show_output(generation, revision, output);
             }
             Message::Preview(presswork_preview::Action::ShowProblem) => self.show_problem(),
+            Message::Preview(presswork_preview::Action::Detach) => return self.detach_preview(),
+            Message::Preview(presswork_preview::Action::Attach) => {
+                return self.preview_window.map_or_else(Task::none, window::close);
+            }
+            Message::WindowClosed(id) => {
+                if self.window_closed(id) {
+                    return iced::exit();
+                }
+            }
             Message::Preview(action) => self.preview.perform(action),
             Message::OpenFolder => return self.open_folder(),
             Message::FolderPicked(Some(root)) => return self.open_project(&root),
@@ -445,6 +521,7 @@ impl App {
             self.logs.subscription().map(Message::Logs),
             system::theme_changes().map(Message::SystemTheme),
             keyboard::listen().map(Message::Key),
+            window::close_events().map(Message::WindowClosed),
         ])
     }
 
@@ -534,6 +611,9 @@ impl App {
             let editor = presswork_editor::view(&self.editor, colors, Message::Editor)
                 .autofocus(true)
                 .marks(self.marks());
+            if self.preview_window.is_some() {
+                return container(editor).width(Fill).height(Fill).into();
+            }
             let preview = self.preview.view(self.preview_text(), Message::Preview);
             return row![
                 container(editor).width(FillPortion(1)).height(Fill),
@@ -1203,6 +1283,69 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    const EMPTY_PREVIEW: &str = "The preview shows the pages after the first compilation.";
+
+    fn detach(app: &mut App) -> window::Id {
+        send(app, Message::Preview(presswork_preview::Action::Detach));
+        app.preview_window.unwrap()
+    }
+
+    #[test]
+    fn detaching_the_preview_moves_it_into_its_own_window() {
+        let mut app = app();
+
+        let preview = detach(&mut app);
+
+        assert!(simulator(app.view()).find(EMPTY_PREVIEW).is_err());
+        assert!(
+            simulator(app.view_window(preview))
+                .find(EMPTY_PREVIEW)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn closing_the_preview_window_brings_the_preview_back() {
+        let mut app = app();
+        let preview = detach(&mut app);
+
+        send(&mut app, Message::WindowClosed(preview));
+
+        assert_eq!(app.preview_window, None);
+        assert!(simulator(app.view()).find(EMPTY_PREVIEW).is_ok());
+    }
+
+    #[test]
+    fn a_second_detach_keeps_one_preview_window() {
+        let mut app = app();
+        let preview = detach(&mut app);
+
+        assert_eq!(detach(&mut app), preview);
+    }
+
+    #[test]
+    fn the_preview_window_has_the_name_of_the_project_in_its_title() {
+        let folder = book();
+        let mut app = app();
+        let preview = detach(&mut app);
+        assert_eq!(app.window_title(preview), "Preview");
+
+        open(&mut app, &folder);
+
+        assert_eq!(app.window_title(preview), "Preview · The Book");
+        assert_eq!(app.window_title(app.main_window), "Presswork");
+    }
+
+    #[test]
+    fn closing_the_main_window_ends_the_application() {
+        let mut app = app();
+        let preview = detach(&mut app);
+
+        assert!(!app.window_closed(preview));
+        let main = app.main_window;
+        assert!(app.window_closed(main));
     }
 
     #[test]

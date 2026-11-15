@@ -22,11 +22,12 @@ pub fn run() -> iced::Result {
     );
     let boot = move || {
         let mut app = App::new(store.clone());
+        let window = app.open_main_window();
         let compile = app.request_compile();
         let theme = iced::system::theme().map(app::Message::SystemTheme);
-        (app, iced::Task::batch([theme, compile]))
+        (app, iced::Task::batch([window, theme, compile]))
     };
-    iced::application(boot, App::update, App::view)
+    iced::daemon(boot, App::update, App::view_window)
         .settings(iced::Settings {
             fonts: font::all(),
             default_font: font::UI,
@@ -35,9 +36,7 @@ pub fn run() -> iced::Result {
             ..iced::Settings::default()
         })
         .subscription(App::subscription)
-        .theme(App::theme)
-        .title(App::title)
-        .window_size((1280.0, 800.0))
-        .centered()
+        .theme(App::window_theme)
+        .title(App::window_title)
         .run()
 }

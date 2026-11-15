@@ -111,6 +111,7 @@ In milestone 1, the preview does these things:
 - After each change to the text, the engine compiles the text again. The status bar shows the duration of the last compilation.
 - By default, the pages fill the width of the preview. The zoom buttons change the zoom from 25% to 400%. If the pages are wider than the preview, you can scroll to the left and to the right.
 - If the text has errors, the preview continues to show the last pages without errors. A bar above the pages shows the first error and its line.
+- A button in the toolbar of the preview opens the preview in its own window, for example on a second screen. The editor then uses the full width of the main window. To show the preview beside the editor again, close the preview window or click its button. If you close the main window, Presswork closes.
 
 ## Source and pages
 
