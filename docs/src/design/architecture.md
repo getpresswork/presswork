@@ -12,17 +12,19 @@ This chapter shows the parts of Presswork and how they connect.
             |                                          |          |
             v                                          v          v
   Local project folders                          PostgreSQL   Blob storage
-  Typst toolchains
-  Typst package cache
+  Local library and search index                 Search index, OCR jobs
+  Typst toolchains and package cache             Web portal
 
 External services:
   Typst Universe ........ Typst packages
-  GitHub releases ....... Typst and Pandoc toolchains
+  GitHub releases ....... Typst and Pandoc toolchains, Presswork updates
   veraPDF releases ...... PDF validation
-  Eclipse Temurin ....... Java runtime for veraPDF
+  Eclipse Temurin ....... Java runtime for veraPDF and EPUBCheck
+  Open Library, Crossref  Lookups by ISBN and DOI, after approval
+  AI providers .......... Only if an administrator turns them on
 ```
 
-The desktop application and the server are two programs. Both use the same crates for the Typst engine, the domain model, the sync protocol, and the API types.
+The desktop application, the command-line tool, and the server are three programs. They use the same crates for the Typst engine, the domain model, the sync protocol, the search, and the API types.
 
 ## Layers
 
@@ -30,31 +32,54 @@ The code has four layers. A layer can use the layers below it. A layer cannot us
 
 | Layer | Contents | Rules |
 | --- | --- | --- |
-| Applications | Desktop application, server | Connect the parts. Contain no business rules. |
-| Adapters | File system, network, database, Typst engine, widgets | Do the input and output. Implement the ports of the services. |
-| Services | Toolchain manager, sync engine, workflow engine, routine engine | Use ports (traits) for all input and output. |
-| Domain | Text model, project model, domain model, API types | Pure code. No input and output. No async code. |
+| Applications | Desktop application, command-line tool, server | Connect the parts. Contain no business rules. |
+| Adapters | File system, network, database, Typst engine, OCR, search, widgets | Do the input and output. Implement the ports of the services. |
+| Services | Toolchain manager, sync engine, workflow engine, routine engine, updater | Use ports (traits) for all input and output. |
+| Domain | Text model, project model, the domain areas, API types | Pure code. No input and output. No async code. |
 
 This structure gives fast tests. Most tests use the domain and service layers with fake adapters.
 
+## Domain areas
+
+The domain has one crate for each area. An area does not use the types of a different area. It refers to objects of other areas only through the links of the shared kernel. Thus each area stays small, and the areas connect in one consistent way. Refer to [Connections](connections.md).
+
+| Area | Crate | Contents |
+| --- | --- | --- |
+| Kernel | `presswork-kernel` | Identifiers, links to objects, times, amounts of money, languages |
+| Organizations | `presswork-org` | Users, organizations, teams, roles, permissions, devices |
+| Content | `presswork-content` | Collections, publications, components, revisions, suggestions |
+| Tasks | `presswork-tasks` | Tasks, tickets, milestones, dependencies, checklists, workflows, routines, time entries |
+| Library | `presswork-library` | Works, editions, files, page maps, standard editions, annotations, research notes, concordances |
+| Language | `presswork-language` | Dictionaries, house style rules, the termbase, translation memory |
+| Production | `presswork-production` | Export profiles, covers, identifiers, metadata, assets, clearances |
+| Finance | `presswork-finance` | Budgets, cost items, rates |
+| Chat | `presswork-chat` | Channels, direct messages, replies, comments, inbox, notifications |
+| Intake | `presswork-intake` | Calls for papers, submissions, reviews |
+
 ## Crates
 
-All crates are in the `crates` folder. Each crate has one purpose. This table shows the planned crates. A crate comes into the repository with its first code.
+All crates are in the `crates` folder. Each crate has one purpose. This table shows the planned crates outside the domain areas. A crate comes into the repository with its first code.
 
 | Crate | Layer | Purpose |
 | --- | --- | --- |
 | `presswork` | Application | The desktop application, with iced. |
-| `presswork-server` | Application | The collaboration server, with axum and PostgreSQL. |
+| `presswork-cli` | Application | The command-line tool. |
+| `presswork-server` | Application | The collaboration server and the web portal, with axum and PostgreSQL. |
 | `presswork-ui` | Adapter | The design system: theme, design tokens, and shared widgets. |
 | `presswork-editor` | Adapter | The text editor widget. |
 | `presswork-preview` | Adapter | The page preview widget. |
 | `presswork-typst` | Adapter | The embedded Typst engine: compilation, page images, export, and IDE functions. |
 | `presswork-client` | Adapter | The HTTP and WebSocket client for the server API. |
-| `presswork-toolchain` | Service | Installs and selects Typst, Pandoc, veraPDF, and Java versions. Controls packages and fonts. |
+| `presswork-ocr` | Adapter | The `OcrEngine` trait with the ocrs and Tesseract engines. |
+| `presswork-search` | Adapter | Full-text search with Tantivy. |
+| `presswork-plugin` | Adapter | The WebAssembly plugin host, with wasmtime. |
+| `presswork-ai` | Adapter | The adapters for AI providers. |
+| `presswork-toolchain` | Service | Installs and selects Typst, Pandoc, veraPDF, EPUBCheck, Java, and dictionaries. Controls packages and fonts. |
 | `presswork-sync` | Service | Connects the text model to Loro documents and sends updates. |
-| `presswork-text` | Domain | Text buffer, positions, edits, selections, and history. |
+| `presswork-crypto` | Service | The keys and the encryption of encrypted projects. |
+| `presswork-update` | Service | The signed updater of the desktop application. |
+| `presswork-text` | Domain | Text buffer, positions, edits, selections, marks, and history. |
 | `presswork-project` | Domain | The project manifest and the project file tree. |
-| `presswork-domain` | Domain | Organizations, roles, publications, tickets, tasks, checklists, workflows, routines, and reports. |
 | `presswork-api` | Domain | The request, response, and event types of the server API. |
 
 ## Data flow
