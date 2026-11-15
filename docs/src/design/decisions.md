@@ -622,3 +622,17 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** Shortcuts use Ctrl on Windows and Linux, and Cmd on macOS. Word movement uses Ctrl on Windows and Linux, and Alt on macOS. Tab inserts two spaces.
 - **Reason:** Users expect the keys of their platform. Typst code usually has an indentation of two spaces.
 - **Other options:** The same keys on all platforms. Tab characters.
+
+## D89. Optimized dependencies in development builds
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** Development builds compile all dependencies with optimization level 2. Presswork crates stay at level 0.
+- **Reason:** Text shaping and Typst are very slow without optimization. With this setting, the tests of the desktop application take 1.5 seconds, not 21 seconds, and the debug application responds quickly.
+- **Other options:** Level 1, which compiles faster but runs slower. No optimization.
+
+## D90. A preview beside the editor in the Write workspace
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** The Write workspace shows the editor and the preview side by side, with the same width. The engine compiles after each change to the text, on its own thread, with one compilation at a time.
+- **Reason:** Writers see the effect of each change at once. One compilation at a time keeps the computer responsive.
+- **Other options:** A preview that shows only after a pause in typing. A preview in a separate window.

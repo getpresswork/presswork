@@ -65,6 +65,12 @@ The editor underlines the range. The diagnostics panel shows a list of all diagn
 - The preview asks for the visible pages first.
 - At high zoom levels, the engine renders tiles of a page, not the full page.
 
+In milestone 1, the engine has these limits:
+
+- The world gives only the fonts that Typst supplies: Libertinus Serif, New Computer Modern, and DejaVu Sans Mono. Thus the output is the same on all computers.
+- The world contains only the scratch document. Project files and packages come with the project model.
+- The engine renders all pages after each compilation, at 2 pixels for each point.
+
 ## IDE functions
 
 The engine uses `typst-ide` for these functions:
