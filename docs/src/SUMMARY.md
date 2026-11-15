@@ -11,6 +11,7 @@
 - [Toolchains](design/toolchains.md)
 - [Editor and preview](design/editor.md)
 - [Collaboration](design/collaboration.md)
+- [Library](design/library.md)
 - [Server](design/server.md)
 - [Domain model](design/domain-model.md)
 - [Interface](design/interface.md)
