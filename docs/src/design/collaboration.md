@@ -55,6 +55,12 @@ Presence data is temporary. The server does not store it. It contains:
 
 Cursor ranges use Loro stable cursors. Thus a remote cursor stays at the correct text when other persons edit the document.
 
+In follow mode, your view follows the view and the cursor of a different member, for example during an editorial meeting. The member sees who follows them.
+
+## History slider
+
+The history slider shows the edit history of a document. Move the slider to see the text at an earlier time, with the author of each change. You can restore the text of any point as a suggestion. The slider uses the history of the Loro document.
+
 ## Revisions
 
 A revision is a named point in the history of a project. It records:
@@ -78,6 +84,12 @@ Tickets and comments can attach to a text range or to an area of a page.
 - All edits go into the local Loro documents first. The network status does not change the edit procedure.
 - Tickets, tasks, and checklists also have a local copy. Changes to them go into a local queue.
 - When the client connects again, it sends the queue in sequence. If the server does not accept a change, Presswork shows the change and the reason. For example, a permission can change while you are offline.
+
+## Co-publishing
+
+- An organization can share one publication with a partner organization on the same server.
+- Each organization gives its own roles for the shared publication.
+- Each organization sees only the shared publication, not the other records of the partner.
 
 ## Git
 
