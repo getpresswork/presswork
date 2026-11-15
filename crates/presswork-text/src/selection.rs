@@ -119,6 +119,11 @@ impl Selection {
     }
 
     #[must_use]
+    pub fn primary_index(&self) -> usize {
+        self.primary
+    }
+
+    #[must_use]
     pub fn map(&self, changes: &ChangeSet) -> Self {
         let ranges = self.ranges.iter().map(|range| range.map(changes)).collect();
         Self::new(ranges, self.primary)
@@ -151,6 +156,7 @@ mod tests {
 
         assert_eq!(selection.ranges(), [range(1, 2), range(4, 4), range(8, 9)]);
         assert_eq!(selection.primary(), range(8, 9));
+        assert_eq!(selection.primary_index(), 2);
     }
 
     #[test]
