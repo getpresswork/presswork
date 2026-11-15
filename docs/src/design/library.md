@@ -94,6 +94,20 @@ A concordance maps the page numbers of one edition to the page numbers of a diff
 
 When the team changes a standard edition, Presswork uses the concordance to propose a new page number for each citation. The proposals are suggestions. A person accepts or rejects each one. Refer to [Editorial tools](editorial.md).
 
+## Similarity check
+
+The similarity check finds text in a document that agrees with the text of a library edition, but has no quotation marks or citation. It shows each match with the edition and the page. This helps authors to prevent accidental plagiarism.
+
+## Citation styles
+
+- Each publication has a citation style in the CSL format. Typst uses CSL styles.
+- The citation style editor shows a sample of each citation form.
+- You can select a style, or change a copy of a style for the house.
+
+## Semantic search
+
+Semantic search finds passages by meaning. It is available when AI assistance is on. Refer to [AI assistance](ai.md).
+
 ## Research notes
 
 - A research note is a text in Markdown with links to other objects.
