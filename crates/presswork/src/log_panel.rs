@@ -38,6 +38,7 @@ pub(crate) struct LogPanel {
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
     Toggle,
+    Show(Level),
     Close,
     Changed,
     LevelSelected(Level),
@@ -62,9 +63,23 @@ impl LogPanel {
         self.open
     }
 
+    pub(crate) fn counts(&self) -> (usize, usize) {
+        let count = |level| {
+            self.entries
+                .iter()
+                .filter(|entry| entry.level == level)
+                .count()
+        };
+        (count(Level::Error), count(Level::Warn))
+    }
+
     pub(crate) fn update(&mut self, message: Message) {
         match message {
             Message::Toggle => self.open = !self.open,
+            Message::Show(level) => {
+                self.open = true;
+                self.filter.minimum = level;
+            }
             Message::Close => self.open = false,
             Message::Changed => self.load(),
             Message::LevelSelected(level) => self.filter.minimum = level,
@@ -337,6 +352,28 @@ mod tests {
         panel.update(Message::SearchChanged("export".to_owned()));
 
         assert_eq!(messages(&panel), ["Exported"]);
+    }
+
+    #[test]
+    fn counts_the_errors_and_the_warnings() {
+        let store = LogStore::with_capacity(10);
+        for level in [Level::Error, Level::Warn, Level::Warn, Level::Info] {
+            store.push(entry(level, "a"));
+        }
+
+        let panel = LogPanel::new(store);
+
+        assert_eq!(panel.counts(), (1, 2));
+    }
+
+    #[test]
+    fn show_opens_the_panel_at_a_level() {
+        let mut panel = LogPanel::new(LogStore::with_capacity(10));
+
+        panel.update(Message::Show(Level::Error));
+
+        assert!(panel.is_open());
+        assert_eq!(panel.filter.minimum, Level::Error);
     }
 
     #[test]

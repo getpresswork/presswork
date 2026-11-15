@@ -1,9 +1,9 @@
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{button, column, container, row, rule, space, text};
 use iced::{Element, Fill, Subscription, Theme, padding, system};
-use presswork_log::LogStore;
-use presswork_ui::icon::icon;
-use presswork_ui::style;
+use presswork_log::{Level, LogStore};
+use presswork_ui::icon::{Icon, icon};
+use presswork_ui::style::{self, Tone};
 use presswork_ui::theme::{self as ui_theme, Mode};
 use presswork_ui::{font, font_size, size, space as gap};
 
@@ -133,13 +133,32 @@ impl App {
     }
 
     fn status_bar(&self) -> Element<'_, Message> {
+        let (errors, warnings) = self.logs.counts();
+        let mut indicators = row![].spacing(gap::XS).align_y(Vertical::Center);
+        if errors > 0 {
+            indicators = indicators.push(count_button(
+                Icon::CircleX,
+                errors,
+                Tone::Danger,
+                Level::Error,
+            ));
+        }
+        if warnings > 0 {
+            indicators = indicators.push(count_button(
+                Icon::TriangleAlert,
+                warnings,
+                Tone::Warning,
+                Level::Warn,
+            ));
+        }
+        indicators = indicators.push(self.logs.toggle_button(&self.localizer).map(Message::Logs));
         container(
             row![
                 text(self.localizer.text("status-no-project"))
                     .size(font_size::SMALL)
                     .style(style::muted),
                 space().width(Fill),
-                self.logs.toggle_button(&self.localizer).map(Message::Logs),
+                indicators,
             ]
             .align_y(Vertical::Center),
         )
@@ -156,10 +175,28 @@ fn hairline<'a>() -> Element<'a, Message> {
     rule::horizontal(1).style(style::hairline).into()
 }
 
+fn count_button<'a>(symbol: Icon, count: usize, tone: Tone, level: Level) -> Element<'a, Message> {
+    let content = row![
+        icon(symbol).size(size::ICON_SMALL).style(style::tone(tone)),
+        text(count.to_string())
+            .size(font_size::SMALL)
+            .font(font::UI_MEDIUM)
+            .style(style::tone(tone)),
+    ]
+    .spacing(gap::XXS)
+    .align_y(Vertical::Center);
+    button(content)
+        .padding([gap::XXS, gap::XS + gap::XXS])
+        .style(style::ghost)
+        .on_press(Message::Logs(log_panel::Message::Show(level)))
+        .into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use iced_test::simulator;
+    use presswork_log::LogEntry;
 
     fn app() -> App {
         App::new(LogStore::with_capacity(10))
@@ -209,6 +246,29 @@ mod tests {
         }
 
         assert!(app.logs.is_open());
+    }
+
+    #[test]
+    fn click_on_the_error_count_shows_only_the_errors() {
+        let store = LogStore::with_capacity(10);
+        for (level, message) in [(Level::Info, "Compiled"), (Level::Error, "Connection lost")] {
+            store.push(LogEntry {
+                level,
+                message: message.to_owned(),
+                ..LogEntry::default()
+            });
+        }
+        let mut app = App::new(store);
+
+        let mut ui = simulator(app.view());
+        ui.click("1").expect("the error count is in the view");
+        for message in ui.into_messages() {
+            app.update(message);
+        }
+
+        let mut ui = simulator(app.view());
+        assert!(ui.find("Connection lost").is_ok());
+        assert!(ui.find("Compiled").is_err());
     }
 
     #[test]
