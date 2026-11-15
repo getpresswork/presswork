@@ -103,6 +103,23 @@ impl ChangeSet {
         })
     }
 
+    pub(crate) fn changed_ranges(&self) -> impl Iterator<Item = (Range<usize>, Range<usize>)> {
+        let (mut old, mut new) = (0, 0);
+        self.runs.iter().filter_map(move |run| match run {
+            Run::Keep(len) => {
+                old += len;
+                new += len;
+                None
+            }
+            Run::Replace { delete, insert } => {
+                let ranges = (old..old + delete, new..new + insert.len());
+                old += delete;
+                new += insert.len();
+                Some(ranges)
+            }
+        })
+    }
+
     pub(crate) fn replacements(&self) -> impl Iterator<Item = (Range<usize>, &str)> {
         let mut offset = 0;
         self.runs.iter().filter_map(move |run| match run {

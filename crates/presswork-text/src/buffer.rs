@@ -7,6 +7,7 @@ use ropey::Rope;
 use crate::change::ChangeSet;
 use crate::error::TextError;
 use crate::position::{LineColumn, Position, Unit};
+use crate::selection::Selection;
 
 #[derive(Debug, Clone, Default)]
 pub struct Buffer {
@@ -50,6 +51,25 @@ impl Buffer {
         }
         for (range, _) in changes.replacements() {
             for offset in [range.start, range.end] {
+                if !self.is_char_boundary(offset) {
+                    return Err(TextError::NotCharBoundary(offset));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check_selection(&self, selection: &Selection) -> Result<(), TextError> {
+        for range in selection.ranges() {
+            let (start, end) = (range.start().offset(), range.end().offset());
+            if end > self.len() {
+                return Err(TextError::InvalidRange {
+                    start,
+                    end,
+                    len: self.len(),
+                });
+            }
+            for offset in [start, end] {
                 if !self.is_char_boundary(offset) {
                     return Err(TextError::NotCharBoundary(offset));
                 }
