@@ -573,3 +573,24 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** Before 1.0, each release of the release train bumps only the patch version. When a milestone is complete, a maintainer starts the release train with the next minor version. After 1.0, the commit types set the version change. This decision replaces the version rule of D37 before 1.0.
 - **Reason:** The version tells which milestone a release belongs to, as the roadmap shows. The release train continues every two weeks.
 - **Other options:** A minor version for each release with a `feat` commit, and no version numbers in the roadmap.
+
+## D82. ropey for the text buffer
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The `Buffer` of `presswork-text` keeps the text in a ropey 1.6 rope. Other crates do not use ropey directly.
+- **Reason:** ropey is stable and fast, and the Helix editor uses it. It finds line breaks with the same rules as Typst, and it converts to UTF-16 units.
+- **Other options:** crop 0.4, which finds only LF and CRLF line breaks. ropey 2.0, which is a beta release. An own rope, which needs much more work.
+
+## D83. Change sets with runs over the full text
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** A change set is a sequence of runs that covers the full text. Each run keeps text or replaces text. Change sets can compose, invert, and map through other change sets, as in CodeMirror 6.
+- **Reason:** Collaborative undo, remote cursors, and diagnostics must map through the changes of other persons.
+- **Other options:** A sorted list of edits.
+
+## D84. Linear undo with time groups
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Undo and redo use one line of groups. An edit joins the last group if it is less than 500 ms after the last edit and touches the text of the last edit. Remote changes rebase the groups. Thus undo changes only your own edits.
+- **Reason:** Collaborative editors such as Google Docs operate in this way. It is easy to understand.
+- **Other options:** An undo tree, as in Vim and Helix.

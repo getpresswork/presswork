@@ -20,15 +20,20 @@ The `presswork-text` crate contains the text model. It does not use iced or Typs
 
 | Type | Purpose |
 | --- | --- |
-| `Buffer` | The text, in a rope. Edits and line access stay fast in large files. |
+| `Buffer` | The text, in a ropey rope. Edits and line access stay fast in large files. |
 | `Position` | A byte offset. It converts to and from lines and columns in UTF-8 bytes, characters, and UTF-16 units. |
 | `Edit` | The replacement of one range with new text. |
-| `ChangeSet` | A set of edits that apply together. It can map a position through the edits. |
+| `ChangeSet` | Runs that keep or replace text, over the full text. Change sets can compose, invert, and map through other change sets. A change set can also map a position. |
 | `Selection` | One or more ranges, with one primary range. |
 | `Transaction` | A change set and a new selection. All changes go through transactions. |
-| `History` | Undo and redo. It puts small edits that occur close together in time into one group. |
+| `History` | Undo and redo of your own edits. An edit joins the last group if it is less than 500 ms after the last edit and touches its text. |
+| `Document` | A buffer, a selection, and a history. It applies transactions, undo, redo, and remote changes. |
 
 The model maps positions through each change set. Thus cursors, remote cursors, diagnostics, and anchors stay at the correct text after an edit.
+
+The buffer finds line breaks with the same rules as Typst: LF, CR, CRLF, VT, FF, NEL, LS, and PS.
+
+Remote changes rebase the history. Thus undo changes only your own edits, also after other persons changed the text.
 
 ## Editor widget
 
