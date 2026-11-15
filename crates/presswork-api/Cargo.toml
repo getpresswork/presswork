@@ -1,0 +1,20 @@
+[package]
+name = "presswork-api"
+description = "The request, response, and event types of the Presswork server API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+utoipa.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

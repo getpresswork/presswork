@@ -12,6 +12,7 @@ homepage = "https://getpresswork.github.io/presswork/"
 publish = false
 
 [workspace.dependencies]
+presswork-api = { path = "crates/presswork-api" }
 presswork-editor = { path = "crates/presswork-editor" }
 presswork-log = { path = "crates/presswork-log" }
 presswork-preview = { path = "crates/presswork-preview" }
@@ -21,10 +22,12 @@ presswork-toolchain = { path = "crates/presswork-toolchain" }
 presswork-typst = { path = "crates/presswork-typst" }
 presswork-ui = { path = "crates/presswork-ui" }
 
+axum = "0.8.9"
 comemo = "0.5.1"
 directories = "6.0.0"
 fluent-bundle = "0.16.0"
 futures = "0.3.34"
+http-body-util = "0.1.5"
 iced = "0.14.0"
 iced_test = "0.14.0"
 jiff = "0.2.45"
@@ -44,6 +47,7 @@ tar = { version = "0.4.46", default-features = false }
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = "1.54.1"
+tower = "0.5.3"
 toml = "1.2.1"
 toml_edit = "0.25.19"
 tracing = "0.1.44"
@@ -56,6 +60,7 @@ typst-syntax = "0.15.1"
 tracing-subscriber ={ version = "0.3.23", default-features = false, features = ["std", "registry", "env-filter", "tracing-log"] }
 unic-langid = "0.9.6"
 unicode-segmentation = "1.13.3"
+utoipa = "6.0.0"
 zip = { version = "9.6.0", default-features = false, features = ["deflate-flate2"] }
 
 [workspace.lints.rust]
