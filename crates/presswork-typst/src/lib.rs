@@ -1,11 +1,15 @@
 mod compile;
 mod fonts;
+mod job;
 mod render;
+mod scheduler;
 mod world;
 
 pub use compile::{Compilation, Diagnostic, Severity, compile};
 pub use fonts::Fonts;
+pub use job::{Output, run};
 pub use render::{PageImage, render_page};
+pub use scheduler::Scheduler;
 pub use typst::foundations::Datetime;
 pub use typst_layout::PagedDocument;
 pub use world::World;
