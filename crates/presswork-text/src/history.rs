@@ -66,7 +66,7 @@ impl History {
     ) -> Result<(), TextError> {
         let joins = self.last.as_ref().is_some_and(|last| {
             at.saturating_duration_since(last.time) < self.group_delay
-                && changes.changed_ranges().any(|(old, _)| {
+                && changes.replacements().any(|(old, _, _)| {
                     last.touched
                         .iter()
                         .any(|range| old.start <= range.end && range.start <= old.end)
@@ -82,7 +82,7 @@ impl History {
         self.redo.clear();
         self.last = Some(Last {
             time: at,
-            touched: changes.changed_ranges().map(|(_, new)| new).collect(),
+            touched: changes.replacements().map(|(_, new, _)| new).collect(),
         });
         Ok(())
     }

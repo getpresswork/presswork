@@ -98,12 +98,12 @@ impl ChangeSet {
     }
 
     pub fn edits(&self) -> impl Iterator<Item = Edit> + '_ {
-        self.replacements().map(|(range, text)| {
-            Edit::replace(Position::new(range.start)..Position::new(range.end), text)
+        self.replacements().map(|(old, _, text)| {
+            Edit::replace(Position::new(old.start)..Position::new(old.end), text)
         })
     }
 
-    pub(crate) fn changed_ranges(&self) -> impl Iterator<Item = (Range<usize>, Range<usize>)> {
+    pub(crate) fn replacements(&self) -> impl Iterator<Item = (Range<usize>, Range<usize>, &str)> {
         let (mut old, mut new) = (0, 0);
         self.runs.iter().filter_map(move |run| match run {
             Run::Keep(len) => {
@@ -115,22 +115,7 @@ impl ChangeSet {
                 let ranges = (old..old + delete, new..new + insert.len());
                 old += delete;
                 new += insert.len();
-                Some(ranges)
-            }
-        })
-    }
-
-    pub(crate) fn replacements(&self) -> impl Iterator<Item = (Range<usize>, &str)> {
-        let mut offset = 0;
-        self.runs.iter().filter_map(move |run| match run {
-            Run::Keep(len) => {
-                offset += len;
-                None
-            }
-            Run::Replace { delete, insert } => {
-                let start = offset;
-                offset += delete;
-                Some((start..offset, insert.as_str()))
+                Some((ranges.0, ranges.1, insert.as_str()))
             }
         })
     }

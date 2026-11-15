@@ -33,7 +33,7 @@ impl Buffer {
     pub fn apply(&mut self, changes: &ChangeSet) -> Result<(), TextError> {
         self.check(changes)?;
         let replacements: Vec<_> = changes.replacements().collect();
-        for (range, text) in replacements.into_iter().rev() {
+        for (range, _, text) in replacements.into_iter().rev() {
             let start = self.rope.byte_to_char(range.start);
             let end = self.rope.byte_to_char(range.end);
             self.rope.remove(start..end);
@@ -49,7 +49,7 @@ impl Buffer {
                 actual: self.len(),
             });
         }
-        for (range, _) in changes.replacements() {
+        for (range, _, _) in changes.replacements() {
             for offset in [range.start, range.end] {
                 if !self.is_char_boundary(offset) {
                     return Err(TextError::NotCharBoundary(offset));
