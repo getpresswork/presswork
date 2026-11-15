@@ -12,13 +12,13 @@ use presswork_preview::Preview;
 use presswork_project::Project;
 use presswork_text::{Position, Unit};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
-use presswork_typst::{Output, Severity};
+use presswork_typst::{Diagnostic, Output, Program, Severity};
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::theme::{self as ui_theme, Mode};
 use presswork_ui::{font, font_size, size, space as gap};
 
-use crate::compiler::{self, Compiler};
+use crate::compiler::{self, Backend, Compiler};
 use crate::files;
 use crate::i18n::{FluentArgs, Localizer};
 use crate::log_panel::{self, LogPanel};
@@ -56,6 +56,11 @@ pub(crate) enum Message {
         generation: u64,
         revision: u64,
         output: Arc<Output>,
+    },
+    CompileFailed {
+        generation: u64,
+        revision: u64,
+        error: String,
     },
     Preview(presswork_preview::Action),
     OpenFolder,
@@ -155,11 +160,13 @@ impl App {
                 tracing::info!(root = %root.display(), "Project opened");
                 self.editor = Editor::new(&opened.text);
                 self.saved = self.editor.revision();
-                self.compiler
-                    .open(opened.project.root(), &opened.project.manifest().main);
+                let root = opened.project.root().to_path_buf();
+                let main = opened.project.manifest().main.clone();
+                self.project = Some(opened.project);
+                let backend = self.backend();
+                self.compiler.open(&root, &main, backend);
                 self.preview = Preview::default();
                 self.compiled = None;
-                self.project = Some(opened.project);
                 self.notice = None;
                 self.workspace = Workspace::Write;
                 self.request_compile()
@@ -210,6 +217,48 @@ impl App {
         })
     }
 
+    fn backend(&self) -> Backend {
+        match self.choice() {
+            None | Some(Choice::Engine(Engine::Embedded)) => Backend::Embedded,
+            Some(Choice::Engine(Engine::Managed(version))) => self
+                .toolchains
+                .executable(&version)
+                .map_or(Backend::Unavailable, |path| {
+                    Backend::Program(Program::new(path, version))
+                }),
+            Some(Choice::Engine(Engine::Missing(_)) | Choice::InvalidPin(_)) => {
+                Backend::Unavailable
+            }
+        }
+    }
+
+    fn sync_backend(&mut self) -> Task<Message> {
+        let backend = self.backend();
+        if !self.compiler.set_backend(backend) {
+            return Task::none();
+        }
+        tracing::info!(backend = ?self.compiler.backend(), "Typst engine changed");
+        self.preview = Preview::default();
+        self.compiled = None;
+        self.compiled_revision = None;
+        self.request_compile()
+    }
+
+    fn preview_text(&self) -> String {
+        if self.compiler.backend() != &Backend::Unavailable {
+            return self.localizer.text("preview-empty");
+        }
+        match self.choice() {
+            Some(Choice::Engine(Engine::Missing(pin))) => {
+                let mut args = FluentArgs::new();
+                args.set("pin", pin.to_string());
+                self.localizer.format("preview-needs-typst", &args)
+            }
+            Some(Choice::InvalidPin(_)) => self.localizer.text("preview-invalid-pin"),
+            _ => self.localizer.text("preview-empty"),
+        }
+    }
+
     fn use_typst(&mut self, version: &Version) {
         let Some(project) = &mut self.project else {
             return;
@@ -237,22 +286,58 @@ impl App {
         let text = self.editor.document().buffer().to_string();
         let generation = self.compiler.generation();
         let revision = self.editor.revision();
-        Task::perform(self.compiler.job(text), move |output| Message::Compiled {
-            generation,
-            revision,
-            output: Arc::new(output),
+        Task::perform(self.compiler.job(text), move |result| {
+            compiled(generation, revision, result)
         })
     }
 
     #[cfg(test)]
     pub(crate) fn compile_now(&mut self) {
         let text = self.editor.document().buffer().to_string();
-        let output = self.compiler.run_now(&text);
-        let _ = self.update(Message::Compiled {
-            generation: self.compiler.generation(),
-            revision: self.editor.revision(),
-            output: Arc::new(output),
-        });
+        let result = self.compiler.run_now(&text);
+        let _ = self.update(compiled(
+            self.compiler.generation(),
+            self.editor.revision(),
+            result,
+        ));
+    }
+
+    fn show_output(
+        &mut self,
+        generation: u64,
+        revision: u64,
+        output: Arc<Output>,
+    ) -> Task<Message> {
+        if generation != self.compiler.generation() {
+            return Task::none();
+        }
+        self.compiled_revision = Some(revision);
+        tracing::debug!(
+            duration_ms = output.duration.as_millis(),
+            diagnostics = output.diagnostics.len(),
+            "Compiled"
+        );
+        self.preview.show(&output, compiler::SCALE);
+        self.preview.set_problem(self.problem(&output));
+        self.compiled = Some(output);
+        if self.compiler.finish() {
+            return self.start_compile();
+        }
+        Task::none()
+    }
+
+    fn failed_output(&self, error: &str) -> Output {
+        let mut args = FluentArgs::new();
+        args.set("error", sentence(error));
+        Output {
+            diagnostics: vec![Diagnostic {
+                severity: Severity::Error,
+                range: None,
+                message: self.localizer.format("preview-program-error", &args),
+                hints: Vec::new(),
+            }],
+            ..Output::default()
+        }
     }
 
     fn problem(&self, output: &Output) -> Option<String> {
@@ -294,14 +379,18 @@ impl App {
                     self.toolchains.close();
                 }
             }
-            Message::Toolchains(toolchain_panel::Message::Use(version)) => self.use_typst(&version),
+            Message::Toolchains(toolchain_panel::Message::Use(version)) => {
+                self.use_typst(&version);
+                return self.sync_backend();
+            }
             Message::Toolchains(message) => {
                 let toggled = matches!(message, toolchain_panel::Message::Toggle);
                 let task = self.toolchains.update(message);
                 if toggled && self.toolchains.is_open() {
                     self.logs.update(log_panel::Message::Close);
                 }
-                return task.map(Message::Toolchains);
+                let sync = self.sync_backend();
+                return Task::batch([task.map(Message::Toolchains), sync]);
             }
             Message::SystemTheme(mode) => {
                 tracing::debug!(?mode, "System theme changed");
@@ -320,22 +409,15 @@ impl App {
                 generation,
                 revision,
                 output,
+            } => return self.show_output(generation, revision, output),
+            Message::CompileFailed {
+                generation,
+                revision,
+                error,
             } => {
-                if generation != self.compiler.generation() {
-                    return Task::none();
-                }
-                self.compiled_revision = Some(revision);
-                tracing::debug!(
-                    duration_ms = output.duration.as_millis(),
-                    diagnostics = output.diagnostics.len(),
-                    "Compiled"
-                );
-                self.preview.show(&output, compiler::SCALE);
-                self.preview.set_problem(self.problem(&output));
-                self.compiled = Some(output);
-                if self.compiler.finish() {
-                    return self.start_compile();
-                }
+                tracing::warn!(%error, "The Typst program did not compile");
+                let output = Arc::new(self.failed_output(&error));
+                return self.show_output(generation, revision, output);
             }
             Message::Preview(presswork_preview::Action::ShowProblem) => self.show_problem(),
             Message::Preview(action) => self.preview.perform(action),
@@ -452,9 +534,7 @@ impl App {
             let editor = presswork_editor::view(&self.editor, colors, Message::Editor)
                 .autofocus(true)
                 .marks(self.marks());
-            let preview = self
-                .preview
-                .view(self.localizer.text("preview-empty"), Message::Preview);
+            let preview = self.preview.view(self.preview_text(), Message::Preview);
             return row![
                 container(editor).width(FillPortion(1)).height(Fill),
                 rule::vertical(1).style(style::hairline),
@@ -590,6 +670,21 @@ impl App {
             .align_y(Vertical::Center)
             .style(style::chrome)
             .into()
+    }
+}
+
+fn compiled(generation: u64, revision: u64, result: Result<Output, String>) -> Message {
+    match result {
+        Ok(output) => Message::Compiled {
+            generation,
+            revision,
+            output: Arc::new(output),
+        },
+        Err(error) => Message::CompileFailed {
+            generation,
+            revision,
+            error,
+        },
     }
 }
 
@@ -1003,6 +1098,110 @@ mod tests {
             simulator(app.view())
                 .find(format!("Typst {embedded}"))
                 .is_ok()
+        );
+    }
+
+    fn fake_install(root: &std::path::Path, version: &str) -> PathBuf {
+        let folder = root.join("typst").join(version);
+        fs::create_dir_all(&folder).unwrap();
+        let program = folder.join(presswork_toolchain::Platform::current().executable());
+        fs::write(&program, "").unwrap();
+        program
+    }
+
+    #[test]
+    fn a_missing_pinned_version_gives_no_preview_and_tells_what_to_install() {
+        let folder = pinned_book("=0.13.1");
+        let mut app = app();
+
+        open(&mut app, &folder);
+
+        assert!(!app.compiler.is_running());
+        let mut ui = simulator(app.view());
+        assert!(
+            ui.find("This project needs Typst =0.13.1. Install it from the Typst item in the status bar.")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn an_installed_pinned_version_compiles_with_its_program() {
+        let toolchains = tempfile::tempdir().unwrap();
+        let program = fake_install(toolchains.path(), "0.14.2");
+        let folder = pinned_book("=0.14.2");
+        let mut app = App::with_toolchains(
+            LogStore::with_capacity(10),
+            Some(toolchains.path().to_path_buf()),
+        );
+
+        open(&mut app, &folder);
+
+        assert_eq!(
+            app.compiler.backend(),
+            &Backend::Program(Program::new(program, Version::new(0, 14, 2)))
+        );
+        assert!(app.compiler.is_running());
+    }
+
+    #[test]
+    #[ignore = "compiles with the real Typst 0.14.2 in the folder that PRESSWORK_TOOLCHAINS names"]
+    fn a_pinned_project_previews_with_the_real_program() {
+        let toolchains = PathBuf::from(std::env::var_os("PRESSWORK_TOOLCHAINS").unwrap());
+        let folder = pinned_book("=0.14.2");
+        let mut app = App::with_toolchains(LogStore::with_capacity(10), Some(toolchains));
+        open(&mut app, &folder);
+
+        app.compile_now();
+
+        assert!(matches!(app.compiler.backend(), Backend::Program(_)));
+        assert_eq!(app.preview.page_count(), 1);
+    }
+
+    #[test]
+    fn installing_the_pinned_version_starts_the_preview() {
+        let toolchains = tempfile::tempdir().unwrap();
+        let folder = pinned_book("=0.14.2");
+        let mut app = App::with_toolchains(
+            LogStore::with_capacity(10),
+            Some(toolchains.path().to_path_buf()),
+        );
+        open(&mut app, &folder);
+        assert_eq!(app.compiler.backend(), &Backend::Unavailable);
+
+        fake_install(toolchains.path(), "0.14.2");
+        send(
+            &mut app,
+            Message::Toolchains(toolchain_panel::Message::Installed(
+                Version::new(0, 14, 2),
+                Ok(()),
+            )),
+        );
+
+        assert!(matches!(app.compiler.backend(), Backend::Program(_)));
+        assert!(app.compiler.is_running());
+    }
+
+    #[test]
+    fn a_program_that_fails_shows_the_problem_above_the_preview() {
+        let mut app = app();
+        let generation = app.compiler.generation();
+        let revision = app.editor.revision();
+
+        send(
+            &mut app,
+            Message::CompileFailed {
+                generation,
+                revision,
+                error: "the program does not start: not found".to_owned(),
+            },
+        );
+
+        let mut ui = simulator(app.view());
+        assert!(
+            ui.find(
+                "Presswork cannot run the Typst program. The program does not start: not found."
+            )
+            .is_ok()
         );
     }
 

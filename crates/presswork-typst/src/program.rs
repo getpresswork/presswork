@@ -17,9 +17,9 @@ const MAIN_FILE: &str = "<stdin>";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProgramError {
-    #[error("the Typst program cannot start: {0}")]
+    #[error("the program does not start: {0}")]
     Start(#[source] io::Error),
-    #[error("the Typst program cannot run: {0}")]
+    #[error("the communication with the program failed: {0}")]
     Run(#[source] io::Error),
     #[error("the page image {path} cannot be read: {reason}")]
     Page { path: PathBuf, reason: String },

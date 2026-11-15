@@ -132,6 +132,12 @@ impl ToolchainPanel {
         &self.installed
     }
 
+    pub(crate) fn executable(&self, version: &Version) -> Option<PathBuf> {
+        self.toolchains
+            .as_ref()
+            .map(|toolchains| toolchains.executable(version))
+    }
+
     pub(crate) fn available(&self, pin: Option<&VersionReq>) -> Vec<&Release> {
         let Releases::Loaded(releases) = &self.releases else {
             return Vec::new();
@@ -836,7 +842,7 @@ mod tests {
         assert!(ui.find("In use").is_ok());
         assert!(ui.find("Use for this project").is_ok());
         assert!(
-            ui.find("This project uses Typst 0.14.2 for exports. The preview uses the built-in Typst 0.15.1.")
+            ui.find("This project uses Typst 0.14.2 for the preview and the exports. Completion and other editor help need the built-in Typst 0.15.1.")
                 .is_ok()
         );
     }
