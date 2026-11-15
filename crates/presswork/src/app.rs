@@ -442,7 +442,9 @@ impl App {
         if self.workspace == Workspace::Write {
             if let Some(output) = &self.compiled {
                 let mut args = FluentArgs::new();
-                let milliseconds = u64::try_from(output.duration.as_millis()).unwrap_or(u64::MAX);
+                let milliseconds = u64::try_from(output.duration.as_millis())
+                    .unwrap_or(u64::MAX)
+                    .max(1);
                 args.set("milliseconds", milliseconds);
                 indicators =
                     indicators.push(status_text(self.localizer.format("status-compiled", &args)));
@@ -776,6 +778,22 @@ mod tests {
         let mut ui = simulator(app.view());
 
         assert!(ui.find("Compiled in 85 ms").is_ok());
+    }
+
+    #[test]
+    fn a_very_fast_compilation_shows_one_millisecond() {
+        let mut app = app();
+        send(
+            &mut app,
+            compiled(Output {
+                duration: Duration::from_micros(300),
+                ..Output::default()
+            }),
+        );
+
+        let mut ui = simulator(app.view());
+
+        assert!(ui.find("Compiled in 1 ms").is_ok());
     }
 
     #[test]
