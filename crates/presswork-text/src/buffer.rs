@@ -4,6 +4,8 @@ use std::ops::Range;
 
 use ropey::Rope;
 
+use crate::change::ChangeSet;
+use crate::error::TextError;
 use crate::position::{LineColumn, Position, Unit};
 
 #[derive(Debug, Clone, Default)]
@@ -25,6 +27,34 @@ impl Buffer {
     #[must_use]
     pub fn line_count(&self) -> usize {
         self.rope.len_lines()
+    }
+
+    pub fn apply(&mut self, changes: &ChangeSet) -> Result<(), TextError> {
+        if changes.len_before() != self.len() {
+            return Err(TextError::LengthMismatch {
+                expected: changes.len_before(),
+                actual: self.len(),
+            });
+        }
+        let replacements: Vec<_> = changes.replacements().collect();
+        for (range, _) in &replacements {
+            for offset in [range.start, range.end] {
+                if !self.is_char_boundary(offset) {
+                    return Err(TextError::NotCharBoundary(offset));
+                }
+            }
+        }
+        for (range, text) in replacements.into_iter().rev() {
+            let start = self.rope.byte_to_char(range.start);
+            let end = self.rope.byte_to_char(range.end);
+            self.rope.remove(start..end);
+            self.rope.insert(start, text);
+        }
+        Ok(())
+    }
+
+    fn is_char_boundary(&self, offset: usize) -> bool {
+        offset <= self.len() && self.rope.char_to_byte(self.rope.byte_to_char(offset)) == offset
     }
 
     #[must_use]
@@ -138,7 +168,8 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::testing::{cursor_positions, text};
+    use crate::change::Edit;
+    use crate::testing::{changes, cursor_positions, text};
 
     fn lines(buffer: &Buffer) -> Vec<String> {
         (0..buffer.line_count())
@@ -234,7 +265,67 @@ mod tests {
         );
     }
 
+    #[test]
+    fn apply_replaces_the_ranges_of_the_edits() {
+        let mut buffer = Buffer::from("Typst is fast");
+        let changes = ChangeSet::new(
+            buffer.len(),
+            [
+                Edit::insert(Position::new(0), "The "),
+                Edit::replace(Position::new(9)..Position::new(13), "very fast"),
+            ],
+        )
+        .unwrap();
+
+        buffer.apply(&changes).unwrap();
+
+        assert_eq!(buffer.to_string(), "The Typst is very fast");
+    }
+
+    #[test]
+    fn apply_needs_changes_for_the_same_length() {
+        let mut buffer = Buffer::from("abc");
+
+        let error = buffer.apply(&ChangeSet::empty(4)).unwrap_err();
+
+        assert_eq!(
+            error,
+            TextError::LengthMismatch {
+                expected: 4,
+                actual: 3
+            }
+        );
+    }
+
+    #[test]
+    fn apply_keeps_the_text_if_an_edit_splits_a_character() {
+        let mut buffer = Buffer::from("aé");
+        let changes = ChangeSet::new(
+            buffer.len(),
+            [
+                Edit::insert(Position::new(0), "x"),
+                Edit::insert(Position::new(2), "y"),
+            ],
+        )
+        .unwrap();
+
+        let error = buffer.apply(&changes).unwrap_err();
+
+        assert_eq!(error, TextError::NotCharBoundary(2));
+        assert_eq!(buffer.to_string(), "aé");
+    }
+
     proptest! {
+        #[test]
+        fn apply_agrees_with_a_string((text, edits) in changes()) {
+            let mut buffer = Buffer::from(text.as_str());
+            let changes = ChangeSet::new(text.len(), edits.clone()).unwrap();
+
+            buffer.apply(&changes).unwrap();
+
+            prop_assert_eq!(buffer.to_string(), crate::testing::apply(&text, &edits));
+        }
+
         #[test]
         fn line_column_and_position_agree(text in text(), pick: prop::sample::Index) {
             let buffer = Buffer::from(text.as_str());
