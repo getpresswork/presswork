@@ -29,6 +29,8 @@ pub enum Action {
     ZoomOut,
     FitWidth,
     ShowProblem,
+    Detach,
+    Attach,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +51,7 @@ pub struct Preview {
     pages: Vec<Page>,
     zoom: Zoom,
     problem: Option<String>,
+    detached: bool,
 }
 
 impl Preview {
@@ -67,6 +70,10 @@ impl Preview {
 
     pub fn set_problem(&mut self, problem: Option<String>) {
         self.problem = problem;
+    }
+
+    pub fn set_detached(&mut self, detached: bool) {
+        self.detached = detached;
     }
 
     #[must_use]
@@ -99,7 +106,7 @@ impl Preview {
                     .find(|&step| step < current)
                     .unwrap_or(STEPS[0]),
             ),
-            Action::ShowProblem => return,
+            Action::ShowProblem | Action::Detach | Action::Attach => return,
         };
     }
 
@@ -176,6 +183,12 @@ impl Preview {
                 self.zoom == Zoom::FitWidth,
                 on_action(Action::FitWidth)
             ),
+            space().width(gap::S),
+            if self.detached {
+                tool(Icon::Columns2, false, on_action(Action::Attach))
+            } else {
+                tool(Icon::ExternalLink, false, on_action(Action::Detach))
+            },
         ]
         .spacing(gap::XXS)
         .align_y(Vertical::Center)
@@ -355,6 +368,29 @@ mod tests {
         assert!((frame.width - (640.0 - SCROLLBAR_SPACE)).abs() < 0.01);
         let page_width = 420.0 * PX_PER_PT * frame.scale;
         assert!((page_width + 2.0 * PADDING - frame.width).abs() < 0.01);
+    }
+
+    fn clicked(preview: &Preview, symbol: Icon) -> Vec<Action> {
+        let mut ui = simulator(preview.view(EMPTY.to_owned(), |action| action));
+        ui.click(symbol.unicode().to_string()).unwrap();
+        ui.into_messages().collect()
+    }
+
+    #[test]
+    fn the_toolbar_offers_its_own_window_for_the_preview() {
+        let mut preview = Preview::default();
+        preview.show(&output(1), 2.0);
+
+        assert_eq!(clicked(&preview, Icon::ExternalLink), [Action::Detach]);
+    }
+
+    #[test]
+    fn a_detached_preview_offers_to_go_back_beside_the_editor() {
+        let mut preview = Preview::default();
+        preview.show(&output(1), 2.0);
+        preview.set_detached(true);
+
+        assert_eq!(clicked(&preview, Icon::Columns2), [Action::Attach]);
     }
 
     #[test]
