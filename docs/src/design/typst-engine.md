@@ -27,6 +27,13 @@ The preview and the exports of a project always use the same Typst version. Refe
 
 The managed toolchain reads the text of the main file from the standard input, so the preview also shows changes that are not saved. It reads the other project files from the project folder. It writes one PNG image for each page, at 144 pixels for each inch, which is the scale of the embedded preview. Its diagnostics give a line and a column, so the editor marks the word at that position.
 
+Presswork stops the managed toolchain in these conditions:
+
+- The program runs for more than two minutes. The preview then shows a problem.
+- You open another project, or the project changes its Typst version. The result of the program is then not necessary.
+
+Presswork does not stop the program when you type. One compilation always finishes, and then Presswork compiles the newest text. Thus the preview also updates while you type without a pause.
+
 All engine functions are behind the `Engine` trait. A later release can add worker processes that link other Typst versions. Then all functions are available for each version.
 
 ## The Typst world

@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
+use std::time::Duration;
 
 use futures::channel::oneshot;
-use presswork_typst::{Datetime, Fonts, Output, Program, Scheduler, World};
+use presswork_typst::{Datetime, Fonts, Output, Program, Scheduler, Stop, World};
 
 pub(crate) const SCALE: f32 = 2.0;
+const PROGRAM_TIME_LIMIT: Duration = Duration::from_secs(120);
 
 static FONTS: LazyLock<Arc<Fonts>> = LazyLock::new(|| Arc::new(Fonts::embedded()));
 
@@ -21,6 +23,7 @@ pub(crate) struct Compiler {
     backend: Backend,
     scheduler: Scheduler,
     generation: u64,
+    stop: Stop,
 }
 
 impl Compiler {
@@ -31,6 +34,7 @@ impl Compiler {
             backend: Backend::Embedded,
             scheduler: Scheduler::default(),
             generation: 0,
+            stop: Stop::new(PROGRAM_TIME_LIMIT),
         }
     }
 
@@ -56,6 +60,8 @@ impl Compiler {
     }
 
     fn restart(&mut self) {
+        self.stop.cancel();
+        self.stop = Stop::new(PROGRAM_TIME_LIMIT);
         self.scheduler = Scheduler::default();
         self.generation += 1;
     }
@@ -103,11 +109,12 @@ impl Compiler {
         let engine = Arc::clone(&self.engine);
         let root = self.root.clone().unwrap_or_default();
         let backend = self.backend.clone();
+        let stop = self.stop.clone();
         move |text| match backend {
             Backend::Embedded => Ok(presswork_typst::run(&engine, text, SCALE)),
-            Backend::Program(program) => {
-                program.run(&root, text).map_err(|error| error.to_string())
-            }
+            Backend::Program(program) => program
+                .run(&root, text, &stop)
+                .map_err(|error| error.to_string()),
             Backend::Unavailable => Ok(Output::default()),
         }
     }
@@ -152,6 +159,21 @@ mod tests {
         assert!(!compiler.set_backend(Backend::Unavailable));
 
         assert_eq!(compiler.generation(), generation + 1);
+    }
+
+    #[test]
+    fn a_new_backend_or_project_stops_the_running_program() {
+        let mut compiler = Compiler::new();
+        let first = compiler.stop.clone();
+
+        compiler.set_backend(Backend::Unavailable);
+        assert!(first.is_cancelled());
+        assert!(!compiler.stop.is_cancelled());
+
+        let second = compiler.stop.clone();
+        let folder = std::env::temp_dir();
+        compiler.open(&folder, Path::new("main.typ"), Backend::Embedded);
+        assert!(second.is_cancelled());
     }
 
     #[test]
