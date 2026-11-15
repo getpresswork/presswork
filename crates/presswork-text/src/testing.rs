@@ -25,28 +25,27 @@ fn inserted_text() -> impl Strategy<Value = String> {
     prop::collection::vec(prop::sample::select(PIECES), 0..3).prop_map(|pieces| pieces.concat())
 }
 
-pub(crate) fn changes() -> impl Strategy<Value = (String, Vec<Edit>)> {
-    (
-        text(),
-        prop::collection::vec(
-            (
-                any::<prop::sample::Index>(),
-                any::<prop::sample::Index>(),
-                inserted_text(),
-            ),
-            0..4,
+pub(crate) type RawEdits = Vec<(prop::sample::Index, prop::sample::Index, String)>;
+
+pub(crate) fn raw_edits() -> impl Strategy<Value = RawEdits> {
+    prop::collection::vec(
+        (
+            any::<prop::sample::Index>(),
+            any::<prop::sample::Index>(),
+            inserted_text(),
         ),
+        0..4,
     )
-        .prop_map(|(text, raw)| {
-            let edits = edits_for(&text, raw);
-            (text, edits)
-        })
 }
 
-fn edits_for(
-    text: &str,
-    raw: Vec<(prop::sample::Index, prop::sample::Index, String)>,
-) -> Vec<Edit> {
+pub(crate) fn changes() -> impl Strategy<Value = (String, Vec<Edit>)> {
+    (text(), raw_edits()).prop_map(|(text, raw)| {
+        let edits = edits_for(&text, raw);
+        (text, edits)
+    })
+}
+
+pub(crate) fn edits_for(text: &str, raw: RawEdits) -> Vec<Edit> {
     let boundaries: Vec<usize> = (0..=text.len())
         .filter(|&offset| text.is_char_boundary(offset))
         .collect();

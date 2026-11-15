@@ -30,25 +30,30 @@ impl Buffer {
     }
 
     pub fn apply(&mut self, changes: &ChangeSet) -> Result<(), TextError> {
+        self.check(changes)?;
+        let replacements: Vec<_> = changes.replacements().collect();
+        for (range, text) in replacements.into_iter().rev() {
+            let start = self.rope.byte_to_char(range.start);
+            let end = self.rope.byte_to_char(range.end);
+            self.rope.remove(start..end);
+            self.rope.insert(start, text);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check(&self, changes: &ChangeSet) -> Result<(), TextError> {
         if changes.len_before() != self.len() {
             return Err(TextError::LengthMismatch {
                 expected: changes.len_before(),
                 actual: self.len(),
             });
         }
-        let replacements: Vec<_> = changes.replacements().collect();
-        for (range, _) in &replacements {
+        for (range, _) in changes.replacements() {
             for offset in [range.start, range.end] {
                 if !self.is_char_boundary(offset) {
                     return Err(TextError::NotCharBoundary(offset));
                 }
             }
-        }
-        for (range, text) in replacements.into_iter().rev() {
-            let start = self.rope.byte_to_char(range.start);
-            let end = self.rope.byte_to_char(range.end);
-            self.rope.remove(start..end);
-            self.rope.insert(start, text);
         }
         Ok(())
     }

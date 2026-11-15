@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use crate::buffer::Buffer;
 use crate::error::TextError;
 use crate::position::Position;
 
@@ -117,6 +118,124 @@ impl ChangeSet {
         })
     }
 
+    pub fn invert(&self, before: &Buffer) -> Result<Self, TextError> {
+        before.check(self)?;
+        let mut builder = Builder::default();
+        let mut offset = 0;
+        for run in &self.runs {
+            match run {
+                Run::Keep(len) => {
+                    builder.keep(*len);
+                    offset += len;
+                }
+                Run::Replace { delete, insert } => {
+                    let deleted =
+                        before.slice(Position::new(offset)..Position::new(offset + delete));
+                    builder.replace(insert.len(), &deleted);
+                    offset += delete;
+                }
+            }
+        }
+        Ok(builder.finish())
+    }
+
+    pub fn compose(&self, next: &Self) -> Result<Self, TextError> {
+        let mismatch = TextError::LengthMismatch {
+            expected: self.len_after,
+            actual: next.len_before,
+        };
+        if self.len_after != next.len_before {
+            return Err(mismatch);
+        }
+        let (mut firsts, mut seconds) = (self.pieces(), next.pieces());
+        let (mut first, mut second) = (firsts.next(), seconds.next());
+        let mut builder = Builder::default();
+        let mut offset = 0;
+        loop {
+            match (first, second) {
+                (None, None) => return Ok(builder.finish()),
+                (Some(Piece::Delete(len)), _) => {
+                    builder.replace(len, "");
+                    first = firsts.next();
+                }
+                (_, Some(Piece::Insert(text))) => {
+                    builder.replace(0, text);
+                    second = seconds.next();
+                }
+                (Some(a), Some(b)) => {
+                    let len = a.len().min(b.len());
+                    match (a, b) {
+                        (Piece::Keep(_), Piece::Keep(_)) => builder.keep(len),
+                        (Piece::Keep(_), Piece::Delete(_)) => builder.replace(len, ""),
+                        (Piece::Insert(text), Piece::Keep(_)) => {
+                            let kept = text
+                                .get(..len)
+                                .ok_or(TextError::NotCharBoundary(offset + len))?;
+                            builder.replace(0, kept);
+                        }
+                        _ => {}
+                    }
+                    offset += len;
+                    first = a.rest(len).or_else(|| firsts.next());
+                    second = b.rest(len).or_else(|| seconds.next());
+                }
+                _ => return Err(mismatch),
+            }
+        }
+    }
+
+    pub fn map(&self, other: &Self, before: bool) -> Result<Self, TextError> {
+        let mismatch = TextError::LengthMismatch {
+            expected: self.len_before,
+            actual: other.len_before,
+        };
+        if self.len_before != other.len_before {
+            return Err(mismatch);
+        }
+        let (mut ours_pieces, mut theirs_pieces) = (self.pieces(), other.pieces());
+        let (mut ours, mut theirs) = (ours_pieces.next(), theirs_pieces.next());
+        let mut builder = Builder::default();
+        loop {
+            match (ours, theirs) {
+                (None, None) => return Ok(builder.finish()),
+                (Some(Piece::Insert(text)), _)
+                    if before || !matches!(theirs, Some(Piece::Insert(_))) =>
+                {
+                    builder.replace(0, text);
+                    ours = ours_pieces.next();
+                }
+                (_, Some(Piece::Insert(text))) => {
+                    builder.keep(text.len());
+                    theirs = theirs_pieces.next();
+                }
+                (Some(a), Some(b)) => {
+                    let len = a.len().min(b.len());
+                    match (a, b) {
+                        (Piece::Keep(_), Piece::Keep(_)) => builder.keep(len),
+                        (Piece::Delete(_), Piece::Keep(_)) => builder.replace(len, ""),
+                        _ => {}
+                    }
+                    ours = a.rest(len).or_else(|| ours_pieces.next());
+                    theirs = b.rest(len).or_else(|| theirs_pieces.next());
+                }
+                _ => return Err(mismatch),
+            }
+        }
+    }
+
+    fn pieces(&self) -> impl Iterator<Item = Piece<'_>> {
+        self.runs
+            .iter()
+            .flat_map(|run| match run {
+                Run::Keep(len) => [Some(Piece::Keep(*len)), None],
+                Run::Replace { delete, insert } => [
+                    (*delete > 0).then_some(Piece::Delete(*delete)),
+                    (!insert.is_empty()).then_some(Piece::Insert(insert)),
+                ],
+            })
+            .flatten()
+    }
+
     #[must_use]
     pub fn map_position(&self, position: Position, assoc: Assoc) -> Position {
         let position = position.offset();
@@ -143,6 +262,30 @@ impl ChangeSet {
             }
         }
         Position::new(new)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Piece<'a> {
+    Keep(usize),
+    Delete(usize),
+    Insert(&'a str),
+}
+
+impl Piece<'_> {
+    fn len(self) -> usize {
+        match self {
+            Self::Keep(len) | Self::Delete(len) => len,
+            Self::Insert(text) => text.len(),
+        }
+    }
+
+    fn rest(self, used: usize) -> Option<Self> {
+        (used < self.len()).then(|| match self {
+            Self::Keep(len) => Self::Keep(len - used),
+            Self::Delete(len) => Self::Delete(len - used),
+            Self::Insert(text) => Self::Insert(&text[used..]),
+        })
     }
 }
 
@@ -202,7 +345,7 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::testing::{changes, cursor_positions};
+    use crate::testing::{changes, cursor_positions, edits_for, raw_edits, text};
 
     fn at(offset: usize) -> Position {
         Position::new(offset)
@@ -210,6 +353,98 @@ mod tests {
 
     fn change_set(len: usize, edits: Vec<Edit>) -> ChangeSet {
         ChangeSet::new(len, edits).unwrap()
+    }
+
+    fn applied(text: &str, changes: &ChangeSet) -> String {
+        let mut buffer = Buffer::from(text);
+        buffer.apply(changes).unwrap();
+        buffer.to_string()
+    }
+
+    #[test]
+    fn invert_gives_the_changes_that_undo_the_changes() {
+        let before = Buffer::from("abcd");
+        let changes = change_set(4, vec![Edit::replace(at(1)..at(3), "XYZ")]);
+
+        let inverse = changes.invert(&before).unwrap();
+
+        assert_eq!(
+            inverse.edits().collect::<Vec<_>>(),
+            [Edit::replace(at(1)..at(4), "bc")]
+        );
+        assert_eq!(applied("aXYZd", &inverse), "abcd");
+    }
+
+    #[test]
+    fn invert_needs_the_text_before_the_changes() {
+        let changes = ChangeSet::empty(4);
+
+        let error = changes.invert(&Buffer::from("abc")).unwrap_err();
+
+        assert_eq!(
+            error,
+            TextError::LengthMismatch {
+                expected: 4,
+                actual: 3
+            }
+        );
+    }
+
+    #[test]
+    fn compose_gives_one_change_set_for_two() {
+        let first = change_set(3, vec![Edit::insert(at(0), "x")]);
+        let second = change_set(4, vec![Edit::delete(at(1)..at(2))]);
+
+        let both = first.compose(&second).unwrap();
+
+        assert_eq!(
+            both.edits().collect::<Vec<_>>(),
+            [Edit::replace(at(0)..at(1), "x")]
+        );
+    }
+
+    #[test]
+    fn compose_needs_changes_in_sequence() {
+        let first = change_set(3, vec![Edit::insert(at(0), "x")]);
+
+        let error = first.compose(&ChangeSet::empty(3)).unwrap_err();
+
+        assert_eq!(
+            error,
+            TextError::LengthMismatch {
+                expected: 4,
+                actual: 3
+            }
+        );
+    }
+
+    #[test]
+    fn map_moves_changes_over_other_changes() {
+        let ours = change_set(3, vec![Edit::insert(at(1), "X")]);
+        let theirs = change_set(3, vec![Edit::insert(at(2), "Y")]);
+
+        let mapped = ours.map(&theirs, false).unwrap();
+
+        assert_eq!(applied("abYc", &mapped), "aXbYc");
+    }
+
+    #[test]
+    fn before_selects_the_order_of_two_insertions_at_one_position() {
+        let ours = change_set(3, vec![Edit::insert(at(1), "X")]);
+        let theirs = change_set(3, vec![Edit::insert(at(1), "Y")]);
+
+        assert_eq!(applied("aYbc", &ours.map(&theirs, false).unwrap()), "aYXbc");
+        assert_eq!(applied("aYbc", &ours.map(&theirs, true).unwrap()), "aXYbc");
+    }
+
+    #[test]
+    fn map_does_not_delete_text_twice() {
+        let ours = change_set(4, vec![Edit::delete(at(1)..at(3))]);
+        let theirs = change_set(4, vec![Edit::delete(at(2)..at(4))]);
+
+        let mapped = ours.map(&theirs, false).unwrap();
+
+        assert_eq!(applied("ab", &mapped), "a");
     }
 
     #[test]
@@ -314,6 +549,44 @@ mod tests {
     }
 
     proptest! {
+        #[test]
+        fn the_inverse_restores_the_text((text, edits) in changes()) {
+            let changes = change_set(text.len(), edits);
+
+            let inverse = changes.invert(&Buffer::from(text.as_str())).unwrap();
+
+            prop_assert_eq!(applied(&applied(&text, &changes), &inverse), text);
+        }
+
+        #[test]
+        fn composed_changes_agree_with_changes_in_sequence(
+            (text, edits) in changes(),
+            raw in raw_edits(),
+        ) {
+            let first = change_set(text.len(), edits);
+            let middle = applied(&text, &first);
+            let second = change_set(middle.len(), edits_for(&middle, raw));
+
+            let both = first.compose(&second).unwrap();
+
+            prop_assert_eq!(applied(&text, &both), applied(&middle, &second));
+        }
+
+        #[test]
+        fn mapped_changes_give_the_same_text_in_each_order(
+            text in text(),
+            ours in raw_edits(),
+            theirs in raw_edits(),
+        ) {
+            let ours = change_set(text.len(), edits_for(&text, ours));
+            let theirs = change_set(text.len(), edits_for(&text, theirs));
+
+            let ours_last = applied(&applied(&text, &theirs), &ours.map(&theirs, false).unwrap());
+            let theirs_last = applied(&applied(&text, &ours), &theirs.map(&ours, true).unwrap());
+
+            prop_assert_eq!(ours_last, theirs_last);
+        }
+
         #[test]
         fn mapped_positions_keep_their_order((text, edits) in changes()) {
             let changes = change_set(text.len(), edits);
