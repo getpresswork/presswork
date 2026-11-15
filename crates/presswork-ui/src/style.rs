@@ -43,6 +43,26 @@ pub fn chrome(theme: &Theme) -> container::Style {
 }
 
 #[must_use]
+pub fn paper(theme: &Theme) -> container::Style {
+    container::Style {
+        border: Border {
+            color: colors(theme).rule,
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        shadow: Shadow {
+            color: Color {
+                a: 0.14,
+                ..Color::BLACK
+            },
+            offset: iced::Vector::new(0.0, 2.0),
+            blur_radius: 12.0,
+        },
+        ..container::Style::default()
+    }
+}
+
+#[must_use]
 pub fn mark(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(colors(theme).accent.into()),
@@ -198,6 +218,16 @@ mod tests {
 
         assert_eq!(style.text_color, Some(DARK.danger));
         assert_ne!(style.background, Some(Background::Color(DARK.chrome)));
+    }
+
+    #[test]
+    fn paper_has_a_rule_and_a_soft_shadow() {
+        let style = paper(&light());
+
+        assert_eq!(style.border.color, LIGHT.rule);
+        assert_eq!(style.border.width, 1.0);
+        assert!(style.shadow.blur_radius > 0.0);
+        assert!(style.shadow.color.a < 0.3);
     }
 
     #[test]
