@@ -6,7 +6,7 @@ use std::time::Instant;
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{button, column, container, row, rule, space, text};
 use iced::{Element, Fill, FillPortion, Subscription, Task, Theme, keyboard, padding, system};
-use presswork_editor::Editor;
+use presswork_editor::{Editor, Mark, MarkKind};
 use presswork_log::{Level, LogStore};
 use presswork_preview::Preview;
 use presswork_project::Project;
@@ -36,6 +36,7 @@ pub(crate) struct App {
     compiler: Compiler,
     preview: Preview,
     compiled: Option<Arc<Output>>,
+    compiled_revision: Option<u64>,
     project: Option<Project>,
     saved: u64,
     notice: Option<String>,
@@ -49,6 +50,7 @@ pub(crate) enum Message {
     Editor(presswork_editor::Action),
     Compiled {
         generation: u64,
+        revision: u64,
         output: Arc<Output>,
     },
     Preview(presswork_preview::Action),
@@ -72,8 +74,62 @@ impl App {
             compiler: Compiler::new(),
             preview: Preview::default(),
             compiled: None,
+            compiled_revision: None,
             project: None,
             notice: None,
+        }
+    }
+
+    pub(crate) fn marks(&self) -> Vec<Mark> {
+        let Some(output) = &self.compiled else {
+            return Vec::new();
+        };
+        if self.compiled_revision != Some(self.editor.revision()) {
+            return Vec::new();
+        }
+        output
+            .diagnostics
+            .iter()
+            .filter_map(|diagnostic| {
+                let range = diagnostic.range.as_ref()?;
+                Some(Mark {
+                    range: Position::new(range.start)..Position::new(range.end),
+                    kind: match diagnostic.severity {
+                        Severity::Error => MarkKind::Error,
+                        Severity::Warning => MarkKind::Warning,
+                    },
+                })
+            })
+            .collect()
+    }
+
+    fn show_problem(&mut self) {
+        let Some(start) = self
+            .compiled
+            .as_ref()
+            .and_then(|output| {
+                output
+                    .diagnostics
+                    .iter()
+                    .find(|diagnostic| diagnostic.severity == Severity::Error)
+            })
+            .and_then(|diagnostic| diagnostic.range.as_ref())
+            .map(|range| range.start)
+        else {
+            return;
+        };
+        let buffer = self.editor.document().buffer();
+        let position = buffer.position(
+            buffer.line_column(Position::new(start), Unit::Byte),
+            Unit::Byte,
+        );
+        let action = presswork_editor::Action::MoveTo {
+            position,
+            extend: false,
+            goal: None,
+        };
+        if let Err(error) = self.editor.perform(action, Instant::now()) {
+            tracing::warn!(%error, "The cursor did not move to the problem");
         }
     }
 
@@ -139,8 +195,10 @@ impl App {
     fn start_compile(&self) -> Task<Message> {
         let text = self.editor.document().buffer().to_string();
         let generation = self.compiler.generation();
+        let revision = self.editor.revision();
         Task::perform(self.compiler.job(text), move |output| Message::Compiled {
             generation,
+            revision,
             output: Arc::new(output),
         })
     }
@@ -151,6 +209,7 @@ impl App {
         let output = self.compiler.run_now(&text);
         let _ = self.update(Message::Compiled {
             generation: self.compiler.generation(),
+            revision: self.editor.revision(),
             output: Arc::new(output),
         });
     }
@@ -202,10 +261,15 @@ impl App {
                     return self.request_compile();
                 }
             }
-            Message::Compiled { generation, output } => {
+            Message::Compiled {
+                generation,
+                revision,
+                output,
+            } => {
                 if generation != self.compiler.generation() {
                     return Task::none();
                 }
+                self.compiled_revision = Some(revision);
                 tracing::debug!(
                     duration_ms = output.duration.as_millis(),
                     diagnostics = output.diagnostics.len(),
@@ -218,6 +282,7 @@ impl App {
                     return self.start_compile();
                 }
             }
+            Message::Preview(presswork_preview::Action::ShowProblem) => self.show_problem(),
             Message::Preview(action) => self.preview.perform(action),
             Message::OpenFolder => return self.open_folder(),
             Message::FolderPicked(Some(root)) => return self.open_project(&root),
@@ -321,8 +386,9 @@ impl App {
         let workspace = self.workspace;
         if workspace == Workspace::Write {
             let colors = ui_theme::colors(&self.theme());
-            let editor =
-                presswork_editor::view(&self.editor, colors, Message::Editor).autofocus(true);
+            let editor = presswork_editor::view(&self.editor, colors, Message::Editor)
+                .autofocus(true)
+                .marks(self.marks());
             let preview = self
                 .preview
                 .view(self.localizer.text("preview-empty"), Message::Preview);
@@ -501,8 +567,58 @@ mod tests {
     fn compiled(output: Output) -> Message {
         Message::Compiled {
             generation: 0,
+            revision: 0,
             output: Arc::new(output),
         }
+    }
+
+    fn error_at(offset: usize) -> Diagnostic {
+        Diagnostic {
+            severity: Severity::Error,
+            range: Some(offset..offset + 1),
+            message: "unknown variable: x".to_owned(),
+            hints: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_click_on_the_problem_moves_the_cursor_to_the_error() {
+        let mut app = app();
+        let line_two = app.editor.document().buffer().line_start(1).offset();
+        send(
+            &mut app,
+            compiled(Output {
+                diagnostics: vec![error_at(line_two)],
+                ..Output::default()
+            }),
+        );
+
+        send(
+            &mut app,
+            Message::Preview(presswork_preview::Action::ShowProblem),
+        );
+
+        assert_eq!(
+            app.editor.document().selection().primary().head,
+            Position::new(line_two)
+        );
+    }
+
+    #[test]
+    fn marks_show_only_while_the_text_agrees_with_the_compilation() {
+        let mut app = app();
+        send(
+            &mut app,
+            compiled(Output {
+                diagnostics: vec![error_at(0)],
+                ..Output::default()
+            }),
+        );
+        assert_eq!(app.marks().len(), 1);
+
+        send(&mut app, insert("x"));
+
+        assert_eq!(app.marks(), []);
     }
 
     fn project_folder(files: &[(&str, &str)]) -> tempfile::TempDir {
