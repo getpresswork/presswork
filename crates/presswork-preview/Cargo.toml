@@ -1,0 +1,21 @@
+[package]
+name = "presswork-preview"
+description = "The page preview of Presswork: pages, zoom, and problems"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+iced = { workspace = true, features = ["image-without-codecs"] }
+presswork-typst.workspace = true
+presswork-ui.workspace = true
+
+[dev-dependencies]
+iced_test.workspace = true

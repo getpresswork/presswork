@@ -15,6 +15,7 @@ publish = false
 presswork-editor = { path = "crates/presswork-editor" }
 presswork-log = { path = "crates/presswork-log" }
 presswork-text = { path = "crates/presswork-text" }
+presswork-typst = { path = "crates/presswork-typst" }
 presswork-ui = { path = "crates/presswork-ui" }
 
 comemo = "0.5.1"
