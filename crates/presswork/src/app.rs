@@ -1,12 +1,18 @@
-use iced::widget::{button, column, row, rule, space, text};
-use iced::{Element, Fill, Subscription, Theme, system};
+use iced::alignment::{Horizontal, Vertical};
+use iced::widget::{button, column, container, row, rule, space, text};
+use iced::{Element, Fill, Subscription, Theme, padding, system};
 use presswork_log::LogStore;
-use presswork_ui::space as gap;
+use presswork_ui::icon::icon;
+use presswork_ui::style;
 use presswork_ui::theme::{self as ui_theme, Mode};
+use presswork_ui::{font, font_size, size, space as gap};
 
 use crate::i18n::Localizer;
 use crate::log_panel::{self, LogPanel};
 use crate::workspace::Workspace;
+
+const MARK_SIZE: f32 = 10.0;
+const DESCRIPTION_WIDTH: f32 = 380.0;
 
 pub(crate) struct App {
     localizer: Localizer,
@@ -62,48 +68,92 @@ impl App {
     }
 
     pub(crate) fn view(&self) -> Element<'_, Message> {
-        let mut content = column![
-            self.workspace_bar(),
-            rule::horizontal(1),
-            space().width(Fill).height(Fill)
-        ];
+        let mut content = column![self.top_bar(), hairline(), self.main_area()];
         if self.logs.is_open() {
             content = content
-                .push(rule::horizontal(1))
+                .push(hairline())
                 .push(self.logs.view(&self.localizer).map(Message::Logs));
         }
-        content
-            .push(rule::horizontal(1))
-            .push(self.status_bar())
-            .into()
+        content.push(hairline()).push(self.status_bar()).into()
     }
 
-    fn status_bar(&self) -> Element<'_, Message> {
-        row![
-            space().width(Fill),
-            self.logs.toggle_button(&self.localizer).map(Message::Logs)
-        ]
-        .padding([gap::XS, gap::S])
+    fn top_bar(&self) -> Element<'_, Message> {
+        let mark = container(space().width(MARK_SIZE).height(MARK_SIZE)).style(style::mark);
+        let title = text(self.title())
+            .font(font::UI_SEMIBOLD)
+            .size(font_size::LARGE);
+        let tabs = row(Workspace::ALL
+            .into_iter()
+            .map(|workspace| self.workspace_tab(workspace)))
+        .spacing(gap::XXS);
+        container(
+            row![mark, title, space().width(gap::XL), tabs]
+                .spacing(gap::S)
+                .align_y(Vertical::Center),
+        )
+        .padding([0.0, gap::L])
+        .width(Fill)
+        .height(size::TOP_BAR)
+        .align_y(Vertical::Center)
+        .style(style::chrome)
         .into()
     }
 
-    fn workspace_bar(&self) -> Element<'_, Message> {
-        let buttons = Workspace::ALL.into_iter().map(|workspace| {
-            let style: fn(&Theme, button::Status) -> button::Style = if workspace == self.workspace
-            {
-                button::primary
-            } else {
-                button::text
-            };
-
-            button(text(self.localizer.text(workspace.text_id())))
-                .style(style)
-                .on_press(Message::SelectWorkspace(workspace))
-                .into()
-        });
-
-        row(buttons).spacing(gap::XS).padding(gap::S).into()
+    fn workspace_tab(&self, workspace: Workspace) -> Element<'_, Message> {
+        let content = row![
+            icon(workspace.icon()),
+            text(self.localizer.text(workspace.text_id())).font(font::UI_MEDIUM)
+        ]
+        .spacing(gap::XS + gap::XXS)
+        .align_y(Vertical::Center);
+        button(content)
+            .padding([gap::XS, gap::S + gap::XXS])
+            .style(style::tab(workspace == self.workspace))
+            .on_press(Message::SelectWorkspace(workspace))
+            .into()
     }
+
+    fn main_area(&self) -> Element<'_, Message> {
+        let workspace = self.workspace;
+        let content = column![
+            icon(workspace.icon())
+                .size(size::ICON_LARGE)
+                .style(style::muted),
+            text(self.localizer.text(workspace.text_id()))
+                .font(font::UI_SEMIBOLD)
+                .size(font_size::TITLE),
+            text(self.localizer.text(workspace.description_id()))
+                .style(style::muted)
+                .width(DESCRIPTION_WIDTH)
+                .align_x(Horizontal::Center),
+        ]
+        .spacing(gap::S)
+        .align_x(Horizontal::Center);
+        container(content).center(Fill).style(style::page).into()
+    }
+
+    fn status_bar(&self) -> Element<'_, Message> {
+        container(
+            row![
+                text(self.localizer.text("status-no-project"))
+                    .size(font_size::SMALL)
+                    .style(style::muted),
+                space().width(Fill),
+                self.logs.toggle_button(&self.localizer).map(Message::Logs),
+            ]
+            .align_y(Vertical::Center),
+        )
+        .padding(padding::left(gap::L).right(gap::S))
+        .width(Fill)
+        .height(size::STATUS_BAR)
+        .align_y(Vertical::Center)
+        .style(style::chrome)
+        .into()
+    }
+}
+
+fn hairline<'a>() -> Element<'a, Message> {
+    rule::horizontal(1).style(style::hairline).into()
 }
 
 #[cfg(test)]
@@ -129,6 +179,15 @@ mod tests {
 
         app.update(Message::SystemTheme(Mode::Light));
         assert!(!app.theme().extended_palette().is_dark);
+    }
+
+    #[test]
+    fn main_area_describes_the_workspace() {
+        let app = app();
+        let mut ui = simulator(app.view());
+
+        let description = app.localizer.text(Workspace::Write.description_id());
+        assert!(ui.find(description).is_ok());
     }
 
     #[test]
