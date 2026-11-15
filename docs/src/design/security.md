@@ -32,6 +32,7 @@ The desktop application keeps tokens in the credential store of the operating sy
 ## Supply chain
 
 - In CI, `cargo deny` examines the licenses, the security advisories, and the sources of all dependencies.
+- A vulnerability in any dependency stops the build. An unmaintained crate stops the build only if a Presswork crate uses it directly. For the other unmaintained crates, the upstream projects must replace them.
 - CI workflows pin each third-party action to a commit hash.
 - Dependabot opens update requests each week.
 
