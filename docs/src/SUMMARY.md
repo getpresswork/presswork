@@ -10,6 +10,7 @@
 - [Typst engine](design/typst-engine.md)
 - [Toolchains](design/toolchains.md)
 - [Editor and preview](design/editor.md)
+- [Typesetting tools](design/typesetting-tools.md)
 - [Collaboration](design/collaboration.md)
 - [Library](design/library.md)
 - [Editorial tools](design/editorial.md)
