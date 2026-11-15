@@ -19,6 +19,8 @@ futures = "0.3.34"
 iced = "0.14.0"
 iced_test = "0.14.0"
 jiff = "0.2.45"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["std", "registry"] }
 unic-langid = "0.9.6"

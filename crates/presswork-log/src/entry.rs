@@ -10,6 +10,19 @@ pub enum Level {
     Error,
 }
 
+impl Level {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Trace => "TRACE",
+            Self::Debug => "DEBUG",
+            Self::Info => "INFO",
+            Self::Warn => "WARN",
+            Self::Error => "ERROR",
+        }
+    }
+}
+
 impl From<tracing::Level> for Level {
     fn from(level: tracing::Level) -> Self {
         match level {
@@ -65,6 +78,12 @@ mod tests {
         ];
 
         assert!(levels.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn level_names_are_the_tracing_names() {
+        assert_eq!(Level::Warn.as_str(), "WARN");
+        assert_eq!(Level::Error.as_str(), "ERROR");
     }
 
     #[test]
