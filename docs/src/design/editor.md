@@ -39,12 +39,52 @@ Remote changes rebase the history. Thus undo changes only your own edits, also a
 
 The `presswork-editor` crate contains the iced widget. The widget does these things:
 
-- It shapes and draws only the visible lines.
-- It draws selections, cursors, remote cursors, and diagnostic underlines.
+- It wraps long lines at the width of the view. Typst source contains much prose, and writers do not add line breaks in paragraphs.
+- It shapes each line with cosmic-text and keeps the result in a cache. Thus an edit shapes only the changed lines. It draws only the visible lines.
+- It shows line numbers, the current line, selections, and a blinking cursor. Later, it will also show remote cursors and diagnostic underlines.
 - It changes keyboard, mouse, and input method events into editor commands.
-- It gets syntax colors from a highlighter. The Typst highlighter uses `typst-syntax`. Other highlighters can come later, for example for TOML or BibTeX.
+- It gets syntax colors from a highlighter. The Typst highlighter uses `typst-syntax`, and it parses again only the changed part of the text. Other highlighters can come later, for example for TOML or BibTeX.
 
 Each editor command is a pure function from the editor state to a transaction. Thus tests can run all commands without a window.
+
+Until the project model is ready, the Write workspace shows a scratch document. Presswork does not save it.
+
+### Keys
+
+| Key | Command |
+| --- | --- |
+| Arrow keys | Move the cursor. With Shift, extend the selection. |
+| Ctrl+Left and Ctrl+Right | Move to the previous or the next word. |
+| Home | Move to the first text of the line. Push Home again to move to the start of the line. |
+| End | Move to the end of the line. |
+| Ctrl+Home and Ctrl+End | Move to the start or the end of the document. |
+| Page Up and Page Down | Move by one page. |
+| Backspace and Delete | Delete one character. With Ctrl, delete one word. |
+| Enter | Start a new line with the same indentation. |
+| Tab | Insert two spaces. |
+| Ctrl+A, Ctrl+C, Ctrl+X, and Ctrl+V | Select all, copy, cut, and paste. |
+| Ctrl+Z, and Ctrl+Y or Ctrl+Shift+Z | Undo and redo. |
+
+On macOS, Cmd replaces Ctrl in shortcuts, and Alt replaces Ctrl for word movement and word deletion. Cmd+Left and Cmd+Right move to the start or the end of the line.
+
+Click to move the cursor. Double-click to select a word, and triple-click to select a line. Drag to select text. Shift+click extends the selection.
+
+### Syntax colors
+
+Each syntax color is a design token. Tests make sure that each color has a contrast ratio of 4.5:1 or more on the page, on the current line, and on the selection.
+
+| Role | Typst syntax |
+| --- | --- |
+| Keyword | Keywords, for example `let`, `set`, and `show`, and list markers |
+| Function | Function names |
+| String | Strings and raw text |
+| Number | Numbers and math delimiters |
+| Operator | Operators and punctuation |
+| Reference | Labels, references, links, escapes, and interpolated values |
+| Comment | Comments, in italic |
+| Error | Syntax errors |
+
+Strong text, headings, and terms are bold. Emphasis is italic.
 
 ## Scripts and input
 

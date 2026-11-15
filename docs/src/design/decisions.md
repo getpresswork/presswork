@@ -594,3 +594,31 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** Undo and redo use one line of groups. An edit joins the last group if it is less than 500 ms after the last edit and touches the text of the last edit. Remote changes rebase the groups. Thus undo changes only your own edits.
 - **Reason:** Collaborative editors such as Google Docs operate in this way. It is easy to understand.
 - **Other options:** An undo tree, as in Vim and Helix.
+
+## D85. An editor that wraps long lines
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** The editor wraps long lines at the width of the view. It shapes each line with cosmic-text through iced, and it keeps the shaped lines in a cache.
+- **Reason:** Typst source contains much prose. Writers do not add line breaks in paragraphs.
+- **Other options:** No wrap, with a horizontal scroll bar. A fixed wrap column.
+
+## D86. Syntax colors from typst-syntax
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** The editor gets its syntax colors from the highlighter of `typst-syntax`, and it parses incrementally. The colors have eight roles, and each role is a design token with a contrast test.
+- **Reason:** The Typst compiler uses the same parser. Thus the colors always agree with the compiler.
+- **Other options:** A TextMate grammar. Tree-sitter.
+
+## D87. Bold and italic faces of JetBrains Mono
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** Presswork includes the bold and the italic faces of JetBrains Mono. The editor shows strong text and headings in bold, and emphasis and comments in italic.
+- **Reason:** Writers see the style of the markup while they write.
+- **Other options:** Synthetic bold and italic. Colors only.
+
+## D88. Editor keys that follow the platform
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** Shortcuts use Ctrl on Windows and Linux, and Cmd on macOS. Word movement uses Ctrl on Windows and Linux, and Alt on macOS. Tab inserts two spaces.
+- **Reason:** Users expect the keys of their platform. Typst code usually has an indentation of two spaces.
+- **Other options:** The same keys on all platforms. Tab characters.
