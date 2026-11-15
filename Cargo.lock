@@ -3759,6 +3759,7 @@ name = "presswork-typst"
 version = "0.1.0"
 dependencies = [
  "comemo",
+ "tempfile",
  "typst",
  "typst-assets",
  "typst-layout",
