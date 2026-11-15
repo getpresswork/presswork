@@ -1,5 +1,9 @@
 pub mod color;
 pub mod font;
 pub mod font_size;
+pub mod icon;
+pub mod radius;
+pub mod size;
 pub mod space;
+pub mod style;
 pub mod theme;

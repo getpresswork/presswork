@@ -2619,6 +2619,7 @@ name = "presswork-ui"
 version = "0.1.0"
 dependencies = [
  "iced",
+ "iced_test",
  "lucide-icons",
  "ttf-parser",
 ]
