@@ -178,8 +178,8 @@ Do not change what an accepted decision says. You can correct its language. To c
 ## D25. Archives first, then installers
 
 - **Status:** Accepted, 2026-11-14. **Origin:** Default.
-- **Decision:** The first release builds make archives. `cargo-packager` makes the installers before release 0.1.0. The first releases are not signed.
-- **Reason:** The pipeline operates from the first commit. Installers must have icons, and signatures must have certificates.
+- **Decision:** The first release builds make archives. `cargo-packager` makes the installers before release 0.1.0. The first releases have no digital signatures.
+- **Reason:** The pipeline operates from the first commit. Installers must have icons, and digital signatures must have certificates.
 - **Other options:** Installers from the first commit.
 
 ## D26. Edition and issue
@@ -266,11 +266,11 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Reason:** Versions change routinely, but not with each commit.
 - **Other options:** Release pull requests with release-plz. A monthly train. Manual releases at milestones.
 
-## D38. A signed updater
+## D38. An updater with digital signatures
 
 - **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
-- **Decision:** The desktop application checks GitHub for releases at start, checks an Ed25519 signature, and installs the update at the next start. Users can turn it off.
-- **Reason:** Users get corrections quickly. The signature protects them from changed packages.
+- **Decision:** The desktop application checks GitHub for releases at start, checks an Ed25519 digital signature, and installs the update at the next start. Users can turn it off.
+- **Reason:** Users get corrections quickly. The digital signature protects them from changed packages.
 - **Other options:** A message only. No update check.
 
 ## D39. Two-factor sign-in and encryption

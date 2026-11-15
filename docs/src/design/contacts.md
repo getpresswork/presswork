@@ -14,7 +14,7 @@ This chapter tells how Presswork keeps the data of persons and organizations out
 
 - A contract records an agreement with a contact: the type, the dates, the publication, the terms, and the fees.
 - A contract has deliverables, for example "Manuscript", "Corrected proofs", or "Index". Each deliverable becomes a task or a milestone with its due date.
-- A contract keeps the signed document as a file.
+- A contract keeps the agreement document as a file.
 - Presswork shows a warning before a deliverable is late and before a contract expires.
 - The fees of a contract become cost items in the budget. Refer to [Tasks and schedules](schedules.md).
 

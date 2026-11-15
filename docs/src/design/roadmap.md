@@ -29,7 +29,7 @@ Milestone 1 makes a small version of each part, from end to end. The goal is to 
 - Suggestion mode.
 - Export profiles and native preflight.
 - The command-line tool.
-- The signed updater.
+- The updater, with digital signatures.
 
 ## Milestone 3: collaboration (0.3)
 

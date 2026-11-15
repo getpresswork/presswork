@@ -54,18 +54,18 @@ Presswork uses Semantic Versioning. All crates have the same version.
 
 ## Updates
 
-The desktop application has a signed updater:
+The desktop application has an updater that checks digital signatures:
 
 1. At start, the updater asks GitHub for the release list. It sends no other data.
 2. If a newer release exists, the application shows the release notes.
-3. The updater downloads the package for the platform. It checks the Ed25519 signature and the SHA-256 checksum.
+3. The updater downloads the package for the platform. It checks the Ed25519 digital signature and the SHA-256 checksum.
 4. The update installs when the application starts the next time.
 
-Users can turn off the update check. Installations from package managers do not use the updater. Refer to [Security](security.md) for the key of the signatures.
+Users can turn off the update check. Installations from package managers do not use the updater. Refer to [Security](security.md) for the key of the digital signatures.
 
-## Signatures
+## Digital signatures of packages
 
-The first releases are not signed. When the project has certificates, the release workflow will sign the Windows installer. It will also sign and notarize the macOS app.
+The first releases have no digital signatures. When the project has certificates, the release workflow will sign the Windows installer. It will also sign and notarize the macOS app.
 
 ## Documentation site
 

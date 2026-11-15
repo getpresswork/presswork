@@ -77,7 +77,7 @@ All crates are in the `crates` folder. Each crate has one purpose. This table sh
 | `presswork-toolchain` | Service | Installs and selects Typst, Pandoc, veraPDF, EPUBCheck, Java, and dictionaries. Controls packages and fonts. |
 | `presswork-sync` | Service | Connects the text model to Loro documents and sends updates. |
 | `presswork-crypto` | Service | The keys and the encryption of encrypted projects. |
-| `presswork-update` | Service | The signed updater of the desktop application. |
+| `presswork-update` | Service | The updater of the desktop application. It checks digital signatures. |
 | `presswork-text` | Domain | Text buffer, positions, edits, selections, marks, and history. |
 | `presswork-project` | Domain | The project manifest and the project file tree. |
 | `presswork-api` | Domain | The request, response, and event types of the server API. |
