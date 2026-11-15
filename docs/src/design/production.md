@@ -33,6 +33,18 @@ The cover tool makes print covers and ebook covers:
 - Presswork exports the metadata as ONIX 3.0 for distributors.
 - For academic publications, Presswork makes Crossref deposit files and records the DOIs.
 
+## JATS and ORCID
+
+- For journals, Presswork exports articles as JATS XML for repositories and indexing services.
+- Contributors can have ORCID identifiers. Presswork adds them to the metadata, to the JATS files, and to the Crossref deposits.
+
+## Print plans
+
+- A print plan divides the page count into signatures, for example of 16 or 32 pages. It shows the blank pages that are necessary at the end of the book.
+- Printer price lists give cost estimates for each format, paper, binding, and quantity.
+- Cost estimates go into the budget as planned costs.
+- The copyfitting assistant helps to reach the target page count. Refer to [Typesetting tools](typesetting-tools.md).
+
 ## Print production
 
 - Typst documents can use CMYK colors. Export profiles can contain ICC profiles and an output intent.
