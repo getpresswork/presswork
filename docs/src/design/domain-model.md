@@ -16,8 +16,12 @@ Organization
 |   +-- Tasks, tickets, milestones, and checklists
 |   +-- Workflow instances
 |   +-- Budget, clearances, and identifiers
+|   +-- Variants and print plans
 +-- Library ................. works, editions, files, standard editions
 +-- Research notes
++-- Content blocks .......... shared pages, biographies, disclaimers
++-- Contacts ................ authors, translators, printers, rights holders
+|   +-- Contracts and deliverables
 +-- Asset library ........... assets and renditions
 +-- Language ................ dictionaries, house style, termbase, translation memory
 +-- Chat .................... channels and direct messages
@@ -35,6 +39,8 @@ This chapter shows the core records. These chapters tell the other areas:
 | Suggestions, spelling, house style, termbase, index, and translation | [Editorial tools](editorial.md) |
 | Assets, clearances, identifiers, and metadata | [Production](production.md) |
 | Chat, inbox, portal, and submissions | [Communication](communication.md) |
+| Content blocks and variants | [Structure and reuse](structure.md) |
+| Contacts, contracts, and deliverables | [Contacts and contracts](contacts.md) |
 
 ## Organizations and people
 
