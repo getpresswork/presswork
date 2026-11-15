@@ -11,9 +11,11 @@ use presswork_ui::{font, font_size};
 use presswork_editor::{Action as EditorAction, Motion};
 use presswork_preview::Action as PreviewAction;
 use presswork_text::Position;
+use presswork_toolchain::{Digest, Platform, Release, ReleaseFile, Version};
 
 use crate::app::{App, Message, send};
 use crate::log_panel;
+use crate::toolchain_panel::Message as ToolchainMessage;
 use crate::workspace::Workspace;
 
 const WIDTH: f32 = 1280.0;
@@ -113,7 +115,11 @@ fn sample_store() -> LogStore {
 #[test]
 #[ignore = "writes screen images for design reviews"]
 fn render_screens() {
-    let mut app = App::new(sample_store());
+    let toolchains = tempfile::tempdir().unwrap();
+    let installed = toolchains.path().join("typst/0.14.2");
+    std::fs::create_dir_all(&installed).unwrap();
+    std::fs::write(installed.join(Platform::current().executable()), "").unwrap();
+    let mut app = App::with_toolchains(sample_store(), Some(toolchains.path().to_path_buf()));
     app.compile_now();
     render(&mut app, "main-window");
 
@@ -173,6 +179,46 @@ fn render_screens() {
     send(&mut app, Message::DismissNotice);
     send(&mut app, Message::SelectWorkspace(Workspace::Plan));
     render(&mut app, "plan-workspace");
+
+    send(&mut app, Message::SelectWorkspace(Workspace::Write));
+    send(
+        &mut app,
+        Message::Toolchains(ToolchainMessage::Use(Version::new(0, 14, 2))),
+    );
+    send(&mut app, Message::Toolchains(ToolchainMessage::Toggle));
+    send(
+        &mut app,
+        Message::Toolchains(ToolchainMessage::Loaded(Ok(sample_releases()))),
+    );
+    send(
+        &mut app,
+        Message::Toolchains(ToolchainMessage::Progress(Version::new(0, 14, 1), 45)),
+    );
+    render(&mut app, "toolchains");
+}
+
+fn sample_releases() -> Vec<Release> {
+    let name = Platform::current().release_file().unwrap();
+    [
+        ("0.15.1", 22_463_684),
+        ("0.15.0", 22_310_112),
+        ("0.14.2", 21_904_208),
+        ("0.14.1", 21_887_540),
+        ("0.14.0", 21_850_016),
+        ("0.13.1", 20_731_392),
+        ("0.12.0", 19_986_844),
+    ]
+    .into_iter()
+    .map(|(version, size)| Release {
+        version: Version::parse(version).unwrap(),
+        files: vec![ReleaseFile {
+            name: name.clone(),
+            url: String::new(),
+            size,
+            digest: Digest::from_hex(&"0".repeat(64)),
+        }],
+    })
+    .collect()
 }
 
 const BOOK: &str = r#"#set page(paper: "a5", margin: (x: 1.8cm, y: 2cm), numbering: "1")
