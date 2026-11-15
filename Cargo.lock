@@ -2621,7 +2621,7 @@ dependencies = [
  "iced",
  "iced_test",
  "lucide-icons",
- "ttf-parser",
+ "skrifa 0.44.0",
 ]
 
 [[package]]

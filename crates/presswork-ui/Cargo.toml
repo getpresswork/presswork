@@ -18,4 +18,4 @@ lucide-icons.workspace = true
 
 [dev-dependencies]
 iced_test.workspace = true
-ttf-parser.workspace = true
+skrifa.workspace = true

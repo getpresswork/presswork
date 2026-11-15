@@ -51,35 +51,32 @@ pub fn all() -> Vec<Cow<'static, [u8]>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ttf_parser::{Face, name_id};
+    use skrifa::attribute::Weight as FontWeight;
+    use skrifa::string::StringId;
+    use skrifa::{FontRef, MetadataProvider};
 
-    fn face(bytes: &[u8]) -> Face<'_> {
-        Face::parse(bytes, 0).unwrap()
+    fn font(bytes: &[u8]) -> FontRef<'_> {
+        FontRef::new(bytes).unwrap()
     }
 
     fn family(bytes: &[u8]) -> String {
-        let face = face(bytes);
-        let names: Vec<_> = face.names().into_iter().collect();
-        [name_id::TYPOGRAPHIC_FAMILY, name_id::FAMILY]
+        let font = font(bytes);
+        [StringId::TYPOGRAPHIC_FAMILY_NAME, StringId::FAMILY_NAME]
             .into_iter()
-            .find_map(|id| {
-                names
-                    .iter()
-                    .filter(|name| name.name_id == id)
-                    .find_map(ttf_parser::name::Name::to_string)
-            })
+            .find_map(|id| font.localized_strings(id).english_or_first())
             .unwrap()
+            .to_string()
     }
 
     #[test]
     fn the_interface_fonts_are_inter_in_three_weights() {
         for (bytes, weight) in [
-            (INTER_REGULAR, 400),
-            (INTER_MEDIUM, 500),
-            (INTER_SEMIBOLD, 600),
+            (INTER_REGULAR, FontWeight::NORMAL),
+            (INTER_MEDIUM, FontWeight::MEDIUM),
+            (INTER_SEMIBOLD, FontWeight::SEMI_BOLD),
         ] {
             assert_eq!(family(bytes), UI_FAMILY);
-            assert_eq!(face(bytes).weight().to_number(), weight);
+            assert_eq!(font(bytes).attributes().weight, weight);
         }
     }
 
