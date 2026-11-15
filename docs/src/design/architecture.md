@@ -21,7 +21,11 @@ External services:
   veraPDF releases ...... PDF validation
   Eclipse Temurin ....... Java runtime for veraPDF and EPUBCheck
   Open Library, Crossref  Lookups by ISBN and DOI, after approval
-  AI providers .......... Only if an administrator turns them on
+  Anthropic API ......... AI functions, only if an administrator turns them on
+  Local model servers ... AI functions inside the organization
+  Email servers ......... Summary emails and the email bridge
+  Calendar services ..... Two-way calendar sync
+  OpenTelemetry ......... The monitoring system of the operator
 ```
 
 The desktop application, the command-line tool, and the server are three programs. They use the same crates for the Typst engine, the domain model, the sync protocol, the search, and the API types.
@@ -47,11 +51,12 @@ The domain has one crate for each area. An area does not use the types of a diff
 | --- | --- | --- |
 | Kernel | `presswork-kernel` | Identifiers, links to objects, times, amounts of money, languages |
 | Organizations | `presswork-org` | Users, organizations, teams, roles, permissions, devices |
-| Content | `presswork-content` | Collections, publications, components, revisions, suggestions |
+| Content | `presswork-content` | Collections, publications, components, revisions, suggestions, content blocks, variants |
+| Contacts | `presswork-contacts` | Contacts, contracts, deliverables |
 | Tasks | `presswork-tasks` | Tasks, tickets, milestones, dependencies, checklists, workflows, routines, time entries |
 | Library | `presswork-library` | Works, editions, files, page maps, standard editions, annotations, research notes, concordances |
 | Language | `presswork-language` | Dictionaries, house style rules, the termbase, translation memory |
-| Production | `presswork-production` | Export profiles, covers, identifiers, metadata, assets, clearances |
+| Production | `presswork-production` | Export profiles, covers, identifiers, metadata, assets, clearances, print plans |
 | Finance | `presswork-finance` | Budgets, cost items, rates |
 | Chat | `presswork-chat` | Channels, direct messages, replies, comments, inbox, notifications |
 | Intake | `presswork-intake` | Calls for papers, submissions, reviews |
@@ -73,7 +78,9 @@ All crates are in the `crates` folder. Each crate has one purpose. This table sh
 | `presswork-ocr` | Adapter | The `OcrEngine` trait with the ocrs and Tesseract engines. |
 | `presswork-search` | Adapter | Full-text search with Tantivy. |
 | `presswork-plugin` | Adapter | The WebAssembly plugin host, with wasmtime. |
-| `presswork-ai` | Adapter | The adapters for AI providers. |
+| `presswork-ai` | Adapter | The AI gateway and the adapters for the Anthropic API and for local model servers. |
+| `presswork-mcp` | Adapter | The desktop MCP server and the team MCP endpoint. |
+| `presswork-lift` | Adapter | The lift from PDF: charts, tables, and equations. |
 | `presswork-toolchain` | Service | Installs and selects Typst, Pandoc, veraPDF, EPUBCheck, Java, and dictionaries. Controls packages and fonts. |
 | `presswork-sync` | Service | Connects the text model to Loro documents and sends updates. |
 | `presswork-crypto` | Service | The keys and the encryption of encrypted projects. |
