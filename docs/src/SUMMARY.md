@@ -8,6 +8,7 @@
 - [Architecture](design/architecture.md)
 - [Typst engine](design/typst-engine.md)
 - [Toolchains](design/toolchains.md)
+- [Editor and preview](design/editor.md)
 
 # Contributing
 
