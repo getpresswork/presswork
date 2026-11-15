@@ -26,6 +26,7 @@ pub enum Action {
     ZoomIn,
     ZoomOut,
     FitWidth,
+    ShowProblem,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +91,7 @@ impl Preview {
                     .find(|&step| step < current)
                     .unwrap_or(STEPS[0]),
             ),
+            Action::ShowProblem => return,
         };
     }
 
@@ -100,7 +102,7 @@ impl Preview {
     ) -> Element<'a, Message> {
         let mut content = column![];
         if let Some(problem) = &self.problem {
-            content = content.push(problem_banner(problem));
+            content = content.push(problem_banner(problem, on_action(Action::ShowProblem)));
         }
         let body: Element<'a, Message> = if self.pages.is_empty() {
             container(
@@ -205,8 +207,11 @@ fn tool<'a, Message: Clone + 'a>(
         .into()
 }
 
-fn problem_banner<'a, Message: 'a>(problem: &'a str) -> Element<'a, Message> {
-    container(
+fn problem_banner<'a, Message: Clone + 'a>(
+    problem: &'a str,
+    on_press: Message,
+) -> Element<'a, Message> {
+    button(
         row![
             icon(Icon::CircleAlert)
                 .size(size::ICON_SMALL)
@@ -220,7 +225,8 @@ fn problem_banner<'a, Message: 'a>(problem: &'a str) -> Element<'a, Message> {
     )
     .padding([gap::XS, gap::M])
     .width(Fill)
-    .style(style::badge(Tone::Danger))
+    .style(style::notice(Tone::Danger))
+    .on_press(on_press)
     .into()
 }
 
@@ -304,6 +310,20 @@ mod tests {
         let mut ui = simulator(preview.view(EMPTY.to_owned(), |action| action));
 
         assert!(ui.find(EMPTY).is_ok());
+    }
+
+    #[test]
+    fn a_click_on_the_problem_asks_to_show_it() {
+        let mut preview = Preview::default();
+        preview.set_problem(Some("Line 2: unknown variable".to_owned()));
+        let mut ui = simulator(preview.view(EMPTY.to_owned(), |action| action));
+
+        ui.click("Line 2: unknown variable").unwrap();
+
+        assert_eq!(
+            ui.into_messages().collect::<Vec<_>>(),
+            [Action::ShowProblem]
+        );
     }
 
     #[test]
