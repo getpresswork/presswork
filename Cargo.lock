@@ -2611,6 +2611,9 @@ dependencies = [
 [[package]]
 name = "presswork-ui"
 version = "0.1.0"
+dependencies = [
+ "iced",
+]
 
 [[package]]
 name = "proc-macro-crate"
