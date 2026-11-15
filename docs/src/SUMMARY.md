@@ -14,6 +14,7 @@
 - [Domain model](design/domain-model.md)
 - [Interface](design/interface.md)
 - [Security](design/security.md)
+- [Quality](design/quality.md)
 
 # Contributing
 
