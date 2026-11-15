@@ -3781,6 +3781,8 @@ name = "presswork-toolchain"
 version = "0.1.0"
 dependencies = [
  "semver",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
