@@ -2,6 +2,10 @@
 
 [Introduction](introduction.md)
 
+# Design
+
+- [Overview](design/overview.md)
+
 # Contributing
 
 - [Workflow](contributing/workflow.md)
