@@ -14,6 +14,7 @@
 - [Collaboration](design/collaboration.md)
 - [Library](design/library.md)
 - [Editorial tools](design/editorial.md)
+- [Structure and reuse](design/structure.md)
 - [Production](design/production.md)
 - [Communication](design/communication.md)
 - [Platform](design/platform.md)
