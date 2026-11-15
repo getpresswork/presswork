@@ -18,7 +18,7 @@ A change in behavior must come with tests for that behavior.
 | --- | --- | --- |
 | Unit tests | Next to the code, in `#[cfg(test)]` modules | Rust test harness |
 | Integration tests | The `tests` folder of each crate | Rust test harness |
-| Property tests | Text model, position mapping, CRDT merges | `proptest` |
+| Property tests | Text model, position maps, CRDT merges | `proptest` |
 | Snapshot tests | Diagnostics, API data, rendered widgets | `insta` |
 | Interface tests | Application flows without a window | `iced_test` |
 | Database tests | Server repositories and API handlers | PostgreSQL, with one database for each test |

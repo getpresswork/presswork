@@ -16,6 +16,6 @@ The desktop application operates without a server. When you connect it to a serv
 This book has two parts:
 
 - **Design** tells how Presswork operates and why.
-- **Contributing** tells how to work on Presswork.
+- **For contributors** tells how to work on Presswork.
 
 All text in this book follows ASD-STE100 Simplified Technical English. Refer to the [style guide](contributing/style-guide.md).

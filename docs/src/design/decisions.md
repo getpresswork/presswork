@@ -5,7 +5,7 @@ This chapter records the main design decisions. Each decision has a number, a st
 - The origin "project owner" means that the project owner made the decision.
 - The origin "default" means that the design team selected the option. The project owner can review it.
 
-Do not change the text of an accepted decision. To change a decision, add a new decision that replaces it. Then set the status of the old decision to "replaced by D*n*".
+Do not change what an accepted decision says. You can correct its language. To change a decision, add a new decision that replaces it. Then set the status of the old decision to "replaced by D*n*".
 
 ## D1. Embedded Typst engine and managed toolchains
 
@@ -21,10 +21,10 @@ Do not change the text of an accepted decision. To change a decision, add a new 
 - **Reason:** Persons who work alone can use Presswork without a server. Teams can work during network problems.
 - **Other options:** A server for all projects. Separate local and server modes without offline sync.
 
-## D3. Live editing with Loro and revisions on the server
+## D3. Live edits with Loro and revisions on the server
 
 - **Status:** Accepted, 2026-11-14. **Origin:** Project owner.
-- **Decision:** Use the Loro CRDT for live editing, with remote cursors and presence. The server records named revisions for review and approval. A bridge exports revisions to Git.
+- **Decision:** Use the Loro CRDT for live edits, with remote cursors and presence. The server records named revisions for review and approval. A bridge exports revisions to Git.
 - **Reason:** Publishing teams frequently edit together at the same time. Formal review and approval must use fixed revisions.
 - **Other options:** Asynchronous work with Git only. A lock on each file, as in classic publishing systems.
 
@@ -94,7 +94,7 @@ Do not change the text of an accepted decision. To change a decision, add a new 
 ## D13. A custom editor on a pure text model
 
 - **Status:** Accepted, 2026-11-14. **Origin:** Default.
-- **Decision:** Write an editor widget on a pure text model with change sets and position mapping.
+- **Decision:** Write an editor widget on a pure text model with change sets that map positions.
 - **Reason:** The iced `text_editor` widget cannot show remote cursors or diagnostics, and it cannot map positions through remote edits.
 - **Other options:** Extend the iced `text_editor` widget.
 

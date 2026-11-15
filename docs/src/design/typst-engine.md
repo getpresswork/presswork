@@ -31,7 +31,7 @@ The Typst compiler reads all files, packages, and fonts through a `World`. The P
 
 1. **Overlays.** The open documents from the editor and from Loro.
 2. **Project files.** The files in the project folder.
-3. **Packages.** The packages in the package cache. The toolchain manager downloads missing packages.
+3. **Packages.** The packages in the package cache. The toolchain manager downloads the packages that are not in the cache.
 
 The world gives fonts from these sources: project fonts, team fonts, system fonts, and the fonts that Typst supplies.
 
@@ -58,9 +58,9 @@ The engine changes each Typst diagnostic into a Presswork diagnostic with these 
 
 The editor underlines the range. The diagnostics panel shows a list of all diagnostics. A click on a diagnostic moves the cursor to its range.
 
-## Page rendering
+## Page images
 
-- The engine renders pages to images with `typst-render`. The scale is the zoom level multiplied by the scale factor of the display.
+- The engine renders pages to images with `typst-render`. The scale is the zoom level multiplied by the scale factor of the screen.
 - Each page frame has a hash. The engine renders a page again only if its hash changes.
 - The preview asks for the visible pages first.
 - At high zoom levels, the engine renders tiles of a page, not the full page.

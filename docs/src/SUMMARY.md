@@ -19,7 +19,7 @@
 - [Roadmap](design/roadmap.md)
 - [Decisions](design/decisions.md)
 
-# Contributing
+# For contributors
 
 - [Workflow](contributing/workflow.md)
 - [Style guide](contributing/style-guide.md)

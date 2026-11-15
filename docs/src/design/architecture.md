@@ -48,7 +48,7 @@ All crates are in the `crates` folder. Each crate has one purpose. This table sh
 | `presswork-ui` | Adapter | The design system: theme, design tokens, and shared widgets. |
 | `presswork-editor` | Adapter | The text editor widget. |
 | `presswork-preview` | Adapter | The page preview widget. |
-| `presswork-typst` | Adapter | The embedded Typst engine: compilation, rendering, export, and IDE functions. |
+| `presswork-typst` | Adapter | The embedded Typst engine: compilation, page images, export, and IDE functions. |
 | `presswork-client` | Adapter | The HTTP and WebSocket client for the server API. |
 | `presswork-toolchain` | Service | Installs and selects Typst, Pandoc, veraPDF, and Java versions. Controls packages and fonts. |
 | `presswork-sync` | Service | Connects the text model to Loro documents and sends updates. |
@@ -82,7 +82,7 @@ If you make more edits during a compilation, the engine does one more compilatio
 - The iced runtime runs the `update` and `view` functions on the main thread. These functions must return quickly.
 - Long work runs in iced tasks on the Tokio runtime.
 - The Typst engine compiles on one dedicated thread, because the Typst compiler is synchronous.
-- Page rendering runs on a thread pool.
+- The engine renders pages on a thread pool.
 - The server runs Typst compilations in separate worker processes. Thus a slow document cannot stop the server.
 
 ## Errors

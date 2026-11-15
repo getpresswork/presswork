@@ -38,7 +38,7 @@ A maintainer can also start the release workflow by hand. Then it builds all pac
 
 Presswork uses Semantic Versioning. All crates have the same version. Before version 1.0, a minor version can contain changes that are not compatible.
 
-## Code signing
+## Signatures
 
 The first releases are not signed. When the project has certificates, the release workflow will sign the Windows installer. It will also sign and notarize the macOS app.
 

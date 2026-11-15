@@ -123,7 +123,7 @@ STE lets each project add technical names and technical verbs. These are the Pre
 | pin | A Typst version requirement in a project manifest. |
 | preflight | The checks before an export. |
 | publication | One work that you can publish, for example a book or an edition. |
-| publishing | The work of making publications and making them available. |
+| publishing | The work that makes publications and makes them available. |
 | query | An issue type: a question to the author. |
 | revision | A named point in the history of a project. |
 | role | A named set of permissions. |
@@ -131,6 +131,6 @@ STE lets each project add technical names and technical verbs. These are the Pre
 | stage | A state in a workflow, for example Copyedit. |
 | task | Planned work for a person. |
 | toolchain | One installed version of an external tool, for example Typst 0.14.2. |
-| typesetting | The work of putting text and images on pages. |
+| typesetting | The work that puts text and images on pages. |
 | workflow | A set of stages and transitions for a publication or a component. |
 | workspace | A saved pane layout for one activity, for example Write. |

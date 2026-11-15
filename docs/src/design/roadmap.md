@@ -10,12 +10,12 @@ Milestone 1 makes a small version of each part, from end to end. The goal is to 
 2. Desktop application: a main window with the workspace bar.
 3. Text model: buffer, positions, edits, selections, and history.
 4. Editor widget: one cursor, text input, deletion, cursor movement, selection, scroll, and Typst syntax colors.
-5. Typst engine: a world with overlays, compilation, diagnostics, and page rendering.
+5. Typst engine: a world with overlays, compilation, diagnostics, and page images.
 6. Preview widget: a vertical list of pages, with zoom.
 7. Project model: open a local folder with a `presswork.toml` manifest.
 8. Toolchain manager: list, install, and select Typst versions.
 9. Server: accounts, sign-in, organizations, projects, and tasks.
-10. Sync: live editing of one text file by two persons, through Loro.
+10. Sync: live edits of one text file by two persons, through Loro.
 11. Desktop application: sign in, open a server project, edit with another person, and see and complete tasks.
 12. Release 0.1.0 with installers for all platforms.
 

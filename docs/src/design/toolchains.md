@@ -26,8 +26,8 @@ The toolchain manager installs a tool version in these steps:
 
 1. Download the release file to a temporary folder.
 2. Calculate the SHA-256 digest of the file. Compare it with the published digest. If the digests are different, stop and delete the file.
-3. Unpack the file into a staging folder. Do not unpack an entry that has an absolute path or `..` in its path.
-4. Move the staging folder to its final location in one operation.
+3. Unpack the file into a new temporary folder. Do not unpack an entry that has an absolute path or `..` in its path.
+4. Move this folder to its final location in one operation.
 
 A lock file prevents two installations of the same version at the same time.
 
