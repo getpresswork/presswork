@@ -85,6 +85,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Cargo.toml Cargo.lock CHANGELOG.md
           git commit -m "chore(release): ${VERSION}"
-          git tag -a "v${VERSION}" -m "Presswork ${VERSION}"
-          git push origin HEAD:main "v${VERSION}"
+          git push origin HEAD:main
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/v${VERSION}" -f sha="$(git rev-parse HEAD)" > /dev/null
           gh workflow run release.yml --ref "v${VERSION}"
