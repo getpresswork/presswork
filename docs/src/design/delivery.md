@@ -32,7 +32,7 @@ The release train makes a release every two weeks. A commit does not bump the ve
 2. It looks for `feat`, `fix`, and `perf` commits since the last release. If there are none, it stops.
 3. git-cliff calculates the next version from the commit types.
 4. The workflow sets the version in the root `Cargo.toml`, updates `Cargo.lock`, and writes `CHANGELOG.md`.
-5. It commits these files to `main` with the message `chore(release): <version>`, and pushes a tag, for example `v0.2.0`.
+5. It commits these files to `main` with the message `chore(release): <version>`. Then it makes a tag through the GitHub API, for example `v0.2.0`.
 6. It starts the release workflow for the tag.
 7. The release workflow builds the packages for all platforms. It makes a GitHub release with the packages, a SHA-256 checksum file, and the release notes.
 
