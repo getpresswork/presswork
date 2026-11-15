@@ -210,6 +210,30 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "downloads a real Typst release from GitHub"]
+    fn a_real_release_installs_and_runs() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = std::env::var_os("PRESSWORK_TOOLCHAINS")
+            .map_or_else(|| temporary.path().to_path_buf(), PathBuf::from);
+        let toolchains = Toolchains::new(root);
+        let client = Client::new("Presswork tests").unwrap();
+        let wanted = version("0.14.2");
+        let releases = run(client.releases()).unwrap();
+        let release = releases
+            .iter()
+            .find(|release| release.version == wanted)
+            .unwrap();
+
+        run(toolchains.install(&client, release, |_| {})).unwrap();
+
+        let output = std::process::Command::new(toolchains.executable(&wanted))
+            .arg("--version")
+            .output()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&output.stdout).contains("0.14.2"));
+    }
+
+    #[test]
     fn install_downloads_checks_and_installs_a_release() {
         let served = served(Some);
         let root = tempfile::tempdir().unwrap();
