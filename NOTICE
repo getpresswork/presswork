@@ -14,3 +14,9 @@ Refer to crates/presswork-ui/fonts/JetBrainsMono-LICENSE.txt.
 This product includes Lucide icons (https://lucide.dev).
 Copyright (c) Lucide Contributors and Cole Bemis (Feather).
 Licensed under the ISC License, with portions under the MIT License.
+
+This product includes the fonts of typst-assets (https://github.com/typst/typst-assets):
+- Libertinus Serif, licensed under the SIL Open Font License, Version 1.1.
+- New Computer Modern, licensed under the GUST Font License, Version 1.0.
+- DejaVu Sans Mono, under the Bitstream Vera Fonts license. The DejaVu changes are in the public domain.
+Refer to crates/presswork-typst/licenses/typst-assets-NOTICE.txt for the full license texts.

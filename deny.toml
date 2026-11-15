@@ -4,6 +4,10 @@ all-features = true
 [advisories]
 unmaintained = "workspace"
 yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.38 comes from typst 0.15.1 through hayagriva and citationberg, which have no fixed release. Remove when typst updates." },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.38 comes from typst 0.15.1 through hayagriva and citationberg, which have no fixed release. Remove when typst updates." },
+]
 
 [licenses]
 allow = [
