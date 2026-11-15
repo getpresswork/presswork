@@ -30,13 +30,13 @@ The release train makes a release every two weeks. A commit does not bump the ve
 
 1. On the Monday of each even week, the release train workflow starts.
 2. It looks for `feat`, `fix`, and `perf` commits since the last release. If there are none, it stops.
-3. git-cliff calculates the next version from the commit types.
+3. The workflow calculates the next version. Refer to [Versions](#versions).
 4. The workflow sets the version in the root `Cargo.toml`, updates `Cargo.lock`, and writes `CHANGELOG.md`.
 5. It commits these files to `main` with the message `chore(release): <version>`. Then it makes a tag through the GitHub API, for example `v0.2.0`.
 6. It starts the release workflow for the tag.
 7. The release workflow builds the packages for all platforms. It makes a GitHub release with the packages, a SHA-256 checksum file, and the release notes.
 
-A maintainer can start the release train by hand, for example for an urgent correction. A dry run calculates the next version but changes nothing.
+A maintainer can start the release train by hand, for example for an urgent correction. A dry run calculates the next version but changes nothing. When a milestone is complete, a maintainer starts the release train by hand with the next minor version, for example 0.2.0 after milestone 1.
 
 ## Nightly builds
 
@@ -46,11 +46,20 @@ Each night, the nightly workflow looks for new commits on `main`. If there are n
 
 Presswork uses Semantic Versioning. All crates have the same version.
 
-| Commits since the last release | Version change before 1.0 | Version change after 1.0 |
-| --- | --- | --- |
-| A change that is not compatible | Minor | Major |
-| `feat` | Minor | Minor |
-| `fix` or `perf` | Patch | Patch |
+Before 1.0, the minor version shows the milestone that is in progress. Refer to the [Roadmap](roadmap.md).
+
+- Each release of the release train bumps only the patch version, for example from 0.1.3 to 0.1.4.
+- When a milestone is complete, a maintainer releases the next minor version by hand.
+
+After 1.0, git-cliff calculates the version from the commit types:
+
+| Commits since the last release | Version change |
+| --- | --- |
+| A change that is not compatible | Major |
+| `feat` | Minor |
+| `fix` or `perf` | Patch |
+
+The `.github/scripts/next-version.sh` script applies these rules. CI runs its tests.
 
 ## Updates
 

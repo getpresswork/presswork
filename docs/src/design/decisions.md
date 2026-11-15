@@ -261,7 +261,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D37. A release train every two weeks, and nightly builds
 
-- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Status:** Accepted, 2026-11-15. Partially replaced by D81. **Origin:** Project owner.
 - **Decision:** Every second Monday, CI bumps the version from the commit types and makes a release, if there are `feat`, `fix`, or `perf` commits. A nightly prerelease contains the newest packages.
 - **Reason:** Versions change routinely, but not with each commit.
 - **Other options:** Release pull requests with release-plz. A monthly train. Manual releases at milestones.
@@ -566,3 +566,10 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** Presswork uses the Lucide icons as an icon font.
 - **Reason:** Lucide has approximately 1,500 icons with one line style. It has the ISC license.
 - **Other options:** Phosphor, with six weights. Tabler, with more than 5,000 icons.
+
+## D81. Milestones set the minor version before 1.0
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Before 1.0, each release of the release train bumps only the patch version. When a milestone is complete, a maintainer starts the release train with the next minor version. After 1.0, the commit types set the version change. This decision replaces the version rule of D37 before 1.0.
+- **Reason:** The version tells which milestone a release belongs to, as the roadmap shows. The release train continues every two weeks.
+- **Other options:** A minor version for each release with a `feat` commit, and no version numbers in the roadmap.

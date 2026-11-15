@@ -1,6 +1,6 @@
 # Roadmap
 
-This chapter gives the milestones. The release train makes a release every two weeks. Thus each milestone has many releases. Refer to [Delivery](delivery.md).
+This chapter gives the milestones. The release train makes a release every two weeks. Thus each milestone has many releases. The releases of milestone *n* have the versions 0.*n*.x. Refer to [Delivery](delivery.md).
 
 ## Milestone 1: thin slice (0.1)
 
