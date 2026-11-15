@@ -22,6 +22,8 @@ A person can save a view with its filters. A team can share saved views.
 
 The calendar has an ICS feed. Thus other calendar applications can show the Presswork dates. The feed address contains a secret token.
 
+The calendar can also sync in two directions with CalDAV servers, Google Calendar, and Microsoft 365. A change of a due date in one calendar changes the date of the task in Presswork. Presswork records the change and its source.
+
 ## Schedules
 
 - A task can have dependencies on other tasks. A dependency has a type: finish to start, start to start, or finish to finish.
