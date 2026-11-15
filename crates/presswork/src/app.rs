@@ -11,6 +11,7 @@ use presswork_log::{Level, LogStore};
 use presswork_preview::Preview;
 use presswork_project::Project;
 use presswork_text::{Position, Unit};
+use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{Output, Severity};
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
@@ -21,6 +22,7 @@ use crate::compiler::{self, Compiler};
 use crate::files;
 use crate::i18n::{FluentArgs, Localizer};
 use crate::log_panel::{self, LogPanel};
+use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
 use crate::workspace::Workspace;
 
 const MARK_SIZE: f32 = 10.0;
@@ -31,6 +33,7 @@ pub(crate) struct App {
     localizer: Localizer,
     workspace: Workspace,
     logs: LogPanel,
+    toolchains: ToolchainPanel,
     mode: Mode,
     editor: Editor,
     compiler: Compiler,
@@ -46,6 +49,7 @@ pub(crate) struct App {
 pub(crate) enum Message {
     SelectWorkspace(Workspace),
     Logs(log_panel::Message),
+    Toolchains(toolchain_panel::Message),
     SystemTheme(Mode),
     Editor(presswork_editor::Action),
     Compiled {
@@ -63,11 +67,18 @@ pub(crate) enum Message {
 
 impl App {
     pub(crate) fn new(store: LogStore) -> Self {
+        Self::with_toolchains(store, toolchain_directory())
+    }
+
+    pub(crate) fn with_toolchains(store: LogStore, toolchains: Option<PathBuf>) -> Self {
         let editor = Editor::new(SCRATCH);
+        let embedded =
+            Version::parse(presswork_typst::version()).unwrap_or_else(|_| Version::new(0, 0, 0));
         Self {
             localizer: Localizer::english(),
             workspace: Workspace::default(),
             logs: LogPanel::new(store),
+            toolchains: ToolchainPanel::new(toolchains, embedded),
             mode: Mode::None,
             saved: editor.revision(),
             editor,
@@ -184,6 +195,36 @@ impl App {
         self.project.is_none() || self.editor.revision() == self.saved
     }
 
+    fn choice(&self) -> Option<Choice> {
+        let project = self.project.as_ref()?;
+        let Some(pin) = project.manifest().typst.as_deref() else {
+            return Some(Choice::Engine(Engine::Embedded));
+        };
+        Some(match parse_pin(pin) {
+            Ok(pin) => Choice::Engine(choose(
+                Some(&pin),
+                self.toolchains.embedded(),
+                self.toolchains.installed(),
+            )),
+            Err(_) => Choice::InvalidPin(pin.to_owned()),
+        })
+    }
+
+    fn use_typst(&mut self, version: &Version) {
+        let Some(project) = &mut self.project else {
+            return;
+        };
+        match project.set_pin(&format!("={version}")) {
+            Ok(()) => tracing::info!(%version, "Typst pin written"),
+            Err(error) => {
+                tracing::warn!(%error, %version, "Typst pin not written");
+                let mut args = FluentArgs::new();
+                args.set("error", sentence(&error.to_string()));
+                self.notice = Some(self.localizer.format("toolchains-pin-error", &args));
+            }
+        }
+    }
+
     pub(crate) fn request_compile(&mut self) -> Task<Message> {
         if self.compiler.request() {
             self.start_compile()
@@ -247,7 +288,21 @@ impl App {
                 tracing::debug!(?workspace, "Workspace selected");
                 self.workspace = workspace;
             }
-            Message::Logs(message) => self.logs.update(message),
+            Message::Logs(message) => {
+                self.logs.update(message);
+                if self.logs.is_open() {
+                    self.toolchains.close();
+                }
+            }
+            Message::Toolchains(toolchain_panel::Message::Use(version)) => self.use_typst(&version),
+            Message::Toolchains(message) => {
+                let toggled = matches!(message, toolchain_panel::Message::Toggle);
+                let task = self.toolchains.update(message);
+                if toggled && self.toolchains.is_open() {
+                    self.logs.update(log_panel::Message::Close);
+                }
+                return task.map(Message::Toolchains);
+            }
             Message::SystemTheme(mode) => {
                 tracing::debug!(?mode, "System theme changed");
                 self.mode = mode;
@@ -317,6 +372,14 @@ impl App {
             content = content
                 .push(hairline())
                 .push(self.logs.view(&self.localizer).map(Message::Logs));
+        }
+        if self.toolchains.is_open() {
+            let choice = self.choice();
+            content = content.push(hairline()).push(
+                self.toolchains
+                    .view(&self.localizer, choice.as_ref())
+                    .map(Message::Toolchains),
+            );
         }
         content.push(hairline()).push(self.status_bar()).into()
     }
@@ -436,6 +499,38 @@ impl App {
         self.localizer.format("status-position", &args)
     }
 
+    fn typst_button(&self) -> Element<'_, Message> {
+        let mut args = FluentArgs::new();
+        let (id, tone) = match self.choice() {
+            None | Some(Choice::Engine(Engine::Embedded)) => {
+                args.set("version", self.toolchains.embedded().to_string());
+                ("status-typst", None)
+            }
+            Some(Choice::Engine(Engine::Managed(version))) => {
+                args.set("version", version.to_string());
+                ("status-typst", None)
+            }
+            Some(Choice::Engine(Engine::Missing(pin))) => {
+                args.set("pin", pin.to_string());
+                ("status-typst-missing", Some(Tone::Warning))
+            }
+            Some(Choice::InvalidPin(_)) => ("status-typst-invalid", Some(Tone::Danger)),
+        };
+        let mut label = text(self.localizer.format(id, &args)).size(font_size::SMALL);
+        if let Some(tone) = tone {
+            label = label.style(style::tone(tone));
+        }
+        button(
+            row![icon(Icon::Package).size(size::ICON_SMALL), label]
+                .spacing(gap::XS)
+                .align_y(Vertical::Center),
+        )
+        .padding([gap::XXS, gap::S])
+        .style(style::tab(self.toolchains.is_open()))
+        .on_press(Message::Toolchains(toolchain_panel::Message::Toggle))
+        .into()
+    }
+
     fn status_bar(&self) -> Element<'_, Message> {
         let (errors, warnings) = self.logs.counts();
         let mut indicators = row![].spacing(gap::XS).align_y(Vertical::Center);
@@ -451,6 +546,7 @@ impl App {
             }
             indicators = indicators.push(status_text(self.cursor_position()));
         }
+        indicators = indicators.push(self.typst_button());
         if errors > 0 {
             indicators = indicators.push(count_button(
                 Icon::CircleX,
@@ -829,7 +925,102 @@ mod tests {
     }
 
     fn app() -> App {
-        App::new(LogStore::with_capacity(10))
+        App::with_toolchains(LogStore::with_capacity(10), None)
+    }
+
+    fn pinned_book(pin: &str) -> tempfile::TempDir {
+        project_folder(&[
+            (
+                "presswork.toml",
+                &format!("[project]\nname = \"The Book\"\ntypst = \"{pin}\"\n"),
+            ),
+            ("main.typ", "= Book"),
+        ])
+    }
+
+    #[test]
+    fn the_status_bar_shows_the_built_in_typst_version() {
+        let app = app();
+        let mut ui = simulator(app.view());
+
+        assert!(
+            ui.find(format!("Typst {}", presswork_typst::version()))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_pin_without_an_installed_version_shows_a_warning() {
+        let folder = pinned_book("=0.13.1");
+        let mut app = app();
+        open(&mut app, &folder);
+
+        let mut ui = simulator(app.view());
+
+        assert!(ui.find("Typst =0.13.1 is not installed").is_ok());
+    }
+
+    #[test]
+    fn a_pin_that_is_not_valid_shows_a_problem() {
+        let folder = pinned_book("latest");
+        let mut app = app();
+        open(&mut app, &folder);
+
+        let mut ui = simulator(app.view());
+
+        assert!(ui.find("The Typst pin is not valid").is_ok());
+    }
+
+    #[test]
+    fn a_click_on_the_typst_version_opens_the_toolchain_panel() {
+        let mut app = app();
+        let mut ui = simulator(app.view());
+
+        ui.click(format!("Typst {}", presswork_typst::version()))
+            .unwrap();
+        for message in ui.into_messages() {
+            send(&mut app, message);
+        }
+
+        assert!(app.toolchains.is_open());
+    }
+
+    #[test]
+    fn use_for_this_project_writes_an_exact_pin() {
+        let folder = pinned_book("=0.13.1");
+        let mut app = app();
+        open(&mut app, &folder);
+        let embedded = app.toolchains.embedded().clone();
+
+        send(
+            &mut app,
+            Message::Toolchains(toolchain_panel::Message::Use(embedded.clone())),
+        );
+
+        let manifest = fs::read_to_string(folder.path().join("presswork.toml")).unwrap();
+        assert!(manifest.contains(&format!("typst = \"={embedded}\"")));
+        assert!(
+            simulator(app.view())
+                .find(format!("Typst {embedded}"))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn the_toolchain_panel_and_the_log_panel_do_not_open_together() {
+        let mut app = app();
+        send(&mut app, Message::Logs(log_panel::Message::Toggle));
+
+        send(
+            &mut app,
+            Message::Toolchains(toolchain_panel::Message::Toggle),
+        );
+        assert!(app.toolchains.is_open());
+        assert!(!app.logs.is_open());
+
+        send(&mut app, Message::Logs(log_panel::Message::Toggle));
+        assert!(app.logs.is_open());
+        assert!(!app.toolchains.is_open());
     }
 
     #[test]

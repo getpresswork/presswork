@@ -2217,6 +2217,7 @@ dependencies = [
  "iced_core",
  "log",
  "rustc-hash 2.1.3",
+ "tokio",
  "wasm-bindgen-futures",
  "wasmtimer",
 ]
@@ -4030,6 +4031,7 @@ dependencies = [
  "presswork-preview",
  "presswork-project",
  "presswork-text",
+ "presswork-toolchain",
  "presswork-typst",
  "presswork-ui",
  "rfd",

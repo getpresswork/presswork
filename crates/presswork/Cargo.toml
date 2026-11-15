@@ -18,13 +18,14 @@ presswork-log.workspace = true
 presswork-preview.workspace = true
 presswork-project.workspace = true
 presswork-text.workspace = true
+presswork-toolchain.workspace = true
 presswork-typst.workspace = true
 presswork-ui.workspace = true
 
 directories.workspace = true
 fluent-bundle.workspace = true
 futures.workspace = true
-iced.workspace = true
+iced = { workspace = true, features = ["tokio"] }
 jiff.workspace = true
 rfd.workspace = true
 tracing.workspace = true

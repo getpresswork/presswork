@@ -6,6 +6,7 @@ mod log_panel;
 mod logging;
 #[cfg(test)]
 mod screens;
+mod toolchain_panel;
 mod workspace;
 
 use app::App;

@@ -17,6 +17,7 @@ presswork-log = { path = "crates/presswork-log" }
 presswork-preview = { path = "crates/presswork-preview" }
 presswork-project = { path = "crates/presswork-project" }
 presswork-text = { path = "crates/presswork-text" }
+presswork-toolchain = { path = "crates/presswork-toolchain" }
 presswork-typst = { path = "crates/presswork-typst" }
 presswork-ui = { path = "crates/presswork-ui" }
 
