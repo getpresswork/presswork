@@ -15,6 +15,7 @@
 - [Interface](design/interface.md)
 - [Security](design/security.md)
 - [Quality](design/quality.md)
+- [Delivery](design/delivery.md)
 
 # Contributing
 
