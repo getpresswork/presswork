@@ -1,0 +1,13 @@
+[book]
+title = "Presswork"
+description = "A typesetting and publication workbench for Typst"
+authors = ["The Presswork Authors"]
+language = "en"
+src = "src"
+
+[output.html]
+site-url = "/presswork/"
+git-repository-url = "https://github.com/getpresswork/presswork"
+edit-url-template = "https://github.com/getpresswork/presswork/edit/main/docs/{path}"
+default-theme = "light"
+preferred-dark-theme = "navy"
