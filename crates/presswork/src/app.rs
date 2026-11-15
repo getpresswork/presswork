@@ -33,7 +33,10 @@ impl App {
     )]
     pub(crate) fn update(&mut self, message: Message) {
         match message {
-            Message::SelectWorkspace(workspace) => self.workspace = workspace,
+            Message::SelectWorkspace(workspace) => {
+                tracing::debug!(?workspace, "Workspace selected");
+                self.workspace = workspace;
+            }
         }
     }
 
