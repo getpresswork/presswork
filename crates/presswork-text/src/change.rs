@@ -181,15 +181,15 @@ impl ChangeSet {
                 }
                 (Some(a), Some(b)) => {
                     let len = a.len().min(b.len());
+                    if let Piece::Insert(text) = a
+                        && !text.is_char_boundary(len)
+                    {
+                        return Err(TextError::NotCharBoundary(offset + len));
+                    }
                     match (a, b) {
                         (Piece::Keep(_), Piece::Keep(_)) => builder.keep(len),
                         (Piece::Keep(_), Piece::Delete(_)) => builder.replace(len, ""),
-                        (Piece::Insert(text), Piece::Keep(_)) => {
-                            let kept = text
-                                .get(..len)
-                                .ok_or(TextError::NotCharBoundary(offset + len))?;
-                            builder.replace(0, kept);
-                        }
+                        (Piece::Insert(text), Piece::Keep(_)) => builder.replace(0, &text[..len]),
                         _ => {}
                     }
                     offset += len;
@@ -418,6 +418,16 @@ mod tests {
             both.edits().collect::<Vec<_>>(),
             [Edit::replace(at(0)..at(1), "x")]
         );
+    }
+
+    #[test]
+    fn compose_rejects_changes_that_split_a_character() {
+        let first = change_set(0, vec![Edit::insert(at(0), "é")]);
+        let second = change_set(2, vec![Edit::delete(at(0)..at(1))]);
+
+        let error = first.compose(&second).unwrap_err();
+
+        assert_eq!(error, TextError::NotCharBoundary(1));
     }
 
     #[test]
