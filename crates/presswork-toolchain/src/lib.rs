@@ -1,4 +1,5 @@
 mod choice;
+mod client;
 mod digest;
 mod error;
 mod install;
@@ -9,6 +10,7 @@ mod testing;
 mod unpack;
 
 pub use choice::{Engine, choose, parse_pin};
+pub use client::{Client, Progress};
 pub use digest::Digest;
 pub use error::ToolchainError;
 pub use install::Toolchains;

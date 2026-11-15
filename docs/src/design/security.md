@@ -77,7 +77,7 @@ The desktop application keeps tokens in the credential store of the operating sy
 
 ## Supply chain
 
-- In CI, `cargo deny` examines the licenses, the security advisories, and the sources of all dependencies.
+- In CI, `cargo deny` examines the licenses, the security advisories, and the sources of all dependencies. It examines the dependency graph of the six release targets, because only these dependencies go into a release.
 - A vulnerability in any dependency stops the build. An unmaintained crate stops the build only if a Presswork crate uses it directly. For the other unmaintained crates, the upstream projects must replace them.
 - An exception for a vulnerability is permitted only if no fixed release exists. Each exception in `deny.toml` tells the cause and the condition that removes it.
 - CI workflows pin each third-party action to a commit hash.

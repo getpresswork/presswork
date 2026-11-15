@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 lzma-rust2.workspace = true
+reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -21,6 +22,7 @@ sha2.workspace = true
 tar.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 zip.workspace = true
 
 [dev-dependencies]

@@ -22,6 +22,16 @@ pub enum ToolchainError {
     NoProgram(semver::Version),
     #[error("another installation of Typst {0} is in progress")]
     Busy(semver::Version),
+    #[error("Typst {0} has no release file for this platform")]
+    NoFile(semver::Version),
+    #[error("Typst {0} has no published digest, so it cannot be checked")]
+    NoDigest(semver::Version),
+    #[error("the installation stopped before it was complete: {0}")]
+    Interrupted(String),
+    #[error("the network request failed: {0}")]
+    Network(String),
+    #[error("the server answered with the HTTP status {status}")]
+    Http { status: u16 },
     #[error("cannot use {path}: {source}")]
     Io {
         path: std::path::PathBuf,

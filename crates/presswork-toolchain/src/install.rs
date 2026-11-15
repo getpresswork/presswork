@@ -4,9 +4,11 @@ use std::path::{Path, PathBuf};
 
 use semver::Version;
 
+use crate::client::{Client, Progress};
 use crate::digest::Digest;
 use crate::error::ToolchainError;
 use crate::platform::Platform;
+use crate::release::Release;
 use crate::unpack::unpack;
 
 #[derive(Debug, Clone)]
@@ -50,6 +52,38 @@ impl Toolchains {
         fs::remove_dir_all(&folder).map_err(|source| io_error(&folder, source))
     }
 
+    pub async fn install(
+        &self,
+        client: &Client,
+        release: &Release,
+        progress: impl FnMut(Progress),
+    ) -> Result<(), ToolchainError> {
+        let version = release.version.clone();
+        let (Some(name), Some(file)) = (self.platform.release_file(), release.file(&self.platform))
+        else {
+            return Err(ToolchainError::NoFile(version));
+        };
+        let published = file
+            .digest
+            .ok_or_else(|| ToolchainError::NoDigest(version.clone()))?;
+        let lock = self.lock(&version)?;
+        let typst = self.typst();
+        let work = tempfile::Builder::new()
+            .prefix(".download-")
+            .tempdir_in(&typst)
+            .map_err(|source| io_error(&typst, source))?;
+        let archive = work.path().join(name);
+        client.download(&file.url, &archive, progress).await?;
+        let toolchains = self.clone();
+        let installed = tokio::task::spawn_blocking(move || {
+            toolchains.install_unlocked(&version, &archive, &published)
+        })
+        .await
+        .map_err(|error| ToolchainError::Interrupted(error.to_string()));
+        drop(lock);
+        installed?
+    }
+
     pub fn install_archive(
         &self,
         version: &Version,
@@ -57,6 +91,15 @@ impl Toolchains {
         published: &Digest,
     ) -> Result<(), ToolchainError> {
         let _lock = self.lock(version)?;
+        self.install_unlocked(version, archive, published)
+    }
+
+    fn install_unlocked(
+        &self,
+        version: &Version,
+        archive: &Path,
+        published: &Digest,
+    ) -> Result<(), ToolchainError> {
         let actual = Digest::of_file(archive).map_err(|source| io_error(archive, source))?;
         if actual != *published {
             return Err(ToolchainError::DigestMismatch {
@@ -130,7 +173,100 @@ fn io_error(path: &Path, source: io::Error) -> ToolchainError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::zip_file;
+    use crate::release::ReleaseFile;
+    use crate::testing::{Route, platform_archive, run, serve, zip_file};
+
+    struct Served {
+        release: Release,
+        base: String,
+        size: u64,
+    }
+
+    fn served(digest: impl FnOnce(Digest) -> Option<Digest>) -> Served {
+        let downloads = tempfile::tempdir().unwrap();
+        let archive = platform_archive(downloads.path());
+        let body = std::fs::read(&archive).unwrap();
+        let size = body.len() as u64;
+        let digest = digest(Digest::of_file(&archive).unwrap());
+        let base = serve(move |_| vec![Route::new("/typst", body)]);
+        let release = Release {
+            version: version("0.14.2"),
+            files: vec![ReleaseFile {
+                name: Platform::current().release_file().unwrap(),
+                url: format!("{base}/typst"),
+                size,
+                digest,
+            }],
+        };
+        Served {
+            release,
+            base,
+            size,
+        }
+    }
+
+    fn client(base: &str) -> Client {
+        Client::with_releases("Presswork tests", &format!("{base}/releases")).unwrap()
+    }
+
+    #[test]
+    fn install_downloads_checks_and_installs_a_release() {
+        let served = served(Some);
+        let root = tempfile::tempdir().unwrap();
+        let toolchains = Toolchains::new(root.path());
+        let mut received = 0;
+
+        run(
+            toolchains.install(&client(&served.base), &served.release, |progress| {
+                received = progress.received;
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(toolchains.installed().unwrap(), [version("0.14.2")]);
+        assert_eq!(received, served.size);
+        assert_eq!(leftovers(root.path()), ["0.14.2"]);
+    }
+
+    #[test]
+    fn a_download_with_another_digest_installs_nothing() {
+        let served = served(|_| Digest::from_hex(&"0".repeat(64)));
+        let root = tempfile::tempdir().unwrap();
+        let toolchains = Toolchains::new(root.path());
+
+        let result = run(toolchains.install(&client(&served.base), &served.release, |_| {}));
+
+        assert!(matches!(result, Err(ToolchainError::DigestMismatch { .. })));
+        assert_eq!(leftovers(root.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_release_without_a_digest_installs_nothing() {
+        let served = served(|_| None);
+        let root = tempfile::tempdir().unwrap();
+        let toolchains = Toolchains::new(root.path());
+
+        let result = run(toolchains.install(&client(&served.base), &served.release, |_| {}));
+
+        assert!(
+            matches!(result, Err(ToolchainError::NoDigest(missing)) if missing == version("0.14.2"))
+        );
+        assert_eq!(toolchains.installed().unwrap(), []);
+    }
+
+    #[test]
+    fn a_release_without_a_file_for_the_platform_installs_nothing() {
+        let mut served = served(Some);
+        served.release.files.clear();
+        let root = tempfile::tempdir().unwrap();
+        let toolchains = Toolchains::new(root.path());
+
+        let result = run(toolchains.install(&client(&served.base), &served.release, |_| {}));
+
+        assert!(
+            matches!(result, Err(ToolchainError::NoFile(missing)) if missing == version("0.14.2"))
+        );
+    }
 
     fn version(text: &str) -> Version {
         Version::parse(text).unwrap()
