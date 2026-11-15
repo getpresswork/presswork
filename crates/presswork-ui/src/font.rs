@@ -1,12 +1,14 @@
 use std::borrow::Cow;
 
 pub use iced::Font;
-use iced::font::{Family, Weight};
+use iced::font::{Family, Style, Weight};
 
 pub const INTER_REGULAR: &[u8] = include_bytes!("../fonts/Inter-Regular.ttf");
 pub const INTER_MEDIUM: &[u8] = include_bytes!("../fonts/Inter-Medium.ttf");
 pub const INTER_SEMIBOLD: &[u8] = include_bytes!("../fonts/Inter-SemiBold.ttf");
 pub const JETBRAINS_MONO: &[u8] = include_bytes!("../fonts/JetBrainsMono-Regular.ttf");
+pub const JETBRAINS_MONO_BOLD: &[u8] = include_bytes!("../fonts/JetBrainsMono-Bold.ttf");
+pub const JETBRAINS_MONO_ITALIC: &[u8] = include_bytes!("../fonts/JetBrainsMono-Italic.ttf");
 pub const LUCIDE: &[u8] = lucide_icons::LUCIDE_FONT_BYTES;
 
 pub const UI_FAMILY: &str = "Inter";
@@ -29,6 +31,14 @@ pub const MONO: Font = Font {
     family: Family::Name(MONO_FAMILY),
     ..Font::DEFAULT
 };
+pub const MONO_BOLD: Font = Font {
+    weight: Weight::Bold,
+    ..MONO
+};
+pub const MONO_ITALIC: Font = Font {
+    style: Style::Italic,
+    ..MONO
+};
 pub const ICONS: Font = Font {
     family: Family::Name(ICON_FAMILY),
     ..Font::DEFAULT
@@ -41,6 +51,8 @@ pub fn all() -> Vec<Cow<'static, [u8]>> {
         INTER_MEDIUM,
         INTER_SEMIBOLD,
         JETBRAINS_MONO,
+        JETBRAINS_MONO_BOLD,
+        JETBRAINS_MONO_ITALIC,
         LUCIDE,
     ]
     .into_iter()
@@ -86,12 +98,26 @@ mod tests {
     }
 
     #[test]
+    fn the_monospace_font_has_bold_and_italic_faces() {
+        assert_eq!(family(JETBRAINS_MONO_BOLD), MONO_FAMILY);
+        assert_eq!(
+            font(JETBRAINS_MONO_BOLD).attributes().weight,
+            FontWeight::BOLD
+        );
+        assert_eq!(family(JETBRAINS_MONO_ITALIC), MONO_FAMILY);
+        assert_eq!(
+            font(JETBRAINS_MONO_ITALIC).attributes().style,
+            skrifa::attribute::Style::Italic
+        );
+    }
+
+    #[test]
     fn the_icon_font_is_lucide() {
         assert_eq!(family(LUCIDE), ICON_FAMILY);
     }
 
     #[test]
     fn all_gives_each_font_one_time() {
-        assert_eq!(all().len(), 5);
+        assert_eq!(all().len(), 7);
     }
 }
