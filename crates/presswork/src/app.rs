@@ -94,7 +94,15 @@ mod tests {
         let app = App::new();
         let mut ui = simulator(app.view());
 
-        for label in ["Write", "Typeset", "Review", "Plan", "Publish"] {
+        for label in [
+            "Plan",
+            "Research",
+            "Write",
+            "Translate",
+            "Review",
+            "Typeset",
+            "Publish",
+        ] {
             assert!(ui.find(label).is_ok(), "{label} is not in the view");
         }
     }
