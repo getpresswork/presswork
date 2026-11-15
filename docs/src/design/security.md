@@ -21,6 +21,13 @@ This chapter tells how Presswork protects documents, accounts, and computers.
 - The user gets recovery codes when they add the second factor.
 - An administrator can make a second factor necessary for all members of an organization.
 
+## Sessions and devices
+
+- Each user sees their sessions and their devices, with the time and the place of the last use.
+- A user can sign out any session or device.
+- When a user removes a device, Presswork also removes the device key from all encrypted projects. Refer to the encrypted projects below.
+- An organization can limit sign-in to given IP address ranges. Refer to [Operations](operations.md).
+
 ## Encryption at rest
 
 - The server encrypts the blobs, the document updates, and the chat messages before it stores them.
@@ -57,7 +64,7 @@ Before release 1.0, an external security audit examines the encryption design an
 ## Updates
 
 - The release workflow signs the checksum file of each release with an Ed25519 key. The private key is a secret of the CI system.
-- The updater of the desktop application contains the public key. It checks the signature and the checksum before it installs an update.
+- The updater of the desktop application contains the public key. It checks the digital signature and the checksum before it installs an update.
 - The update check sends no data except the request for the release list.
 
 ## Credentials on the desktop
