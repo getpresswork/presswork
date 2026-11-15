@@ -1,0 +1,23 @@
+name: Function request
+description: Ask for a new function or for a change to a function.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Tell the problem. Tell who has the problem, and when.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Tell how the function must operate.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Tell other ways to correct the problem that you examined.

@@ -1,0 +1,46 @@
+name: Problem report
+description: Report a problem in Presswork.
+labels: [bug]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Tell what occurred.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: Write the steps that cause the problem.
+      placeholder: |
+        1. Open a project.
+        2. Select the Review workspace.
+        3. Click a page in the preview.
+    validations:
+      required: true
+  - type: textarea
+    id: correct
+    attributes:
+      label: Correct result
+      description: Tell what must occur.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Presswork version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - Linux
+        - macOS
+    validations:
+      required: true
