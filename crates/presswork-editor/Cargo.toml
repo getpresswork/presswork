@@ -13,6 +13,11 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+iced = { workspace = true, features = ["advanced"] }
 presswork-text.workspace = true
+presswork-ui.workspace = true
 typst-syntax.workspace = true
 unicode-segmentation.workspace = true
+
+[dev-dependencies]
+iced_test.workspace = true

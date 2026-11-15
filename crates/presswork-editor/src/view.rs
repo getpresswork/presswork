@@ -1,0 +1,739 @@
+use std::time::{Duration, Instant};
+
+use iced::advanced::graphics::text::Paragraph;
+use iced::advanced::input_method::{self, InputMethod};
+use iced::advanced::layout;
+use iced::advanced::renderer::{self, Quad, Renderer as _};
+use iced::advanced::text::{self, Paragraph as _, Renderer as _, Text};
+use iced::advanced::widget::{self, Tree, Widget, operation};
+use iced::advanced::{Clipboard, Shell, clipboard, mouse};
+use iced::alignment::Vertical;
+use iced::keyboard::{self, Key, key::Named, key::Physical};
+use iced::{
+    Border, Element, Event, Length, Pixels, Point, Rectangle, Renderer, Size, Theme, Vector, window,
+};
+use presswork_text::{Position, Unit};
+use presswork_ui::color::Colors;
+use presswork_ui::font;
+
+use crate::action::{Action, Deletion, Motion};
+use crate::editor::Editor;
+use crate::highlight::Highlighter;
+use crate::layout::{LINE_HEIGHT, Layout, TEXT_SIZE, row_height};
+
+const PADDING_TOP: f32 = 16.0;
+const PADDING_BOTTOM: f32 = 120.0;
+const PADDING_RIGHT: f32 = 24.0;
+const GUTTER_LEFT: f32 = 16.0;
+const GUTTER_GAP: f32 = 16.0;
+const MIN_DIGITS: usize = 3;
+const MIN_TEXT_WIDTH: f32 = 80.0;
+const CARET_WIDTH: f32 = 2.0;
+const BLINK: Duration = Duration::from_millis(500);
+const WHEEL_LINES: f32 = 3.0;
+const TAB: &str = "  ";
+
+pub struct EditorView<'a, Message> {
+    editor: &'a Editor,
+    colors: &'a Colors,
+    on_action: Box<dyn Fn(Action) -> Message + 'a>,
+    autofocus: bool,
+}
+
+pub fn view<'a, Message>(
+    editor: &'a Editor,
+    colors: &'a Colors,
+    on_action: impl Fn(Action) -> Message + 'a,
+) -> EditorView<'a, Message> {
+    EditorView {
+        editor,
+        colors,
+        on_action: Box::new(on_action),
+        autofocus: false,
+    }
+}
+
+impl<Message> EditorView<'_, Message> {
+    #[must_use]
+    pub fn autofocus(mut self, autofocus: bool) -> Self {
+        self.autofocus = autofocus;
+        self
+    }
+
+    fn snap(&self, position: Position) -> Position {
+        let buffer = self.editor.document().buffer();
+        buffer.position(buffer.line_column(position, Unit::Byte), Unit::Byte)
+    }
+
+    fn input_method(&self, state: &State, bounds: Rectangle) -> InputMethod<&'static str> {
+        let caret = state
+            .layout
+            .caret(self.editor.document().selection().primary().head);
+        let origin = state.origin(bounds);
+        InputMethod::Enabled {
+            cursor: Rectangle::new(
+                Point::new(origin.x + caret.x, origin.y + caret.y),
+                Size::new(1.0, caret.height),
+            ),
+            purpose: input_method::Purpose::Normal,
+            preedit: None,
+        }
+    }
+
+    fn run(
+        &self,
+        command: Command,
+        state: &mut State,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let head = self.editor.document().selection().primary().head;
+        let action = match command {
+            Command::Act(action) => action,
+            Command::Vertical { rows, extend } => {
+                let delta = rows * row_height();
+                let (position, goal) = state.layout.vertical(head, self.editor.goal(), delta);
+                Action::MoveTo {
+                    position: self.snap(position),
+                    extend,
+                    goal: Some(goal),
+                }
+            }
+            Command::Page { down, extend } => {
+                let page = (state.viewport.height - row_height()).max(row_height());
+                let delta = if down { page } else { -page };
+                let (position, goal) = state.layout.vertical(head, self.editor.goal(), delta);
+                state.scroll_by(delta);
+                Action::MoveTo {
+                    position: self.snap(position),
+                    extend,
+                    goal: Some(goal),
+                }
+            }
+            Command::Copy | Command::Cut => {
+                let text = self.editor.selected_text();
+                if text.is_empty() {
+                    return;
+                }
+                clipboard.write(clipboard::Kind::Standard, text);
+                if command == Command::Copy {
+                    return;
+                }
+                Action::Delete(Deletion::Backward)
+            }
+            Command::Paste => match clipboard.read(clipboard::Kind::Standard) {
+                Some(text) => Action::Insert(text),
+                None => return,
+            },
+        };
+        shell.publish((self.on_action)(action));
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Command {
+    Act(Action),
+    Vertical { rows: f32, extend: bool },
+    Page { down: bool, extend: bool },
+    Copy,
+    Cut,
+    Paste,
+}
+
+fn command(
+    key: &Key,
+    physical_key: Physical,
+    modifiers: keyboard::Modifiers,
+    text: Option<&str>,
+) -> Option<Command> {
+    let extend = modifiers.shift();
+    if modifiers.command() {
+        let shortcut = match key.to_latin(physical_key) {
+            Some('a') => Some(Command::Act(Action::SelectAll)),
+            Some('c') => Some(Command::Copy),
+            Some('x') => Some(Command::Cut),
+            Some('v') if !modifiers.alt() => Some(Command::Paste),
+            Some('z') if extend => Some(Command::Act(Action::Redo)),
+            Some('z') => Some(Command::Act(Action::Undo)),
+            Some('y') => Some(Command::Act(Action::Redo)),
+            _ => None,
+        };
+        if shortcut.is_some() {
+            return shortcut;
+        }
+    }
+    let jump = modifiers.jump();
+    let line = modifiers.macos_command();
+    let step = |motion| Some(Command::Act(Action::Move { motion, extend }));
+    let deletion = |word, single| {
+        Some(Command::Act(Action::Delete(if jump {
+            word
+        } else {
+            single
+        })))
+    };
+    match key {
+        Key::Named(Named::Enter) => Some(Command::Act(Action::Newline)),
+        Key::Named(Named::Tab) => Some(Command::Act(Action::Insert(TAB.to_owned()))),
+        Key::Named(Named::Backspace) => deletion(Deletion::WordBackward, Deletion::Backward),
+        Key::Named(Named::Delete) => deletion(Deletion::WordForward, Deletion::Forward),
+        Key::Named(Named::ArrowLeft) if line => step(Motion::LineStart),
+        Key::Named(Named::ArrowRight) if line => step(Motion::LineEnd),
+        Key::Named(Named::ArrowLeft) => step(if jump { Motion::WordLeft } else { Motion::Left }),
+        Key::Named(Named::ArrowRight) => step(if jump {
+            Motion::WordRight
+        } else {
+            Motion::Right
+        }),
+        Key::Named(Named::ArrowUp) if line => step(Motion::DocumentStart),
+        Key::Named(Named::ArrowDown) if line => step(Motion::DocumentEnd),
+        Key::Named(Named::ArrowUp) => Some(Command::Vertical { rows: -1.0, extend }),
+        Key::Named(Named::ArrowDown) => Some(Command::Vertical { rows: 1.0, extend }),
+        Key::Named(Named::Home) if modifiers.command() => step(Motion::DocumentStart),
+        Key::Named(Named::End) if modifiers.command() => step(Motion::DocumentEnd),
+        Key::Named(Named::Home) => step(Motion::LineStart),
+        Key::Named(Named::End) => step(Motion::LineEnd),
+        Key::Named(Named::PageUp) => Some(Command::Page {
+            down: false,
+            extend,
+        }),
+        Key::Named(Named::PageDown) => Some(Command::Page { down: true, extend }),
+        _ => {
+            let text = text?;
+            let shortcut_only = modifiers.command() && !modifiers.alt();
+            if shortcut_only || text.is_empty() || text.chars().any(char::is_control) {
+                return None;
+            }
+            Some(Command::Act(Action::Insert(text.to_owned())))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Focus {
+    since: Instant,
+    now: Instant,
+    window_focused: bool,
+}
+
+impl Focus {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            since: now,
+            now,
+            window_focused: true,
+        }
+    }
+
+    fn caret_visible(&self) -> bool {
+        let elapsed = self.now.saturating_duration_since(self.since).as_millis();
+        self.window_focused && (elapsed / BLINK.as_millis()).is_multiple_of(2)
+    }
+}
+
+#[derive(Debug, Default)]
+struct State {
+    layout: Layout,
+    highlighter: Highlighter,
+    scroll: f32,
+    gutter: f32,
+    gutter_digits: usize,
+    viewport: Size,
+    focus: Option<Focus>,
+    last_click: Option<mouse::Click>,
+    dragging: bool,
+    modifiers: keyboard::Modifiers,
+    revealed: Option<(u64, u64, Position)>,
+}
+
+impl State {
+    fn origin(&self, bounds: Rectangle) -> Point {
+        Point::new(bounds.x + self.gutter, bounds.y + PADDING_TOP - self.scroll)
+    }
+
+    fn to_content(&self, bounds: Rectangle, point: Point) -> Point {
+        let origin = self.origin(bounds);
+        Point::new(point.x - origin.x, point.y - origin.y)
+    }
+
+    fn max_scroll(&self) -> f32 {
+        (self.layout.height() + PADDING_TOP + PADDING_BOTTOM - self.viewport.height).max(0.0)
+    }
+
+    fn scroll_by(&mut self, delta: f32) {
+        self.scroll = (self.scroll + delta).clamp(0.0, self.max_scroll());
+    }
+
+    fn update_gutter(&mut self, line_count: usize) {
+        let digits = line_count.to_string().len().max(MIN_DIGITS);
+        if digits != self.gutter_digits {
+            let numbers = Paragraph::with_text(number_text("0".repeat(digits).as_str(), 0.0));
+            self.gutter = GUTTER_LEFT + numbers.min_width() + GUTTER_GAP;
+            self.gutter_digits = digits;
+        }
+    }
+
+    fn reveal(&mut self, editor: &Editor) {
+        let head = editor.document().selection().primary().head;
+        let key = (editor.id(), editor.revision(), head);
+        if self.revealed != Some(key) {
+            self.revealed = Some(key);
+            let caret = self.layout.caret(head);
+            let top = caret.y + PADDING_TOP - row_height();
+            let bottom = caret.y + caret.height + PADDING_TOP + row_height();
+            if top < self.scroll {
+                self.scroll = top;
+            } else if bottom > self.scroll + self.viewport.height {
+                self.scroll = bottom - self.viewport.height;
+            }
+        }
+        self.scroll = self.scroll.clamp(0.0, self.max_scroll());
+    }
+}
+
+impl operation::Focusable for State {
+    fn is_focused(&self) -> bool {
+        self.focus.is_some()
+    }
+
+    fn focus(&mut self) {
+        self.focus = Some(Focus::new());
+    }
+
+    fn unfocus(&mut self) {
+        self.focus = None;
+    }
+}
+
+fn number_text<Content>(content: Content, width: f32) -> Text<Content> {
+    Text {
+        content,
+        bounds: Size::new(width, row_height()),
+        size: Pixels(TEXT_SIZE),
+        line_height: text::LineHeight::Relative(LINE_HEIGHT),
+        font: font::MONO,
+        align_x: text::Alignment::Right,
+        align_y: Vertical::Top,
+        shaping: text::Shaping::Basic,
+        wrapping: text::Wrapping::None,
+    }
+}
+
+impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
+    fn tag(&self) -> widget::tree::Tag {
+        widget::tree::Tag::of::<State>()
+    }
+
+    fn state(&self) -> widget::tree::State {
+        widget::tree::State::new(State {
+            focus: self.autofocus.then(Focus::new),
+            ..State::default()
+        })
+    }
+
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Fill)
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        _renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let state = tree.state.downcast_mut::<State>();
+        let size = limits.width(Length::Fill).height(Length::Fill).max();
+        state.viewport = size;
+        state.update_gutter(self.editor.document().buffer().line_count());
+        let width = (size.width - state.gutter - PADDING_RIGHT).max(MIN_TEXT_WIDTH);
+        state
+            .layout
+            .update(self.editor, &mut state.highlighter, self.colors, width);
+        state.reveal(self.editor);
+        layout::Node::new(size)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        _theme: &Theme,
+        _style: &renderer::Style,
+        layout: layout::Layout<'_>,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_ref::<State>();
+        let bounds = layout.bounds();
+        let colors = self.colors;
+        renderer.fill_quad(
+            Quad {
+                bounds,
+                ..Quad::default()
+            },
+            colors.page,
+        );
+        renderer.with_layer(bounds, |renderer| {
+            let origin = state.origin(bounds);
+            let offset = Vector::new(origin.x, origin.y);
+            let visible =
+                (state.scroll - PADDING_TOP)..(state.scroll - PADDING_TOP + bounds.height);
+            let selection = self.editor.document().selection();
+            let current = state.layout.line_index(selection.primary().head);
+            if let Some(line) = state.layout.lines().get(current) {
+                renderer.fill_quad(
+                    Quad {
+                        bounds: Rectangle::new(
+                            Point::new(bounds.x, origin.y + line.top),
+                            Size::new(bounds.width, line.height),
+                        ),
+                        ..Quad::default()
+                    },
+                    colors.editor.current_line,
+                );
+            }
+            for range in selection.ranges().iter().filter(|range| !range.is_empty()) {
+                for row in state.layout.selection(range.start()..range.end()) {
+                    if row.y + row.height < visible.start || row.y > visible.end {
+                        continue;
+                    }
+                    renderer.fill_quad(
+                        Quad {
+                            bounds: row + offset,
+                            border: Border {
+                                radius: 2.0.into(),
+                                ..Border::default()
+                            },
+                            ..Quad::default()
+                        },
+                        colors.editor.selection,
+                    );
+                }
+            }
+            for (index, line) in state.layout.visible(visible.clone()) {
+                renderer.fill_paragraph(
+                    &line.paragraph,
+                    Point::new(origin.x, origin.y + line.top),
+                    colors.ink,
+                    bounds,
+                );
+                let number_color = if index == current {
+                    colors.ink
+                } else {
+                    colors.editor.line_number
+                };
+                renderer.fill_text(
+                    number_text((index + 1).to_string(), state.gutter - GUTTER_GAP),
+                    Point::new(origin.x - GUTTER_GAP, origin.y + line.top),
+                    number_color,
+                    bounds,
+                );
+            }
+            if state.focus.is_some_and(|focus| focus.caret_visible()) {
+                for range in selection.ranges() {
+                    let caret = state.layout.caret(range.head);
+                    renderer.fill_quad(
+                        Quad {
+                            bounds: Rectangle::new(
+                                Point::new(
+                                    origin.x + caret.x - CARET_WIDTH / 2.0,
+                                    origin.y + caret.y,
+                                ),
+                                Size::new(CARET_WIDTH, caret.height),
+                            ),
+                            ..Quad::default()
+                        },
+                        colors.accent,
+                    );
+                }
+            }
+        });
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: layout::Layout<'_>,
+        cursor: mouse::Cursor,
+        _renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        _viewport: &Rectangle,
+    ) {
+        let state = tree.state.downcast_mut::<State>();
+        let bounds = layout.bounds();
+        match event {
+            Event::Window(window::Event::Unfocused) => {
+                if let Some(focus) = &mut state.focus {
+                    focus.window_focused = false;
+                }
+            }
+            Event::Window(window::Event::Focused) => {
+                if let Some(focus) = &mut state.focus {
+                    focus.window_focused = true;
+                    focus.since = Instant::now();
+                    shell.request_redraw();
+                }
+            }
+            Event::Window(window::Event::RedrawRequested(now)) => {
+                if let Some(focus) = &mut state.focus
+                    && focus.window_focused
+                {
+                    focus.now = *now;
+                    let elapsed = now.saturating_duration_since(focus.since);
+                    let blinks = elapsed.as_millis() / BLINK.as_millis() + 1;
+                    let next = BLINK * u32::try_from(blinks).unwrap_or(u32::MAX);
+                    shell.request_redraw_at(focus.since + next);
+                    shell.request_input_method(&self.input_method(state, bounds));
+                }
+            }
+            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                state.modifiers = *modifiers;
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if let Some(point) = cursor.position_over(bounds) {
+                    let click = mouse::Click::new(point, mouse::Button::Left, state.last_click);
+                    let position = self.snap(state.layout.hit(state.to_content(bounds, point)));
+                    let action = match click.kind() {
+                        mouse::click::Kind::Single => Action::MoveTo {
+                            position,
+                            extend: state.modifiers.shift(),
+                            goal: None,
+                        },
+                        mouse::click::Kind::Double => Action::SelectWord(position),
+                        mouse::click::Kind::Triple => Action::SelectLine(position),
+                    };
+                    state.dragging = click.kind() == mouse::click::Kind::Single;
+                    state.last_click = Some(click);
+                    state.focus = Some(Focus::new());
+                    shell.publish((self.on_action)(action));
+                    shell.capture_event();
+                } else if state.focus.is_some() {
+                    state.focus = None;
+                    state.dragging = false;
+                    shell.request_redraw();
+                }
+            }
+            Event::Mouse(mouse::Event::CursorMoved { position }) if state.dragging => {
+                let target = self.snap(state.layout.hit(state.to_content(bounds, *position)));
+                shell.publish((self.on_action)(Action::MoveTo {
+                    position: target,
+                    extend: true,
+                    goal: None,
+                }));
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                state.dragging = false;
+            }
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor.is_over(bounds) => {
+                let pixels = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => -y * WHEEL_LINES * row_height(),
+                    mouse::ScrollDelta::Pixels { y, .. } => -y,
+                };
+                state.scroll_by(pixels);
+                shell.request_redraw();
+                shell.capture_event();
+            }
+            Event::InputMethod(input_method::Event::Commit(text)) if state.focus.is_some() => {
+                shell.publish((self.on_action)(Action::Insert(text.clone())));
+                shell.capture_event();
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key,
+                physical_key,
+                modifiers,
+                text,
+                ..
+            }) if state.focus.is_some() => {
+                if let Some(command) = command(key, *physical_key, *modifiers, text.as_deref()) {
+                    self.run(command, state, clipboard, shell);
+                    if let Some(focus) = &mut state.focus {
+                        focus.since = Instant::now();
+                    }
+                    shell.capture_event();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: layout::Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
+        let state = tree.state.downcast_ref::<State>();
+        match cursor.position_in(layout.bounds()) {
+            Some(point) if point.x >= state.gutter => mouse::Interaction::Text,
+            _ => mouse::Interaction::default(),
+        }
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: layout::Layout<'_>,
+        _renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        let state = tree.state.downcast_mut::<State>();
+        operation.focusable(None, layout.bounds(), state);
+    }
+}
+
+impl<'a, Message: 'a> From<EditorView<'a, Message>> for Element<'a, Message, Theme, Renderer> {
+    fn from(view: EditorView<'a, Message>) -> Self {
+        Element::new(view)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::keyboard::key::Code;
+    use iced::keyboard::{Location, Modifiers};
+    use iced_test::{Simulator, simulator};
+    use presswork_ui::color::LIGHT;
+
+    use super::*;
+    use crate::layout::tests::load_fonts;
+
+    fn actions(text: &str, interact: impl FnOnce(&mut Simulator<'_, Action>)) -> Vec<Action> {
+        load_fonts();
+        let editor = Editor::new(text);
+        let mut ui = simulator(view(&editor, &LIGHT, |action| action).autofocus(true));
+        interact(&mut ui);
+        ui.into_messages().collect()
+    }
+
+    fn shortcut(letter: &str, code: Code, modifiers: Modifiers) -> Event {
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: Key::Character(letter.into()),
+            modified_key: Key::Character(letter.into()),
+            physical_key: Physical::Code(code),
+            location: Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    fn press(point: Point) -> impl FnOnce(&mut Simulator<'_, Action>) {
+        move |ui| {
+            ui.point_at(point);
+            ui.simulate([
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            ]);
+        }
+    }
+
+    fn move_to(offset: usize, extend: bool, goal: Option<f32>) -> Action {
+        Action::MoveTo {
+            position: Position::new(offset),
+            extend,
+            goal,
+        }
+    }
+
+    #[test]
+    fn typing_inserts_text() {
+        let actions = actions("", |ui| {
+            ui.typewrite("ab");
+        });
+
+        assert_eq!(
+            actions,
+            [
+                Action::Insert("a".to_owned()),
+                Action::Insert("b".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn named_keys_edit_and_move() {
+        let actions = actions("ab", |ui| {
+            for key in [
+                Named::Enter,
+                Named::Backspace,
+                Named::Delete,
+                Named::ArrowRight,
+                Named::End,
+            ] {
+                ui.tap_key(key);
+            }
+        });
+
+        assert_eq!(
+            actions,
+            [
+                Action::Newline,
+                Action::Delete(Deletion::Backward),
+                Action::Delete(Deletion::Forward),
+                Action::Move {
+                    motion: Motion::Right,
+                    extend: false
+                },
+                Action::Move {
+                    motion: Motion::LineEnd,
+                    extend: false
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn shortcuts_select_all_and_undo() {
+        let actions = actions("ab", |ui| {
+            ui.simulate([
+                shortcut("a", Code::KeyA, Modifiers::COMMAND),
+                shortcut("z", Code::KeyZ, Modifiers::COMMAND),
+                shortcut("z", Code::KeyZ, Modifiers::COMMAND | Modifiers::SHIFT),
+            ]);
+        });
+
+        assert_eq!(actions, [Action::SelectAll, Action::Undo, Action::Redo]);
+    }
+
+    #[test]
+    fn down_moves_to_the_next_line_and_keeps_the_goal() {
+        let actions = actions("abc\ndef", |ui| {
+            ui.tap_key(Named::ArrowDown);
+        });
+
+        assert_eq!(actions, [move_to(4, false, Some(0.0))]);
+    }
+
+    #[test]
+    fn a_click_in_the_gutter_puts_the_cursor_at_the_line_start() {
+        let actions = actions(
+            "abc\ndef",
+            press(Point::new(4.0, PADDING_TOP + row_height() * 1.5)),
+        );
+
+        assert_eq!(actions, [move_to(4, false, None)]);
+    }
+
+    #[test]
+    fn a_click_below_the_text_puts_the_cursor_at_the_end() {
+        let actions = actions("abc\ndef", press(Point::new(300.0, 600.0)));
+
+        assert_eq!(actions, [move_to(7, false, None)]);
+    }
+
+    #[test]
+    fn without_focus_keys_do_nothing() {
+        load_fonts();
+        let editor = Editor::new("ab");
+        let mut ui = simulator(view(&editor, &LIGHT, |action| action));
+
+        ui.typewrite("x");
+
+        assert_eq!(ui.into_messages().count(), 0);
+    }
+}

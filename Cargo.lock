@@ -2713,7 +2713,10 @@ dependencies = [
 name = "presswork-editor"
 version = "0.1.0"
 dependencies = [
+ "iced",
+ "iced_test",
  "presswork-text",
+ "presswork-ui",
  "typst-syntax",
  "unicode-segmentation",
 ]
