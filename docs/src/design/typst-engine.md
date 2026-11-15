@@ -8,8 +8,8 @@ Presswork uses Typst in two ways:
 
 | Engine | Use | Typst version |
 | --- | --- | --- |
-| Embedded engine | Live preview, diagnostics, completion, tooltips, and jumps between source and pages | The version in this Presswork release, now 0.15 |
-| Managed toolchain | Exports of projects that pin a different Typst version | Each version that the toolchain manager installs |
+| Embedded engine | Live preview, exports, diagnostics, completion, tooltips, and jumps between source and pages | The version in this Presswork release, now 0.15 |
+| Managed toolchain | Live preview, exports, and diagnostics of projects that pin a different Typst version | Each version that the toolchain manager installs |
 
 The embedded engine links the Typst crates into Presswork. It gives access to the document model. Thus the interface can connect each element on a page to its source.
 
@@ -20,8 +20,12 @@ The managed toolchain runs the official Typst command-line tool. It gives the ex
 1. A project can pin a Typst version in its manifest, for example `typst = "0.14"`.
 2. If the project has no pin, Presswork uses the embedded engine for all functions.
 3. If the pin accepts the embedded version, Presswork uses the embedded engine for all functions.
-4. If the pin does not accept the embedded version, Presswork uses the managed toolchain for exports. The preview shows a message with the two versions.
-5. In this condition, the user can also select a pinned preview. The pinned preview uses the managed toolchain. It is slower, but it shows the exact output of the pinned version.
+4. If the pin does not accept the embedded version, Presswork uses the managed toolchain for the preview and the exports. Thus you proof the same output that goes to print. The preview is slower. The editor functions that need the document model, such as completion, tooltips, and jumps from the pages to the source, are off, and a note tells why.
+5. If no installed version agrees with the pin, Presswork shows no preview. The Toolchains panel shows the versions that you can install.
+
+The preview and the exports of a project always use the same Typst version. Refer to D100 in [Decisions](decisions.md).
+
+The managed toolchain reads the text of the main file from the standard input, so the preview also shows changes that are not saved. It reads the other project files from the project folder. It writes one PNG image for each page, at 144 pixels for each inch, which is the scale of the embedded preview. Its diagnostics give a line and a column, so the editor marks the word at that position.
 
 All engine functions are behind the `Engine` trait. A later release can add worker processes that link other Typst versions. Then all functions are available for each version.
 
@@ -69,7 +73,7 @@ In milestone 1, the engine has these limits:
 
 - The world gives only the fonts that Typst supplies: Libertinus Serif, New Computer Modern, and DejaVu Sans Mono. Thus the output is the same on all computers.
 - The world reads the files of the open project folder. It does not read packages yet.
-- The managed toolchain installs Typst versions, but exports do not use it yet. The Toolchains panel, not the preview, shows the message with the two versions.
+- Exports are not available yet. The preview of a project with a different pin uses the managed toolchain.
 - The engine renders all pages after each compilation, at 2 pixels for each point.
 
 ## IDE functions

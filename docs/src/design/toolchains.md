@@ -78,7 +78,7 @@ In milestone 1, the toolchain manager does these things:
 - It installs, lists, and removes Typst versions. Pandoc, veraPDF, and the Java runtime come later.
 - It shows only stable releases. If the pin of the project agrees only with a release candidate, the panel also shows that candidate.
 - It installs the versions into the `toolchains` folder in the local data folder of Presswork.
-- Exports do not use the managed versions yet.
+- The preview of a project uses the Typst version that its pin selects. Exports come later, and they will use the same version.
 
 ## Typst packages
 

@@ -10,7 +10,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D1. Embedded Typst engine and managed toolchains
 
-- **Status:** Accepted, 2026-11-14. **Origin:** Project owner.
+- **Status:** Accepted, 2026-11-14. Partially replaced by D100. **Origin:** Project owner.
 - **Decision:** Link the Typst crates for the preview and the IDE functions. Install official Typst CLI versions for the exports of projects that pin a different version.
 - **Reason:** Only the embedded engine gives access to the document model. Only the pinned CLI gives the exact output of a different version.
 - **Other options:** One worker process for each Typst version, which has a high build cost. The embedded engine only, which has no pins. The CLI only, which gives a weak preview.
@@ -700,3 +700,10 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** The list of available versions shows only stable releases. If the pin of the project agrees only with a release candidate, the panel also shows that candidate.
 - **Reason:** Release candidates are for tests. Most users need only stable releases.
 - **Other options:** A switch that shows the release candidates. All releases, with a label.
+
+## D100. One Typst version for the preview and the exports
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The preview and the exports of a project always use the same Typst version. If the pin of the project does not accept the built-in version, the pinned Typst program makes the preview pages and the exports. The editor functions that need the document model, such as completion, tooltips, and jumps from the pages to the source, are off for such a project, and a note tells why. If no installed version agrees with the pin, Presswork shows no preview and asks you to install a version. This decision replaces the part of D1 about the preview.
+- **Reason:** Writers must proof the same output that goes to print.
+- **Other options:** Only the built-in version, with a request to update old pins. A worker process for each Typst version, which D1 rejected because of its build cost.
