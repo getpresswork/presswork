@@ -6,6 +6,7 @@ use crate::radius;
 use crate::theme::colors;
 
 const BADGE_TINT: f32 = 0.14;
+const NOTICE_HOVER_TINT: f32 = 0.22;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
@@ -86,6 +87,26 @@ pub fn badge(tone: Tone) -> impl Fn(&Theme) -> container::Style {
                 ..Border::default()
             },
             ..container::Style::default()
+        }
+    }
+}
+
+pub fn notice(tone: Tone) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let colors = colors(theme);
+        let color = tone.color(colors);
+        let tint = match status {
+            button::Status::Hovered | button::Status::Pressed => NOTICE_HOVER_TINT,
+            button::Status::Active | button::Status::Disabled => BADGE_TINT,
+        };
+        button::Style {
+            background: Some(mix(colors.chrome, color, tint).into()),
+            text_color: color,
+            border: Border {
+                radius: radius::SMALL.into(),
+                ..Border::default()
+            },
+            ..button::Style::default()
         }
     }
 }
@@ -218,6 +239,16 @@ mod tests {
 
         assert_eq!(style.text_color, Some(DARK.danger));
         assert_ne!(style.background, Some(Background::Color(DARK.chrome)));
+    }
+
+    #[test]
+    fn a_notice_shows_more_tint_when_hovered() {
+        let quiet = notice(Tone::Danger)(&light(), button::Status::Active);
+        let hovered = notice(Tone::Danger)(&light(), button::Status::Hovered);
+
+        assert_eq!(quiet.text_color, LIGHT.danger);
+        assert_ne!(quiet.background, hovered.background);
+        assert_eq!(quiet.background, badge(Tone::Danger)(&light()).background);
     }
 
     #[test]
