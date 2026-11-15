@@ -1,4 +1,5 @@
 use iced::alignment::{Horizontal, Vertical};
+use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::{button, column, container, image, responsive, row, scrollable, space, text};
 use iced::{Element, Fill, Size};
 use presswork_typst::Output;
@@ -11,6 +12,7 @@ const STEPS: [u16; 11] = [25, 50, 67, 75, 90, 100, 125, 150, 200, 300, 400];
 const FULL_SIZE: u16 = 100;
 const PADDING: f32 = 32.0;
 const PAGE_GAP: f32 = 24.0;
+const SCROLLBAR_SPACE: f32 = 12.0;
 const EMPTY_WIDTH: f32 = 320.0;
 const PERCENT_WIDTH: f32 = 48.0;
 
@@ -34,6 +36,12 @@ struct Page {
     handle: image::Handle,
     width: f32,
     height: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Frame {
+    scale: f32,
+    width: f32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -130,17 +138,19 @@ impl Preview {
             .into()
     }
 
-    fn scale(&self, width: f32) -> f32 {
-        match self.zoom {
+    fn frame(&self, viewport: f32) -> Frame {
+        let available = (viewport - SCROLLBAR_SPACE).max(0.0);
+        let widest = self.pages.iter().map(|page| page.width).fold(0.0, f32::max) * PX_PER_PT;
+        let scale = match self.zoom {
             Zoom::Percent(percent) => f32::from(percent) / f32::from(FULL_SIZE),
-            Zoom::FitWidth => {
-                let widest = self.pages.iter().map(|page| page.width).fold(0.0, f32::max);
-                if widest > 0.0 {
-                    ((width - 2.0 * PADDING) / (widest * PX_PER_PT)).clamp(0.1, 4.0)
-                } else {
-                    1.0
-                }
+            Zoom::FitWidth if widest > 0.0 => {
+                ((available - 2.0 * PADDING) / widest).clamp(0.1, 4.0)
             }
+            Zoom::FitWidth => 1.0,
+        };
+        Frame {
+            scale,
+            width: available.max(widest * scale + 2.0 * PADDING),
         }
     }
 
@@ -149,7 +159,7 @@ impl Preview {
         size: Size,
         on_action: impl Fn(Action) -> Message + Copy + 'a,
     ) -> Element<'a, Message> {
-        let scale = self.scale(size.width);
+        let Frame { scale, width } = self.frame(size.width);
         let percent = scale * 100.0;
         let toolbar = row![
             space().width(Fill),
@@ -182,8 +192,15 @@ impl Preview {
         .spacing(PAGE_GAP)
         .padding(PADDING)
         .align_x(Horizontal::Center)
-        .width(Fill);
-        column![toolbar, scrollable(pages).width(Fill).height(Fill)].into()
+        .width(width);
+        let pages = scrollable(pages)
+            .direction(Direction::Both {
+                vertical: Scrollbar::default(),
+                horizontal: Scrollbar::default(),
+            })
+            .width(Fill)
+            .height(Fill);
+        column![toolbar, pages].into()
     }
 }
 
@@ -302,6 +319,42 @@ mod tests {
             preview.perform(Action::ZoomIn);
         }
         assert_eq!(preview.zoom(), Zoom::Percent(400));
+    }
+
+    fn a5_page() -> Output {
+        Output {
+            pages: Some(vec![PageImage {
+                width: 840,
+                height: 1190,
+                rgba: vec![255; 840 * 1190 * 4],
+            }]),
+            ..Output::default()
+        }
+    }
+
+    #[test]
+    fn a_zoomed_page_keeps_its_size_and_makes_the_content_wider() {
+        let mut preview = Preview::default();
+        preview.show(&a5_page(), 2.0);
+        preview.perform(Action::ZoomIn);
+        preview.perform(Action::ZoomIn);
+
+        let frame = preview.frame(640.0);
+
+        assert!((frame.scale - 1.5).abs() < 1e-6);
+        assert!((frame.width - (420.0 * PX_PER_PT * 1.5 + 2.0 * PADDING)).abs() < 0.01);
+    }
+
+    #[test]
+    fn fit_width_keeps_the_content_inside_the_available_width() {
+        let mut preview = Preview::default();
+        preview.show(&a5_page(), 2.0);
+
+        let frame = preview.frame(640.0);
+
+        assert!((frame.width - (640.0 - SCROLLBAR_SPACE)).abs() < 0.01);
+        let page_width = 420.0 * PX_PER_PT * frame.scale;
+        assert!((page_width + 2.0 * PADDING - frame.width).abs() < 0.01);
     }
 
     #[test]

@@ -109,7 +109,7 @@ In milestone 1, the preview does these things:
 
 - The Write workspace shows the editor on the left and the preview on the right.
 - After each change to the text, the engine compiles the text again. The status bar shows the duration of the last compilation.
-- By default, the pages fill the width of the preview. The zoom buttons change the zoom from 25% to 400%.
+- By default, the pages fill the width of the preview. The zoom buttons change the zoom from 25% to 400%. If the pages are wider than the preview, you can scroll to the left and to the right.
 - If the text has errors, the preview continues to show the last pages without errors. A bar above the pages shows the first error and its line.
 
 ## Source and pages
