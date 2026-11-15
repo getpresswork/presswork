@@ -2586,6 +2586,7 @@ dependencies = [
  "fluent-bundle",
  "iced",
  "iced_test",
+ "jiff",
  "presswork-log",
  "presswork-ui",
  "tracing",

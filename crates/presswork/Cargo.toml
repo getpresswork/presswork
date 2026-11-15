@@ -19,6 +19,7 @@ presswork-ui.workspace = true
 directories.workspace = true
 fluent-bundle.workspace = true
 iced.workspace = true
+jiff.workspace = true
 tracing.workspace = true
 unic-langid = { workspace = true, features = ["macros"] }
 
