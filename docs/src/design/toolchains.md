@@ -1,0 +1,91 @@
+# Toolchains
+
+This chapter tells how Presswork installs and selects external tools, packages, and fonts.
+
+## Tools
+
+The toolchain manager controls these tools:
+
+| Tool | Use | Source |
+| --- | --- | --- |
+| Typst | Exports with a pinned Typst version | GitHub releases of `typst/typst` |
+| Pandoc | Import of Word, Markdown, and LaTeX manuscripts into Typst | GitHub releases of `jgm/pandoc` |
+| veraPDF | Validation of PDF/A and PDF/UA files | veraPDF releases |
+| Java runtime | The runtime for veraPDF, which is a Java program | Eclipse Temurin releases |
+
+Each tool has a provider. A provider knows these things:
+
+- How to list the available versions.
+- Which release file is correct for the platform.
+- How to get the published digest of each release file.
+- How to unpack the release file, and where the executable is in it.
+
+## Installation
+
+The toolchain manager installs a tool version in these steps:
+
+1. Download the release file to a temporary folder.
+2. Calculate the SHA-256 digest of the file. Compare it with the published digest. If the digests are different, stop and delete the file.
+3. Unpack the file into a staging folder. Do not unpack an entry that has an absolute path or `..` in its path.
+4. Move the staging folder to its final location in one operation.
+
+A lock file prevents two installations of the same version at the same time.
+
+## Folders
+
+Each tool version has its own folder in the data folder of Presswork:
+
+```text
+toolchains/
+  typst/0.15.1/typst
+  typst/0.14.2/typst
+  pandoc/3.8.2/pandoc
+```
+
+The manager does not change the system `PATH`. Presswork always runs a tool through its full path.
+
+## Version selection
+
+The manager selects a version in this sequence:
+
+1. The pin in the project manifest. A pin is a version requirement, for example `0.14` or `=0.14.2`.
+2. The default version in the user settings.
+3. The installed version with the highest number.
+
+If the pin accepts none of the installed versions, Presswork asks the user to install a version.
+
+## Typst packages
+
+- Presswork uses the standard Typst package folders. Thus the Typst command-line tool and other tools use the same packages.
+- Before you go offline, the manager can download all packages of a project. It finds the imports with the Typst parser.
+- A team can publish private packages to its Presswork server. The manager installs them into the local package folder under the namespace of the organization, for example `@acme/letterhead:1.0.0`.
+- The package panel shows the packages in the cache. It can remove old versions.
+
+## Fonts
+
+Presswork finds fonts in these locations:
+
+1. The font folders of the project, for example `fonts/`.
+2. The font library of the team on the server. The client keeps a local copy.
+3. The system fonts.
+4. The fonts that Typst supplies.
+
+The font panel shows each font family, its styles, its glyph coverage, and its license. Presswork shows a warning if a document uses a font that is not available.
+
+The administrators record the license of each font in a team library. Presswork shows the license before a member downloads the font.
+
+## Manuscript import
+
+Many authors send manuscripts as Word files. Presswork imports them with Pandoc:
+
+1. Pandoc changes the manuscript into Typst markup.
+2. A Presswork Lua filter maps the styles of the manuscript to the functions of the project template. For example, the Word style "Block Text" becomes `#quote`.
+3. Presswork shows the result next to the original manuscript for examination.
+
+## PDF validation
+
+veraPDF validates PDF/A and PDF/UA files. It is a Java program, so the manager can also install a Java runtime for it.
+
+Presswork reads the veraPDF report. It shows each failed rule with its page and its object.
+
+Routines and checklists can use the validation result. Refer to [Domain model](domain-model.md).

@@ -7,6 +7,7 @@
 - [Overview](design/overview.md)
 - [Architecture](design/architecture.md)
 - [Typst engine](design/typst-engine.md)
+- [Toolchains](design/toolchains.md)
 
 # Contributing
 
