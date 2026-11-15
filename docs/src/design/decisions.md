@@ -363,3 +363,178 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** Presswork publishes its Typst helper packages, for example the index package, on Typst Universe.
 - **Reason:** Projects that use these packages still compile with the Typst command-line tool.
 - **Other options:** Packages inside Presswork only.
+
+## D52. Tools for typesetters
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Add version migration, the typesetting QA report, the compile profiler, the tools for packages and templates, the baseline grid check, the soft proof, hyphenation exceptions, and the copyfitting assistant.
+- **Reason:** Typesetters must find layout problems and move projects to new Typst versions safely.
+- **Other options:** Diagnostics from Typst only.
+
+## D53. Excellent logs
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Structured logs in all crates, a log panel, build reports for each compilation and export, a support bundle, and OpenTelemetry export on the server.
+- **Reason:** Persons must find the cause of a problem quickly, and repeat a build exactly.
+- **Other options:** Log files only.
+
+## D54. Design tools that write Typst
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Add the style panel, the table, math, and chart builders, and brand kits. Each tool writes normal Typst code that stays visible.
+- **Reason:** Designers who do not write code can make page designs. The project stays a normal Typst project.
+- **Other options:** Author mode, a rich-text view that hides the markup. The project owner did not select it, so Typst stays visible to all users.
+
+## D55. Lift from PDF
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner, from an idea of the project owner.
+- **Decision:** Rebuild charts as data, tables, and equations from PDF pages as Typst code. Charts in images use AI assistance.
+- **Reason:** Publications often reuse charts and tables from other documents. A rebuilt chart is sharp and editable, and it uses the house style.
+- **Other options:** Images of the original only.
+
+## D56. Structure and reuse
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Add the structure board, shared content blocks, variants, and data merge.
+- **Reason:** Teams reuse pages and text in many publications, and make several outputs from one source.
+- **Other options:** Copies by hand.
+
+## D57. More editorial checks
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Add proof collation, the accessibility audit, controlled language checks, and find and replace in the organization.
+- **Reason:** These checks make the proof rounds faster and the publications accessible.
+- **Other options:** A round trip through Word files with tracked changes. The project owner did not select it.
+
+## D58. Contacts, contracts, and print plans
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Add the contacts directory, contracts with deliverables, and print plans with cost estimates.
+- **Reason:** Deliverables and print costs control the schedule and the budget of a publication.
+- **Other options:** Royalty statements. The project owner did not select them.
+
+## D59. Sales and promotion outputs out of scope
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Presswork does not make catalogs, sell sheets, websites, newsletters, or audiobooks.
+- **Reason:** Other tools do these jobs. Presswork stays focused on the publication.
+- **Other options:** Sales and promotion outputs from the metadata.
+
+## D60. Teamwork functions
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Add the email bridge, watermarked proofs, follow mode, and co-publishing.
+- **Reason:** Authors use email, unpublished books must stay protected, and some books have two publishers.
+- **Other options:** None of these functions.
+
+## D61. Server operations
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Add the admin console, backups and restore, and enterprise deployment.
+- **Reason:** A self-hosted server must be safe and easy to operate.
+- **Other options:** Importers from other tools. The project owner did not select them.
+
+## D62. Desktop experience
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Add the home dashboard, the history slider, operating system integration, and the Typst scratchpad.
+- **Reason:** A commercial product starts in a useful place and fits into the operating system.
+- **Other options:** A start screen only.
+
+## D63. Editor additions
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Add Vim mode, and full support for right-to-left and CJK text.
+- **Reason:** Technical users want Vim keys. Translators and international publishers use all scripts.
+- **Other options:** Emacs mode, and support for external editors. The project owner did not select them.
+
+## D64. Research additions
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Add the similarity check, JATS export and ORCID identifiers, the citation style editor, and semantic search.
+- **Reason:** Academic publishers use these functions, and all authors must prevent accidental plagiarism.
+- **Other options:** None of these functions.
+
+## D65. Phones and calendars
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Members can use the web portal on phones, with web push notifications. The calendar syncs in two directions with CalDAV, Google Calendar, and Microsoft 365.
+- **Reason:** Approvals and messages must not wait for a desktop.
+- **Other options:** Native mobile applications. The project owner did not select them.
+
+## D66. Account and data controls
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Add sessions and devices, retention rules, audit log export, and IP allow lists.
+- **Reason:** Organizations must control who signs in, from where, and how long data stays.
+- **Other options:** None of these controls.
+
+## D67. AI as tools and an assistant that proposes
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Presswork has inline AI tools and an assistant panel. The assistant reads the project and uses Presswork commands as tools. Each change from AI is a suggestion or a proposal that a person approves.
+- **Reason:** AI is useful, but persons stay responsible for the text and the schedule.
+- **Other options:** Inline tools only. An autonomous agent. Minimal AI.
+
+## D68. AI providers and the AI gateway
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Support the Anthropic API and local model servers. The server keeps the provider keys in an AI gateway that applies the policy, the quotas, the audit log, and the removal of personal data. Solo users and local models can connect directly from the desktop.
+- **Reason:** Organizations control the keys and the data. Persons without a server can still use AI.
+- **Other options:** Cloud platforms and other hosted services. Keys on each desktop. A gateway for all requests.
+
+## D69. MCP servers
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Presswork has a desktop MCP server and a team MCP endpoint. Changes from MCP clients become suggestions and proposals.
+- **Reason:** Persons can use their own AI clients with Presswork projects.
+- **Other options:** An assistant that uses other MCP servers. The project owner did not select it.
+
+## D70. AI functions
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The AI functions are in [AI assistance](ai.md): editorial, Typst, library, translation, and management functions.
+- **Reason:** Each function gives its result to a person through an object that Presswork already has.
+- **Other options:** Developmental feedback and summaries of library chapters. The project owner did not select them.
+
+## D71. AI consent and controls
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** An AI policy, a preview of each request, and the AI audit log. Confirmation only for sensitive data. Quotas, cost reports, removal of personal data, and provenance labels.
+- **Reason:** Persons see what goes to a provider, without a dialog for each request.
+- **Other options:** A confirmation for each request. A policy without a preview.
+
+## D72. One default AI model
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** All AI functions use Claude Opus 5.5. An administrator can select a different model.
+- **Reason:** One strong model gives consistent results and one cache for each book.
+- **Other options:** A model for each function. Automatic selection.
+
+## D73. AI for large jobs
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Use Message Batches for overnight jobs, whole-book context with prompt caching, and the inference region where the provider supports it.
+- **Reason:** Book-length jobs cost less in batches, and repeated requests on a book cost less with a prompt cache.
+- **Other options:** A fallback to a local model. The project owner did not select it.
+
+## D74. A local embedding model
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Semantic search uses a local embedding model on the desktop and on the server.
+- **Reason:** No text leaves the organization for search.
+- **Other options:** An embedding service of a provider.
+
+## D75. Direct calls to the Messages API
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** Presswork calls the Anthropic Messages API over HTTPS. It uses structured outputs, citations, prompt caching, Message Batches, streaming, and the server-side refusal fallback.
+- **Reason:** There is no official Rust SDK. These API functions give valid results, page citations, and lower costs.
+- **Other options:** A community Rust crate. A layer that is compatible with many providers.
+
+## D76. Signature and digital signature
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** "Signature" means a group of pages that a printer folds and binds. "Digital signature" means cryptographic data.
+- **Reason:** Print plans and imposition use signatures. In STE, each word has only one meaning.
+- **Other options:** "Section" for the printed group.
