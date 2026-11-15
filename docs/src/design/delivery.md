@@ -24,19 +24,44 @@ Each push to `main` and each pull request runs these jobs:
 | Dependencies | Linux | `cargo deny check` |
 | Documentation | Linux | `mdbook build docs` |
 
-## Releases
+## Release train
 
-1. A maintainer sets the new version in the root `Cargo.toml`.
-2. The maintainer pushes a tag with the version, for example `v0.1.0`.
-3. The release workflow builds the packages for all platforms.
-4. git-cliff writes the release notes from the commit messages since the last tag.
-5. The workflow makes a GitHub release with the packages, a SHA-256 checksum file, and the notes.
+The release train makes a release every two weeks. A commit does not bump the version.
 
-A maintainer can also start the release workflow by hand. Then it builds all packages, but it does not make a release.
+1. On the Monday of each even week, the release train workflow starts.
+2. It looks for `feat`, `fix`, and `perf` commits since the last release. If there are none, it stops.
+3. git-cliff calculates the next version from the commit types.
+4. The workflow sets the version in the root `Cargo.toml`, updates `Cargo.lock`, and writes `CHANGELOG.md`.
+5. It commits these files to `main` with the message `chore(release): <version>`, and pushes a tag, for example `v0.2.0`.
+6. It starts the release workflow for the tag.
+7. The release workflow builds the packages for all platforms. It makes a GitHub release with the packages, a SHA-256 checksum file, and the release notes.
+
+A maintainer can start the release train by hand, for example for an urgent correction. A dry run calculates the next version but changes nothing.
+
+## Nightly builds
+
+Each night, the nightly workflow looks for new commits on `main`. If there are new commits, it builds the packages for all platforms. It puts them into the `nightly` prerelease on GitHub, in place of the previous nightly packages. Testers use the nightly builds. The updater does not install them unless the user selects the nightly builds.
 
 ## Versions
 
-Presswork uses Semantic Versioning. All crates have the same version. Before version 1.0, a minor version can contain changes that are not compatible.
+Presswork uses Semantic Versioning. All crates have the same version.
+
+| Commits since the last release | Version change before 1.0 | Version change after 1.0 |
+| --- | --- | --- |
+| A change that is not compatible | Minor | Major |
+| `feat` | Minor | Minor |
+| `fix` or `perf` | Patch | Patch |
+
+## Updates
+
+The desktop application has a signed updater:
+
+1. At start, the updater asks GitHub for the release list. It sends no other data.
+2. If a newer release exists, the application shows the release notes.
+3. The updater downloads the package for the platform. It checks the Ed25519 signature and the SHA-256 checksum.
+4. The update installs when the application starts the next time.
+
+Users can turn off the update check. Installations from package managers do not use the updater. Refer to [Security](security.md) for the signing key.
 
 ## Signatures
 
