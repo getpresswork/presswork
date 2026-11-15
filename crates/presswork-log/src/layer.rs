@@ -1,12 +1,14 @@
 use std::fmt;
+use std::io::Write;
 
 use jiff::Timestamp;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
+use tracing_appender::non_blocking::NonBlocking;
 use tracing_subscriber::layer::{Context, Layer};
 use tracing_subscriber::registry::LookupSpan;
 
-use crate::{Level, LogEntry, LogStore};
+use crate::{Level, LogEntry, LogStore, to_json_line};
 
 pub type Clock = fn() -> Timestamp;
 
@@ -31,6 +33,7 @@ const SECRET_NAMES: [&str; 12] = [
 pub struct LogLayer {
     store: LogStore,
     clock: Clock,
+    file: Option<NonBlocking>,
 }
 
 impl LogLayer {
@@ -41,7 +44,19 @@ impl LogLayer {
 
     #[must_use]
     pub fn with_clock(store: LogStore, clock: Clock) -> Self {
-        Self { store, clock }
+        Self {
+            store,
+            clock,
+            file: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_file(self, file: NonBlocking) -> Self {
+        Self {
+            file: Some(file),
+            ..self
+        }
     }
 }
 
@@ -59,7 +74,7 @@ where
                 .collect()
         });
         let metadata = event.metadata();
-        self.store.push(LogEntry {
+        let entry = LogEntry {
             sequence: 0,
             time: (self.clock)(),
             level: Level::from(*metadata.level()),
@@ -67,7 +82,18 @@ where
             message: collector.message,
             fields: collector.fields,
             spans,
-        });
+        };
+        if let Some(file) = &self.file {
+            write_line(file.clone(), &entry);
+        }
+        self.store.push(entry);
+    }
+}
+
+fn write_line(mut file: NonBlocking, entry: &LogEntry) {
+    if let Ok(mut line) = to_json_line(entry) {
+        line.push('\n');
+        let _ = file.write_all(line.as_bytes());
     }
 }
 
