@@ -199,6 +199,31 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "reads the real list of releases from GitHub"]
+    fn the_real_releases_have_digests_for_this_platform() {
+        let client = Client::new(AGENT).unwrap();
+        let platform = crate::Platform::current();
+
+        let releases = run(client.releases()).unwrap();
+
+        for version in [
+            semver::Version::new(0, 15, 1),
+            semver::Version::new(0, 13, 1),
+        ] {
+            let release = releases
+                .iter()
+                .find(|release| release.version == version)
+                .unwrap();
+            assert!(
+                release
+                    .file(&platform)
+                    .is_some_and(|file| file.digest.is_some()),
+                "{version}"
+            );
+        }
+    }
+
+    #[test]
     fn a_download_writes_the_file_and_tells_the_progress() {
         let data: Vec<u8> = (0..200_000_u32)
             .map(|value| value.to_le_bytes()[0])
