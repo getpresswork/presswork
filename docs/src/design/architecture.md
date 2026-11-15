@@ -71,6 +71,7 @@ All crates are in the `crates` folder. Each crate has one purpose. This table sh
 | `presswork-cli` | Application | The command-line tool. |
 | `presswork-server` | Application | The collaboration server and the web portal, with axum and PostgreSQL. |
 | `presswork-ui` | Adapter | The design system: theme, design tokens, and shared widgets. |
+| `presswork-log` | Adapter | Structured logs, the log store for the log panel, and the log files. |
 | `presswork-editor` | Adapter | The text editor widget. |
 | `presswork-preview` | Adapter | The page preview widget. |
 | `presswork-typst` | Adapter | The embedded Typst engine: compilation, page images, export, and IDE functions. |

@@ -6,8 +6,10 @@ This chapter tells how Presswork records events, so that persons can find the ca
 
 - All crates write structured logs with `tracing`. Each entry has a time, a level, an area, a message, and fields, for example the project, the file, or the job.
 - Each operation has a span. Thus the log shows which entries belong to one operation, for example one export.
-- Logs never contain document text, passwords, tokens, or keys.
-- The desktop application writes its logs to rotated files in its data folder. The server writes JSON lines to the standard output.
+- Logs never contain document text, passwords, tokens, or keys. The log layer replaces the value of each field with a secret name with "[removed]". Secret names end in, for example, `password`, `token`, `key`, `secret`, `text`, or `content`.
+- The desktop application writes its logs as JSON lines to files in its data folder. It starts a new file each day and keeps the files of the last 14 days.
+- The server writes JSON lines to the standard output.
+- The `PRESSWORK_LOG` environment variable sets the log filter at start, for example `info,presswork_typst=debug`.
 - An administrator can change the log level of each area while the program runs.
 
 ## Log panel
