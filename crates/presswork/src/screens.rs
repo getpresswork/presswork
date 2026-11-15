@@ -117,4 +117,12 @@ fn render_screens() {
         Message::Logs(log_panel::Message::Show(Level::Debug)),
     );
     render(&mut app, "log-panel");
+
+    send(&mut app, Message::Logs(log_panel::Message::Close));
+    send(
+        &mut app,
+        Message::Editor(presswork_editor::Action::Insert("#nothing\n".to_owned())),
+    );
+    app.compile_now();
+    render(&mut app, "write-error");
 }
