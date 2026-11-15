@@ -1,0 +1,15 @@
+[package]
+name = "presswork-ui"
+description = "The Presswork design system: theme, tokens, and shared widgets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

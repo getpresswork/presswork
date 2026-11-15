@@ -12,6 +12,12 @@ homepage = "https://getpresswork.github.io/presswork/"
 publish = false
 
 [workspace.dependencies]
+presswork-ui = { path = "crates/presswork-ui" }
+
+fluent-bundle = "0.16.0"
+iced = "0.14.0"
+iced_test = "0.14.0"
+unic-langid = "0.9.6"
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
@@ -20,6 +26,8 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
 dbg_macro = "warn"
 expect_used = "warn"
 todo = "warn"

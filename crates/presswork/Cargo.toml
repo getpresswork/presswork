@@ -13,3 +13,11 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+presswork-ui.workspace = true
+
+fluent-bundle.workspace = true
+iced.workspace = true
+unic-langid = { workspace = true, features = ["macros"] }
+
+[dev-dependencies]
+iced_test.workspace = true
