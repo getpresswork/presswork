@@ -13,6 +13,7 @@
 - [Server](design/server.md)
 - [Domain model](design/domain-model.md)
 - [Interface](design/interface.md)
+- [Security](design/security.md)
 
 # Contributing
 
