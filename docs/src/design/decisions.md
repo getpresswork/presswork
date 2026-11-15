@@ -707,3 +707,59 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** The preview and the exports of a project always use the same Typst version. If the pin of the project does not accept the built-in version, the pinned Typst program makes the preview pages and the exports. The editor functions that need the document model, such as completion, tooltips, and jumps from the pages to the source, are off for such a project, and a note tells why. If no installed version agrees with the pin, Presswork shows no preview and asks you to install a version. This decision replaces the part of D1 about the preview.
 - **Reason:** Writers must proof the same output that goes to print.
 - **Other options:** Only the built-in version, with a request to update old pins. A worker process for each Typst version, which D1 rejected because of its build cost.
+
+## D101. Many organizations on one server
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** One server can hold many organizations. Each record belongs to an organization, and a user can be a member of more than one organization.
+- **Reason:** One server can serve a publisher and its partners, and a hosting service can serve many publishers. A later change from one organization to many would need a large migration.
+- **Other options:** One organization for each server.
+
+## D102. Accounts through invite links
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** A command on the server makes the first administrator. After that, an administrator makes an invite link for each person. A link is valid for 7 days and for one use. The server has no open sign-up.
+- **Reason:** Publishers control who can see their unpublished texts.
+- **Other options:** Open sign-up. Invite links and a setting for open sign-up.
+
+## D103. No email in milestone 1
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** In milestone 1, the server sends no email. Administrators send invite links themselves and reset forgotten passwords with a server command. Email starts with the email bridge in milestone 3.
+- **Reason:** Email needs mail settings and delivery checks. Milestone 1 can operate without it.
+- **Other options:** Invite and password-reset emails through SMTP from milestone 1.
+
+## D104. Device sessions that last 30 days after their last use
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** A sign-in makes a session for one device, with a random token. The server keeps only the hash of the token. Each use of the session extends it to 30 days after that use. The list of sessions shows each device, and a user can end each session.
+- **Reason:** The model is simple, and it agrees with the sessions and devices of D66.
+- **Other options:** Access tokens that last 15 minutes, with refresh tokens that rotate.
+
+## D105. Database tests on PostgreSQL in Docker
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The database tests use a PostgreSQL server that a URL in the environment names. In CI, a PostgreSQL service on Linux supplies it. On a developer computer, PostgreSQL in Docker supplies it. Without the URL, the database tests stop at once and write a note.
+- **Reason:** The tests use the real database, without a download in the build.
+- **Other options:** Embedded PostgreSQL binaries on all platforms. Database tests only in CI.
+
+## D106. A small task model in milestone 1
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** In milestone 1, a task has a title, a Markdown description, a state (to do, in progress, or done), one assignee, a due date, and a project.
+- **Reason:** This is sufficient to complete tasks in the desktop application. Workflows and checklists come in milestone 5.
+- **Other options:** The small model with checklists. Tasks with the workflow stages of D6.
+
+## D107. Server commands for administration in milestone 1
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** In milestone 1, administrators use subcommands of `presswork-server` to make the first administrator and organizations, make invite links, and reset passwords. The admin console of D61 comes later.
+- **Reason:** Commands are small and easy to test. Milestone 1 needs no admin pages.
+- **Other options:** The first pages of the admin console, as server-rendered HTML.
+
+## D108. utoipa for the OpenAPI description
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The server makes its OpenAPI description from the code with utoipa. A test makes sure that the description is valid.
+- **Reason:** The description always agrees with the code. utoipa has the most users of the crates for this.
+- **Other options:** A file that a person writes, with a test that compares it with the routes. aide, which uses schemars.
