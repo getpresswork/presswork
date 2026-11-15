@@ -12,6 +12,7 @@
 - [Collaboration](design/collaboration.md)
 - [Server](design/server.md)
 - [Domain model](design/domain-model.md)
+- [Interface](design/interface.md)
 
 # Contributing
 
