@@ -538,3 +538,31 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** "Signature" means a group of pages that a printer folds and binds. "Digital signature" means cryptographic data.
 - **Reason:** Print plans and imposition use signatures. In STE, each word has only one meaning.
 - **Other options:** "Section" for the printed group.
+
+## D77. A quiet editorial style
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The interface uses warm paper colors, ink colors, thin rules, and much space. One accent color marks the selected item, the focus, and the primary action.
+- **Reason:** This style looks like a good book page. It keeps the attention on the document.
+- **Other options:** A dense style for developer tools, with cool grays and a bright accent. A soft modern style, with rounded cards, soft shadows, and pastel colors.
+
+## D78. Inter and JetBrains Mono
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The interface text uses Inter in three weights: regular, medium, and semibold. Code, times, and data use JetBrains Mono. Presswork includes the font files.
+- **Reason:** Both fonts are easy to read at small sizes. Both have the SIL Open Font License. Included fonts make the interface the same on all platforms.
+- **Other options:** IBM Plex Sans and IBM Plex Mono. Source Sans 3 and Source Code Pro.
+
+## D79. Oxblood as the accent color
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The accent color is oxblood: #8C2F39 in the light theme and #E07A84 in the dark theme.
+- **Reason:** Oxblood is a red from the tradition of printing. Its contrast is 4.5:1 or more on all surfaces of the two themes.
+- **Other options:** Deep indigo, which was the recommended option. Ink blue. Forest green.
+
+## D80. Lucide icons
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Presswork uses the Lucide icons as an icon font.
+- **Reason:** Lucide has approximately 1,500 icons with one line style. It has the ISC license.
+- **Other options:** Phosphor, with six weights. Tabler, with more than 5,000 icons.

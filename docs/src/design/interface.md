@@ -57,10 +57,46 @@ Thus each action has one origin, and you can use all functions with the keyboard
 
 ## Visual design
 
+The interface has a quiet editorial style. Warm paper colors, ink colors, and thin rules make it look like a good book page. Pages and text get the most space. Tools stay small and quiet until you use them.
+
 - The `presswork-ui` crate contains the design tokens: colors, type sizes, spacing, radii, and shadows. Widgets use only tokens, not literal values.
 - Presswork has a light theme, a dark theme, and a high-contrast theme. By default, it follows the theme of the operating system.
-- The interface uses a calm style that puts the document first. Pages and text get the most space. Tools stay small until you use them.
-- Presswork has its own interface fonts. Thus the interface looks the same on all platforms.
+- Presswork includes its interface fonts and its icons. Thus the interface looks the same on all platforms.
+
+### Design tokens
+
+| Token | Values |
+| --- | --- |
+| Interface font | Inter: regular, medium, and semibold |
+| Font for code and data | JetBrains Mono |
+| Icons | Lucide, as an icon font |
+| Accent color | Oxblood: #8C2F39 in the light theme, #E07A84 in the dark theme |
+| Type sizes | 11, 12, 13, 15, 18, and 24 pixels. Body text is 13 pixels. |
+| Spacing | 2, 4, 8, 12, 16, 24, and 32 pixels |
+| Radii | 4, 6, and 10 pixels |
+| Icon sizes | 12, 14, and 28 pixels |
+
+### Color roles
+
+| Role | Use |
+| --- | --- |
+| Page | The background of documents and of the main area |
+| Chrome | The background of bars and panels |
+| Raised | The background of fields, menus, and dialogs |
+| Rule | Lines of 1 pixel between areas |
+| Ink | Body text |
+| Muted ink | Labels, times, and secondary text |
+| Faint ink | Disabled items only |
+| Accent | The selected item, the focus, and the primary action |
+| Danger, warning, success, and info | Status only |
+
+### Rules
+
+- Use the accent color only for the selected item, the focus, and the primary action. Do not use it as decoration.
+- Use the status colors only for status.
+- Use one rule of 1 pixel between two areas.
+- Show times, areas, file names, and data in JetBrains Mono.
+- Each workspace and each command has a Lucide icon.
 
 ## Status bar
 
@@ -91,7 +127,7 @@ From the home dashboard, you can also:
 ## Accessibility
 
 - You can use all functions with the keyboard.
-- All themes have a contrast ratio of 4.5:1 or more for text.
+- All themes have a contrast ratio of 4.5:1 or more for text. Tests measure each text color on each surface. Disabled text is the only exception.
 - The interface scale can change from 75% to 200%.
 - iced does not have screen reader support at this time. Presswork will add it when iced gets AccessKit integration.
 
