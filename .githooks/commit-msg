@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+message=$(grep -v '^#' "$1" | sed -e '/^[[:space:]]*$/d')
+lines=$(printf '%s\n' "$message" | wc -l)
+types='build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test'
+pattern="^($types)(\([a-z0-9-]+\))?!?: [a-z0-9]"
+
+if [ "$lines" -ne 1 ]; then
+    echo "commit-msg: write the message on one line." >&2
+    exit 1
+fi
+
+if ! printf '%s\n' "$message" | grep -Eq "$pattern"; then
+    echo "commit-msg: use the form 'type(scope): summary'." >&2
+    echo "commit-msg: types are $types." >&2
+    exit 1
+fi
+
+if [ "${#message}" -gt 72 ]; then
+    echo "commit-msg: use 72 characters or fewer." >&2
+    exit 1
+fi
