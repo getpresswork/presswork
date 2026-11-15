@@ -385,6 +385,26 @@ pub(crate) mod tests {
             .collect()
     }
 
+    fn glyph_ids(text: &str) -> Vec<u16> {
+        load_fonts();
+        shape(text, &[(0..text.len(), Style::default())], &LIGHT, 400.0)
+            .buffer()
+            .layout_runs()
+            .flat_map(|run| run.glyphs.iter().map(|glyph| glyph.glyph_id))
+            .collect()
+    }
+
+    #[test]
+    fn the_editor_shows_each_character_as_typed() {
+        for text in ["==", "---", "->", "=>", "...", "!=", "<=", ">=", "//", "/*"] {
+            let alone: Vec<u16> = text
+                .chars()
+                .flat_map(|character| glyph_ids(&character.to_string()))
+                .collect();
+            assert_eq!(glyph_ids(text), alone, "{text}");
+        }
+    }
+
     #[test]
     fn lines_stack_from_the_top() {
         let layout = layout("a\nb\nc", 400.0);

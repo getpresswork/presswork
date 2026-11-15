@@ -650,3 +650,10 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** Presswork opens project folders with the native folder dialog of each platform, through `rfd`. On Linux, it uses the XDG desktop portal.
 - **Reason:** Users know the dialog of their platform. The portal needs no GTK libraries.
 - **Other options:** A Presswork dialog. The GTK dialog on Linux.
+
+## D93. JetBrains Mono without ligatures
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Presswork uses the NL faces of JetBrains Mono. These faces have no ligatures. Thus the editor shows each character as you type it.
+- **Reason:** In Typst, character sequences such as `==`, `---`, and `->` have a meaning. With ligatures, the editor showed `==` as one long sign, and the level of a heading was not clear. The NL faces are also smaller.
+- **Other options:** JetBrains Mono with ligatures. A setting that turns the ligatures on and off.

@@ -68,7 +68,7 @@ The interface has a quiet editorial style. Warm paper colors, ink colors, and th
 | Token | Values |
 | --- | --- |
 | Interface font | Inter: regular, medium, and semibold |
-| Font for code and data | JetBrains Mono |
+| Font for code and data | JetBrains Mono NL: regular, bold, and italic. These faces have no ligatures. |
 | Icons | Lucide, as an icon font |
 | Accent color | Oxblood: #8C2F39 in the light theme, #E07A84 in the dark theme |
 | Type sizes | 11, 12, 13, 15, 18, and 24 pixels. Body text is 13 pixels. |
