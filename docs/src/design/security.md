@@ -80,14 +80,16 @@ The desktop application keeps tokens in the credential store of the operating sy
 - In CI, `cargo deny` examines the licenses, the security advisories, and the sources of all dependencies.
 - A vulnerability in any dependency stops the build. An unmaintained crate stops the build only if a Presswork crate uses it directly. For the other unmaintained crates, the upstream projects must replace them.
 - An exception for a vulnerability is permitted only if no fixed release exists. Each exception in `deny.toml` tells the cause and the condition that removes it.
+- CI workflows pin each third-party action to a commit hash.
+- Dependabot opens update requests each week.
 
 ### Current exceptions
 
 | Advisory | Cause | Risk | Removal |
 | --- | --- | --- | --- |
 | RUSTSEC-2026-0194 and RUSTSEC-2026-0195 | Typst 0.15.1 uses `quick-xml` 0.38 through `hayagriva` and `citationberg`. These crates have no fixed release. | A hostile CSL style file can make a compilation slow or use much memory. On the desktop, only the document with the file is affected. | Remove the exceptions when Typst uses `quick-xml` 0.41 or later. |
-- CI workflows pin each third-party action to a commit hash.
-- Dependabot opens update requests each week.
+
+The project owner reviewed these exceptions on 2026-11-15. The other option was a fork of `quick-xml` 0.38 with the fix.
 
 ## Vulnerability reports
 

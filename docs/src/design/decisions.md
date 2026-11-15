@@ -4,6 +4,7 @@ This chapter records the main design decisions. Each decision has a number, a st
 
 - The origin "project owner" means that the project owner made the decision.
 - The origin "default" means that the design team selected the option. The project owner can review it.
+- The origin "default, reviewed by the project owner" means that the project owner examined a default decision and kept it.
 
 Do not change what an accepted decision says. You can correct its language. To change a decision, add a new decision that replaces it. Then set the status of the old decision to "replaced by D*n*".
 
@@ -597,56 +598,56 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D85. An editor that wraps long lines
 
-- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Status:** Accepted, 2026-11-15. **Origin:** Default, reviewed by the project owner.
 - **Decision:** The editor wraps long lines at the width of the view. It shapes each line with cosmic-text through iced, and it keeps the shaped lines in a cache.
 - **Reason:** Typst source contains much prose. Writers do not add line breaks in paragraphs.
 - **Other options:** No wrap, with a horizontal scroll bar. A fixed wrap column.
 
 ## D86. Syntax colors from typst-syntax
 
-- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Status:** Accepted, 2026-11-15. **Origin:** Default, reviewed by the project owner.
 - **Decision:** The editor gets its syntax colors from the highlighter of `typst-syntax`, and it parses incrementally. The colors have eight roles, and each role is a design token with a contrast test.
 - **Reason:** The Typst compiler uses the same parser. Thus the colors always agree with the compiler.
 - **Other options:** A TextMate grammar. Tree-sitter.
 
 ## D87. Bold and italic faces of JetBrains Mono
 
-- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Status:** Accepted, 2026-11-15. **Origin:** Default, reviewed by the project owner.
 - **Decision:** Presswork includes the bold and the italic faces of JetBrains Mono. The editor shows strong text and headings in bold, and emphasis and comments in italic.
 - **Reason:** Writers see the style of the markup while they write.
 - **Other options:** Synthetic bold and italic. Colors only.
 
 ## D88. Editor keys that follow the platform
 
-- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Status:** Accepted, 2026-11-15. **Origin:** Default, reviewed by the project owner.
 - **Decision:** Shortcuts use Ctrl on Windows and Linux, and Cmd on macOS. Word movement uses Ctrl on Windows and Linux, and Alt on macOS. Tab inserts two spaces.
 - **Reason:** Users expect the keys of their platform. Typst code usually has an indentation of two spaces.
 - **Other options:** The same keys on all platforms. Tab characters.
 
 ## D89. Optimized dependencies in development builds
 
-- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Status:** Accepted, 2026-11-15. **Origin:** Default, reviewed by the project owner.
 - **Decision:** Development builds compile all dependencies with optimization level 2. Presswork crates stay at level 0.
 - **Reason:** Text shaping and Typst are very slow without optimization. With this setting, the tests of the desktop application take 1.5 seconds, not 21 seconds, and the debug application responds quickly.
 - **Other options:** Level 1, which compiles faster but runs slower. No optimization.
 
 ## D90. A preview beside the editor in the Write workspace
 
-- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Status:** Accepted, 2026-11-15. **Origin:** Default, reviewed by the project owner.
 - **Decision:** The Write workspace shows the editor and the preview side by side, with the same width. The engine compiles after each change to the text, on its own thread, with one compilation at a time.
 - **Reason:** Writers see the effect of each change at once. One compilation at a time keeps the computer responsive.
 - **Other options:** A preview that shows only after a pause in typing. A preview in a separate window.
 
 ## D91. A small manifest that later releases can extend
 
-- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Status:** Accepted, 2026-11-15. **Origin:** Default, reviewed by the project owner.
 - **Decision:** The `presswork.toml` manifest has a `[project]` table with `name`, `main`, and `typst`. Only `name` is necessary. Presswork ignores the keys that it does not know.
 - **Reason:** A small manifest is easy to write by hand. Older releases can open projects of newer releases.
 - **Other options:** A strict manifest that refuses unknown keys. A manifest with all future tables now.
 
 ## D92. A native dialog to open a project folder
 
-- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Status:** Accepted, 2026-11-15. **Origin:** Default, reviewed by the project owner.
 - **Decision:** Presswork opens project folders with the native folder dialog of each platform, through `rfd`. On Linux, it uses the XDG desktop portal.
 - **Reason:** Users know the dialog of their platform. The portal needs no GTK libraries.
 - **Other options:** A Presswork dialog. The GTK dialog on Linux.
@@ -657,3 +658,45 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** Presswork uses the NL faces of JetBrains Mono. These faces have no ligatures. Thus the editor shows each character as you type it.
 - **Reason:** In Typst, character sequences such as `==`, `---`, and `->` have a meaning. With ligatures, the editor showed `==` as one long sign, and the level of a heading was not clear. The NL faces are also smaller.
 - **Other options:** JetBrains Mono with ligatures. A setting that turns the ligatures on and off.
+
+## D94. reqwest for HTTP in the desktop application
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The desktop application uses reqwest 0.13 for HTTP, with its default TLS: rustls and the certificate store of the operating system. iced runs its tasks on tokio.
+- **Reason:** The toolchain manager and the server client use the same HTTP client. The certificate store of the operating system also contains the certificates of company proxies.
+- **Other options:** ureq 3, a small blocking client on a worker thread.
+
+## D95. Pure Rust crates to unpack toolchains
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The toolchain manager unpacks `.zip` files with zip, and `.tar.xz` files with tar and lzma-rust2.
+- **Reason:** lzma-rust2 is pure Rust, and it has active maintenance. The zip crate also uses it.
+- **Other options:** liblzma, which binds the C library of xz-utils.
+
+## D96. A reviewed list of digests for older Typst releases
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** For Typst 0.14.0 and later, the toolchain manager compares each download with the SHA-256 digest that GitHub publishes. For Typst 0.11.0 to 0.13.1, Presswork includes a list of digests. A CI job calculates the list one time, and a maintainer examines it before the commit.
+- **Reason:** GitHub publishes digests only for the files of Typst 0.14.0 and later. Projects that pin an older version must also get a digest check.
+- **Other options:** Only Typst 0.14.0 and later. An installation without a digest after a warning.
+
+## D97. A Toolchains panel that opens from the status bar
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The status bar shows the Typst version of the open project. A click opens the Toolchains panel. The panel shows the installed and the available versions and the progress of an installation. It has commands to install, remove, and use a version.
+- **Reason:** The version is always visible, and the panel is one click away.
+- **Other options:** A section on a settings page. A modal dialog.
+
+## D98. A pin in the manifest selects the Typst version
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The command "Use for this project" writes the pin into `presswork.toml`. toml_edit keeps the comments and the layout of the file. If more than one installed version agrees with the pin, Presswork uses the highest.
+- **Reason:** All members of a team then use the same Typst version.
+- **Other options:** A default version in the user settings. A pin and a default version in the user settings.
+
+## D99. Only stable Typst releases in the list
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The list of available versions shows only stable releases. If the pin of the project agrees only with a release candidate, the panel also shows that candidate.
+- **Reason:** Release candidates are for tests. Most users need only stable releases.
+- **Other options:** A switch that shows the release candidates. All releases, with a label.
