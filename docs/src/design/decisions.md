@@ -636,3 +636,17 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** The Write workspace shows the editor and the preview side by side, with the same width. The engine compiles after each change to the text, on its own thread, with one compilation at a time.
 - **Reason:** Writers see the effect of each change at once. One compilation at a time keeps the computer responsive.
 - **Other options:** A preview that shows only after a pause in typing. A preview in a separate window.
+
+## D91. A small manifest that later releases can extend
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** The `presswork.toml` manifest has a `[project]` table with `name`, `main`, and `typst`. Only `name` is necessary. Presswork ignores the keys that it does not know.
+- **Reason:** A small manifest is easy to write by hand. Older releases can open projects of newer releases.
+- **Other options:** A strict manifest that refuses unknown keys. A manifest with all future tables now.
+
+## D92. A native dialog to open a project folder
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** Presswork opens project folders with the native folder dialog of each platform, through `rfd`. On Linux, it uses the XDG desktop portal.
+- **Reason:** Users know the dialog of their platform. The portal needs no GTK libraries.
+- **Other options:** A Presswork dialog. The GTK dialog on Linux.

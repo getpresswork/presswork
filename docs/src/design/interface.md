@@ -102,6 +102,30 @@ The interface has a quiet editorial style. Warm paper colors, ink colors, and th
 
 The status bar shows the workflow stage, the open tasks and queries, the diagnostics, the sync status, the team members in the document, and the Typst version.
 
+In milestone 1, the status bar shows these items:
+
+- The project name and the open file, or "No project open".
+- "Not saved" if the open file has changes that are not saved. Click it to save the file.
+- The duration of the last compilation and the position of the cursor, in the Write workspace.
+- The number of log errors and warnings, and the Logs button.
+
+## Projects
+
+A project is a folder with a `presswork.toml` manifest. The manifest has a `[project]` table:
+
+| Key | Value | Default |
+| --- | --- | --- |
+| `name` | The name of the project. | No default. The key is necessary. |
+| `main` | The path of the main Typst file, relative to the folder. | `main.typ` |
+| `typst` | The Typst version that the project needs, for example `0.15`. | No pin |
+
+Presswork ignores the keys that it does not know. Thus an older Presswork release can open a project from a newer release.
+
+- To open a project, click **Open folder** in the top bar, or push Ctrl+O. Then select the project folder.
+- The Write workspace shows the main file in the editor and its pages in the preview.
+- To save the main file, push Ctrl+S.
+- If the folder is not a project, a notice tells the problem.
+
 ## Home dashboard
 
 The home dashboard is the start page. It shows:
