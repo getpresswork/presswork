@@ -1,16 +1,20 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{button, column, container, row, rule, space, text};
-use iced::{Element, Fill, Subscription, Theme, padding, system};
+use iced::{Element, Fill, FillPortion, Subscription, Task, Theme, padding, system};
 use presswork_editor::Editor;
 use presswork_log::{Level, LogStore};
-use presswork_text::Unit;
+use presswork_preview::Preview;
+use presswork_text::{Position, Unit};
+use presswork_typst::{Output, Severity};
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::theme::{self as ui_theme, Mode};
 use presswork_ui::{font, font_size, size, space as gap};
 
+use crate::compiler::{self, Compiler};
 use crate::i18n::{FluentArgs, Localizer};
 use crate::log_panel::{self, LogPanel};
 use crate::workspace::Workspace;
@@ -25,6 +29,9 @@ pub(crate) struct App {
     logs: LogPanel,
     mode: Mode,
     editor: Editor,
+    compiler: Compiler,
+    preview: Preview,
+    compiled: Option<Arc<Output>>,
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +40,8 @@ pub(crate) enum Message {
     Logs(log_panel::Message),
     SystemTheme(Mode),
     Editor(presswork_editor::Action),
+    Compiled(Arc<Output>),
+    Preview(presswork_preview::Action),
 }
 
 impl App {
@@ -43,7 +52,51 @@ impl App {
             logs: LogPanel::new(store),
             mode: Mode::None,
             editor: Editor::new(SCRATCH),
+            compiler: Compiler::new(),
+            preview: Preview::default(),
+            compiled: None,
         }
+    }
+
+    pub(crate) fn request_compile(&mut self) -> Task<Message> {
+        if self.compiler.request() {
+            self.start_compile()
+        } else {
+            Task::none()
+        }
+    }
+
+    fn start_compile(&self) -> Task<Message> {
+        let text = self.editor.document().buffer().to_string();
+        Task::perform(self.compiler.job(text), |output| {
+            Message::Compiled(Arc::new(output))
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn compile_now(&mut self) {
+        let text = self.editor.document().buffer().to_string();
+        let output = self.compiler.run_now(&text);
+        let _ = self.update(Message::Compiled(Arc::new(output)));
+    }
+
+    fn problem(&self, output: &Output) -> Option<String> {
+        let error = output
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.severity == Severity::Error)?;
+        let mut args = FluentArgs::new();
+        args.set("message", error.message.clone());
+        let Some(range) = &error.range else {
+            return Some(self.localizer.format("preview-error-without-line", &args));
+        };
+        let line = self
+            .editor
+            .document()
+            .buffer()
+            .line_of(Position::new(range.start));
+        args.set("line", line + 1);
+        Some(self.localizer.format("preview-error", &args))
     }
 
     pub(crate) fn title(&self) -> String {
@@ -54,7 +107,7 @@ impl App {
         ui_theme::for_mode(self.mode)
     }
 
-    pub(crate) fn update(&mut self, message: Message) {
+    pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::SelectWorkspace(workspace) => {
                 tracing::debug!(?workspace, "Workspace selected");
@@ -66,11 +119,30 @@ impl App {
                 self.mode = mode;
             }
             Message::Editor(action) => {
+                let revision = self.editor.revision();
                 if let Err(error) = self.editor.perform(action, Instant::now()) {
                     tracing::warn!(%error, "Editor action failed");
                 }
+                if self.editor.revision() != revision {
+                    return self.request_compile();
+                }
             }
+            Message::Compiled(output) => {
+                tracing::debug!(
+                    duration_ms = output.duration.as_millis(),
+                    diagnostics = output.diagnostics.len(),
+                    "Compiled"
+                );
+                self.preview.show(&output, compiler::SCALE);
+                self.preview.set_problem(self.problem(&output));
+                self.compiled = Some(output);
+                if self.compiler.finish() {
+                    return self.start_compile();
+                }
+            }
+            Message::Preview(action) => self.preview.perform(action),
         }
+        Task::none()
     }
 
     pub(crate) fn subscription(&self) -> Subscription<Message> {
@@ -130,9 +202,17 @@ impl App {
         let workspace = self.workspace;
         if workspace == Workspace::Write {
             let colors = ui_theme::colors(&self.theme());
-            return presswork_editor::view(&self.editor, colors, Message::Editor)
-                .autofocus(true)
-                .into();
+            let editor =
+                presswork_editor::view(&self.editor, colors, Message::Editor).autofocus(true);
+            let preview = self
+                .preview
+                .view(self.localizer.text("preview-empty"), Message::Preview);
+            return row![
+                container(editor).width(FillPortion(1)).height(Fill),
+                rule::vertical(1).style(style::hairline),
+                container(preview).width(FillPortion(1)).height(Fill),
+            ]
+            .into();
         }
         let content = column![
             icon(workspace.icon())
@@ -165,14 +245,14 @@ impl App {
         let (errors, warnings) = self.logs.counts();
         let mut indicators = row![].spacing(gap::XS).align_y(Vertical::Center);
         if self.workspace == Workspace::Write {
-            indicators = indicators.push(
-                container(
-                    text(self.cursor_position())
-                        .size(font_size::SMALL)
-                        .style(style::muted),
-                )
-                .padding([0.0, gap::S]),
-            );
+            if let Some(output) = &self.compiled {
+                let mut args = FluentArgs::new();
+                let milliseconds = u64::try_from(output.duration.as_millis()).unwrap_or(u64::MAX);
+                args.set("milliseconds", milliseconds);
+                indicators =
+                    indicators.push(status_text(self.localizer.format("status-compiled", &args)));
+            }
+            indicators = indicators.push(status_text(self.cursor_position()));
         }
         if errors > 0 {
             indicators = indicators.push(count_button(
@@ -214,6 +294,17 @@ fn hairline<'a>() -> Element<'a, Message> {
     rule::horizontal(1).style(style::hairline).into()
 }
 
+#[cfg(test)]
+pub(crate) fn send(app: &mut App, message: Message) {
+    let _ = app.update(message);
+}
+
+fn status_text<'a>(content: String) -> Element<'a, Message> {
+    container(text(content).size(font_size::SMALL).style(style::muted))
+        .padding([0.0, gap::S])
+        .into()
+}
+
 fn count_button<'a>(symbol: Icon, count: usize, tone: Tone, level: Level) -> Element<'a, Message> {
     let content = row![
         icon(symbol).size(size::ICON_SMALL).style(style::tone(tone)),
@@ -233,9 +324,102 @@ fn count_button<'a>(symbol: Icon, count: usize, tone: Tone, level: Level) -> Ele
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use iced_test::simulator;
     use presswork_log::LogEntry;
+    use presswork_typst::Diagnostic;
+
+    fn insert(text: &str) -> Message {
+        Message::Editor(presswork_editor::Action::Insert(text.to_owned()))
+    }
+
+    fn compiled(output: Output) -> Message {
+        Message::Compiled(Arc::new(output))
+    }
+
+    #[test]
+    fn an_edit_starts_a_compilation() {
+        let mut app = app();
+        assert!(!app.compiler.is_running());
+
+        send(&mut app, insert("x"));
+
+        assert!(app.compiler.is_running());
+    }
+
+    #[test]
+    fn edits_during_a_compilation_start_one_more() {
+        let mut app = app();
+        send(&mut app, insert("x"));
+        send(&mut app, insert("y"));
+
+        send(&mut app, compiled(Output::default()));
+        assert!(app.compiler.is_running());
+
+        send(&mut app, compiled(Output::default()));
+        assert!(!app.compiler.is_running());
+    }
+
+    #[test]
+    fn the_preview_waits_for_the_first_compilation() {
+        let app = app();
+        let mut ui = simulator(app.view());
+
+        assert!(
+            ui.find("The preview shows the pages after the first compilation.")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn the_status_bar_shows_the_time_of_the_last_compilation() {
+        let mut app = app();
+        send(
+            &mut app,
+            compiled(Output {
+                duration: Duration::from_millis(85),
+                ..Output::default()
+            }),
+        );
+
+        let mut ui = simulator(app.view());
+
+        assert!(ui.find("Compiled in 85 ms").is_ok());
+    }
+
+    #[test]
+    fn an_error_appears_above_the_preview_with_its_line() {
+        let mut app = app();
+        let line_two = app.editor.document().buffer().line_start(1).offset();
+        let error = Diagnostic {
+            severity: Severity::Error,
+            range: Some(line_two..line_two + 1),
+            message: "unknown variable: x".to_owned(),
+            hints: Vec::new(),
+        };
+        send(
+            &mut app,
+            compiled(Output {
+                diagnostics: vec![error],
+                ..Output::default()
+            }),
+        );
+
+        let mut ui = simulator(app.view());
+
+        assert!(ui.find("Line 2: unknown variable: x").is_ok());
+    }
+
+    #[test]
+    fn a_compilation_now_shows_the_pages_of_the_scratch_text() {
+        let mut app = app();
+
+        app.compile_now();
+
+        assert_eq!(app.preview.page_count(), 1);
+    }
 
     fn app() -> App {
         App::new(LogStore::with_capacity(10))
@@ -250,17 +434,17 @@ mod tests {
     fn theme_follows_the_system_mode() {
         let mut app = app();
 
-        app.update(Message::SystemTheme(Mode::Dark));
+        send(&mut app, Message::SystemTheme(Mode::Dark));
         assert!(app.theme().extended_palette().is_dark);
 
-        app.update(Message::SystemTheme(Mode::Light));
+        send(&mut app, Message::SystemTheme(Mode::Light));
         assert!(!app.theme().extended_palette().is_dark);
     }
 
     #[test]
     fn main_area_describes_a_workspace_without_content() {
         let mut app = app();
-        app.update(Message::SelectWorkspace(Workspace::Plan));
+        send(&mut app, Message::SelectWorkspace(Workspace::Plan));
         let mut ui = simulator(app.view());
 
         let description = app.localizer.text(Workspace::Plan.description_id());
@@ -274,7 +458,7 @@ mod tests {
 
         ui.typewrite("x");
         for message in ui.into_messages() {
-            app.update(message);
+            send(&mut app, message);
         }
 
         assert!(app.editor.document().buffer().to_string().starts_with('x'));
@@ -283,7 +467,7 @@ mod tests {
     #[test]
     fn other_workspaces_ignore_typing() {
         let mut app = app();
-        app.update(Message::SelectWorkspace(Workspace::Plan));
+        send(&mut app, Message::SelectWorkspace(Workspace::Plan));
         let mut ui = simulator(app.view());
 
         ui.typewrite("x");
@@ -314,7 +498,7 @@ mod tests {
 
         ui.click("Logs").expect("Logs is in the view");
         for message in ui.into_messages() {
-            app.update(message);
+            send(&mut app, message);
         }
 
         assert!(app.logs.is_open());
@@ -335,7 +519,7 @@ mod tests {
         let mut ui = simulator(app.view());
         ui.click("1").expect("the error count is in the view");
         for message in ui.into_messages() {
-            app.update(message);
+            send(&mut app, message);
         }
 
         let mut ui = simulator(app.view());
@@ -347,7 +531,7 @@ mod tests {
     fn select_workspace_changes_the_workspace() {
         let mut app = app();
 
-        app.update(Message::SelectWorkspace(Workspace::Review));
+        send(&mut app, Message::SelectWorkspace(Workspace::Review));
 
         assert_eq!(app.workspace, Workspace::Review);
     }
@@ -382,7 +566,7 @@ mod tests {
 
         ui.click("Plan").expect("Plan is in the view");
         for message in ui.into_messages() {
-            app.update(message);
+            send(&mut app, message);
         }
 
         assert_eq!(app.workspace, Workspace::Plan);

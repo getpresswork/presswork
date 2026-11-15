@@ -15,11 +15,14 @@ workspace = true
 [dependencies]
 presswork-editor.workspace = true
 presswork-log.workspace = true
+presswork-preview.workspace = true
 presswork-text.workspace = true
+presswork-typst.workspace = true
 presswork-ui.workspace = true
 
 directories.workspace = true
 fluent-bundle.workspace = true
+futures.workspace = true
 iced.workspace = true
 jiff.workspace = true
 tracing.workspace = true

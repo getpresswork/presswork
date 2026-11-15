@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use iced::Settings;
 use iced_test::Simulator;
@@ -7,11 +8,12 @@ use presswork_log::{Level, LogEntry, LogStore};
 use presswork_ui::theme::Mode;
 use presswork_ui::{font, font_size};
 
-use crate::app::{App, Message};
+use crate::app::{App, Message, send};
 use crate::log_panel;
 
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 800.0;
+const IMAGE_UPLOAD: Duration = Duration::from_millis(300);
 
 fn directory() -> PathBuf {
     std::env::var_os("PRESSWORK_SCREENS").map_or_else(
@@ -34,7 +36,7 @@ fn render(app: &mut App, name: &str) {
     let directory = directory();
     std::fs::create_dir_all(&directory).unwrap();
     for (label, mode) in [("light", Mode::Light), ("dark", Mode::Dark)] {
-        app.update(Message::SystemTheme(mode));
+        send(app, Message::SystemTheme(mode));
         let theme = app.theme();
         let stem = format!("{name}-{label}");
         for old in std::fs::read_dir(&directory).unwrap().flatten() {
@@ -43,6 +45,8 @@ fn render(app: &mut App, name: &str) {
             }
         }
         let mut ui = Simulator::with_size(settings(), (WIDTH, HEIGHT), app.view());
+        let _ = ui.snapshot(&theme).unwrap();
+        std::thread::sleep(IMAGE_UPLOAD);
         ui.snapshot(&theme)
             .unwrap()
             .matches_image(directory.join(stem))
@@ -105,8 +109,12 @@ fn sample_store() -> LogStore {
 #[ignore = "writes screen images for design reviews"]
 fn render_screens() {
     let mut app = App::new(sample_store());
+    app.compile_now();
     render(&mut app, "main-window");
 
-    app.update(Message::Logs(log_panel::Message::Show(Level::Debug)));
+    send(
+        &mut app,
+        Message::Logs(log_panel::Message::Show(Level::Debug)),
+    );
     render(&mut app, "log-panel");
 }

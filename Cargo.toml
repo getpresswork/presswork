@@ -14,6 +14,7 @@ publish = false
 [workspace.dependencies]
 presswork-editor = { path = "crates/presswork-editor" }
 presswork-log = { path = "crates/presswork-log" }
+presswork-preview = { path = "crates/presswork-preview" }
 presswork-text = { path = "crates/presswork-text" }
 presswork-typst = { path = "crates/presswork-typst" }
 presswork-ui = { path = "crates/presswork-ui" }

@@ -1,4 +1,5 @@
 mod app;
+mod compiler;
 mod i18n;
 mod log_panel;
 mod logging;
@@ -18,10 +19,10 @@ pub fn run() -> iced::Result {
         |logging| logging.store.clone(),
     );
     let boot = move || {
-        (
-            App::new(store.clone()),
-            iced::system::theme().map(app::Message::SystemTheme),
-        )
+        let mut app = App::new(store.clone());
+        let compile = app.request_compile();
+        let theme = iced::system::theme().map(app::Message::SystemTheme);
+        (app, iced::Task::batch([theme, compile]))
     };
     iced::application(boot, App::update, App::view)
         .settings(iced::Settings {

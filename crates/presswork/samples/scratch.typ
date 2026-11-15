@@ -1,6 +1,7 @@
 // Presswork does not save this scratch text yet.
 #set page(paper: "a5", margin: 2cm)
 #set text(font: "Libertinus Serif", size: 11pt, lang: "en")
+#set heading(numbering: "1.")
 
 = A first chapter <intro>
 

@@ -18,6 +18,11 @@ workspace-publish-description = This workspace shows the export profiles, the va
 
 status-no-project = No project open
 status-position = Line { $line }, column { $column }
+status-compiled = Compiled in { $milliseconds } ms
+
+preview-empty = The preview shows the pages after the first compilation.
+preview-error = Line { $line }: { $message }
+preview-error-without-line = { $message }
 
 logs-toggle = Logs
 logs-title = Logs
