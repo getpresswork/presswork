@@ -4,7 +4,8 @@ use iced::Settings;
 use iced_test::Simulator;
 use jiff::Timestamp;
 use presswork_log::{Level, LogEntry, LogStore};
-use presswork_ui::{font, font_size, theme};
+use presswork_ui::theme::Mode;
+use presswork_ui::{font, font_size};
 
 use crate::app::{App, Message};
 use crate::log_panel;
@@ -29,11 +30,13 @@ fn settings() -> Settings {
     }
 }
 
-fn render(app: &App, name: &str) {
+fn render(app: &mut App, name: &str) {
     let directory = directory();
     std::fs::create_dir_all(&directory).unwrap();
-    for (mode, theme) in [("light", theme::light()), ("dark", theme::dark())] {
-        let stem = format!("{name}-{mode}");
+    for (label, mode) in [("light", Mode::Light), ("dark", Mode::Dark)] {
+        app.update(Message::SystemTheme(mode));
+        let theme = app.theme();
+        let stem = format!("{name}-{label}");
         for old in std::fs::read_dir(&directory).unwrap().flatten() {
             if old.file_name().to_string_lossy().starts_with(&stem) {
                 std::fs::remove_file(old.path()).unwrap();
@@ -102,8 +105,8 @@ fn sample_store() -> LogStore {
 #[ignore = "writes screen images for design reviews"]
 fn render_screens() {
     let mut app = App::new(sample_store());
-    render(&app, "main-window");
+    render(&mut app, "main-window");
 
     app.update(Message::Logs(log_panel::Message::Show(Level::Debug)));
-    render(&app, "log-panel");
+    render(&mut app, "log-panel");
 }
