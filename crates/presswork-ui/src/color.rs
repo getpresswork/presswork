@@ -19,6 +19,22 @@ pub struct Colors {
     pub warning: Color,
     pub success: Color,
     pub info: Color,
+    pub editor: EditorColors,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EditorColors {
+    pub current_line: Color,
+    pub selection: Color,
+    pub line_number: Color,
+    pub comment: Color,
+    pub keyword: Color,
+    pub function: Color,
+    pub string: Color,
+    pub number: Color,
+    pub operator: Color,
+    pub reference: Color,
+    pub error: Color,
 }
 
 pub const LIGHT: Colors = Colors {
@@ -39,6 +55,19 @@ pub const LIGHT: Colors = Colors {
     warning: rgb(0x86, 0x50, 0x00),
     success: rgb(0x2C, 0x66, 0x4A),
     info: rgb(0x1D, 0x4E, 0x89),
+    editor: EditorColors {
+        current_line: rgb(0xF4, 0xF1, 0xEB),
+        selection: rgb(0xF2, 0xE3, 0xE4),
+        line_number: rgb(0x77, 0x6F, 0x64),
+        comment: rgb(0x6B, 0x63, 0x58),
+        keyword: rgb(0x8C, 0x2F, 0x39),
+        function: rgb(0x1D, 0x4E, 0x89),
+        string: rgb(0x2C, 0x66, 0x4A),
+        number: rgb(0x86, 0x50, 0x00),
+        operator: rgb(0x5F, 0x59, 0x50),
+        reference: rgb(0x7A, 0x3B, 0x69),
+        error: rgb(0xA8, 0x23, 0x1B),
+    },
 };
 
 pub const DARK: Colors = Colors {
@@ -59,6 +88,19 @@ pub const DARK: Colors = Colors {
     warning: rgb(0xE3, 0xAE, 0x5E),
     success: rgb(0x7F, 0xC2, 0xA0),
     info: rgb(0x7F, 0xB0, 0xE8),
+    editor: EditorColors {
+        current_line: rgb(0x21, 0x1F, 0x1D),
+        selection: rgb(0x3B, 0x25, 0x28),
+        line_number: rgb(0x91, 0x8A, 0x7E),
+        comment: rgb(0xA3, 0x9B, 0x8E),
+        keyword: rgb(0xE0, 0x7A, 0x84),
+        function: rgb(0x7F, 0xB0, 0xE8),
+        string: rgb(0x7F, 0xC2, 0xA0),
+        number: rgb(0xE3, 0xAE, 0x5E),
+        operator: rgb(0xA9, 0xA1, 0x96),
+        reference: rgb(0xCB, 0x9B, 0xC2),
+        error: rgb(0xF2, 0x86, 0x7C),
+    },
 };
 
 #[must_use]
@@ -143,6 +185,41 @@ pub(crate) mod tests {
         let middle = mix(rgb(0x00, 0x00, 0x00), rgb(0xFF, 0xFF, 0xFF), 0.5);
 
         assert!((middle.r - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn editor_text_colors_are_readable_on_all_editor_backgrounds() {
+        for (theme, colors) in [("light", &LIGHT), ("dark", &DARK)] {
+            let editor = colors.editor;
+            for (surface, background) in [
+                ("page", colors.page),
+                ("current line", editor.current_line),
+                ("selection", editor.selection),
+            ] {
+                for (role, foreground) in [
+                    ("ink", colors.ink),
+                    ("comment", editor.comment),
+                    ("keyword", editor.keyword),
+                    ("function", editor.function),
+                    ("string", editor.string),
+                    ("number", editor.number),
+                    ("operator", editor.operator),
+                    ("reference", editor.reference),
+                    ("error", editor.error),
+                ] {
+                    assert_readable(
+                        &format!("{theme} {role} on {surface}"),
+                        foreground,
+                        background,
+                    );
+                }
+            }
+            assert_readable(
+                &format!("{theme} line number on page"),
+                editor.line_number,
+                colors.page,
+            );
+        }
     }
 
     #[test]
