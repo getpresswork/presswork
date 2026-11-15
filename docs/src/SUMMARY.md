@@ -14,6 +14,7 @@
 - [Library](design/library.md)
 - [Editorial tools](design/editorial.md)
 - [Production](design/production.md)
+- [Communication](design/communication.md)
 - [Server](design/server.md)
 - [Domain model](design/domain-model.md)
 - [Tasks and schedules](design/schedules.md)
