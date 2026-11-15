@@ -62,6 +62,40 @@ The translation workspace shows the source text and the target text side by side
 - Each segment has a status: new, draft, translated, or approved.
 - Presswork can export and import XLIFF files for other translation tools.
 
+## Proof collation
+
+- A proof round is one set of proof pages for a revision, for example the first proofs.
+- Proofreaders mark the pages with standard proof marks, in the desktop application or in the web portal.
+- Presswork collates the corrections of all proofreaders into one list for the proof round. It merges corrections at the same location, and it shows the conflicts between them.
+- Each correction links to its page area and to its source text. The typesetter applies it as a suggestion, or rejects it with a reason.
+- The next proof round shows which corrections are complete.
+
+## Accessibility audit
+
+The accessibility audit examines the compiled document and the exports for these items:
+
+- Alternative text for each image.
+- A correct sequence of heading levels.
+- The reading order.
+- Header rows in tables.
+- The language of each part of the text.
+- The color contrast of text in figures.
+
+The results show in the preflight panel. A checklist item can use them. The audit applies to PDF/UA files and to EPUB files.
+
+## Controlled language checks
+
+- An organization can turn on controlled language rules, for example the writing rules of ASD-STE100.
+- The rules examine the sentence length, the -ing forms, the passive voice, the noun clusters, and the lists of approved and forbidden words.
+- The organization loads its own dictionary. Presswork does not include the ASD-STE100 dictionary, because ASD owns its copyright.
+- Problems show in the editor, in the same way as spelling problems. AI assistance can propose a rewrite.
+
+## Find and replace in the organization
+
+- Find a word or a pattern in all publications of the organization.
+- Replace it in all locations. Each replacement is a suggestion in its publication.
+- Presswork does not change publications after their release.
+
 ## Read aloud
 
 The read-aloud function reads the text aloud. It marks each word while it speaks the word. This helps proofreaders find repeated words and words that are not there. Presswork uses the speech functions of the operating system.
