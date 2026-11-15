@@ -20,6 +20,8 @@
 - [Platform](design/platform.md)
 - [AI assistance](design/ai.md)
 - [Server](design/server.md)
+- [Operations](design/operations.md)
+- [Logs and diagnostics](design/logs.md)
 - [Domain model](design/domain-model.md)
 - [Tasks and schedules](design/schedules.md)
 - [Contacts and contracts](design/contacts.md)
