@@ -8,31 +8,42 @@ The interface has one pane system. A workspace is a saved layout of panes for on
 
 | Workspace | Users | Main panes |
 | --- | --- | --- |
+| Plan | Production managers | Tasks, timeline, calendar, workflow board, budget, reports |
+| Research | Authors, editors, and researchers | Library, file reader with annotations, research notes, quote checker |
 | Write | Authors and editors | Outline, editor, preview |
-| Typeset | Typesetters | Files, editor, preview with guides, styles, fonts, preflight |
-| Review | Editors, proofreaders, and reviewers | Preview, comments, tickets, revision compare |
-| Plan | Production managers | Tasks, schedule, workflow board, reports |
-| Publish | Production managers and typesetters | Export profiles, preflight, validation, releases |
+| Translate | Translators | Source text, target text, translation memory, termbase |
+| Review | Editors, proofreaders, and reviewers | Preview, comments, tickets, suggestions, revision compare |
+| Typeset | Typesetters | Files, editor, preview with guides, styles, fonts, assets, preflight |
+| Publish | Production managers and typesetters | Export profiles, preflight, validation, covers, metadata, releases |
 
 ```text
-+ Write | Typeset | Review | Plan | Publish ---------- Ctrl+K +
-| Outline  | chapter-03.typ         | Preview                  |
-|  Part I  | = The Long Night       |  +--------------------+  |
-|   Ch. 1  |                        |  |      Page 41       |  |
-|   Ch. 2  | It was late when the   |  |                    |  |
-| > Ch. 3  | press stopped.         |  +--------------------+  |
-|----------+------------------------+--------------------------|
-| Stage: Copyedit | 3 tasks | 2 queries | 0 errors | Typst 0.15 |
-+-------------------------------------------------------------+
++ Plan | Research | Write | Review | Typeset | Publish ----- Ctrl+K +
+| Outline  | chapter-03.typ         | Preview                       |
+|  Part I  | = The Long Night       |  +-------------------------+  |
+|   Ch. 1  |                        |  |         Page 41         |  |
+|   Ch. 2  | It was late when the   |  |                         |  |
+| > Ch. 3  | press stopped.         |  +-------------------------+  |
+|----------+------------------------+-------------------------------|
+| Stage: Copyedit | 3 tasks | 2 queries | 0 errors | Typst 0.15     |
++-------------------------------------------------------------------+
 ```
 
-The workspace bar at the top shows all workspaces. Select a workspace to change the layout. Each user can change a workspace and save it. Each role has a default workspace.
+The workspace bar at the top shows the workspaces in the sequence of a publication, from the plan to the release. It shows only the workspaces of the roles of the user. Select a workspace to change the layout. Each user can change a workspace and save it. Each role has a default workspace.
 
 ## Panes
 
 - Each pane has tabs.
 - You can split, move, and close panes with the mouse or with commands.
-- Each panel can open in each pane. The panels are: project files, outline, editor, preview, diagnostics, build log, tickets, tasks, checklists, workflow, revisions, comments, fonts, packages, toolchains, preflight, reports, and team.
+- Each panel can open in each pane. The panels are: project files, outline, editor, preview, diagnostics, build log, tickets, tasks, timeline, calendar, table, checklists, workflow, revisions, suggestions, comments, chat, inbox, related, library, annotations, research notes, termbase, translation memory, back-of-book index, assets, clearances, budget, time, fonts, packages, toolchains, preflight, covers, metadata, reports, and team.
+
+## Windows
+
+- Each project opens in its own window. A window shows one project.
+- You can detach each pane into its own window, for example the preview on a second screen. You can attach the pane to the project window again.
+- Presswork remembers the windows of each project: the position, the size, the screen, and the layout.
+- All windows run in one process. They share the Typst engine, the caches, and the server connection.
+- Commands apply to the window that has the focus.
+- The chat and the inbox can open in their own window, outside of a project.
 
 ## Commands
 
