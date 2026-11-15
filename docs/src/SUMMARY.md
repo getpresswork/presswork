@@ -16,6 +16,7 @@
 - [Production](design/production.md)
 - [Communication](design/communication.md)
 - [Platform](design/platform.md)
+- [AI assistance](design/ai.md)
 - [Server](design/server.md)
 - [Domain model](design/domain-model.md)
 - [Tasks and schedules](design/schedules.md)

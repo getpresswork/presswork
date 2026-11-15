@@ -29,13 +29,6 @@ Plugins add functions to Presswork. A plugin is a WebAssembly module that uses t
 - A plugin panel uses a declarative description of its widgets. Presswork draws the widgets with its own design system. Thus plugins look like the rest of Presswork.
 - Plugins run on the desktop. The server runs only the plugins that an administrator installs.
 
-## AI assistance
+## AI assistance and MCP
 
-AI assistance is off by default. An administrator must turn it on for the organization.
-
-- The AI functions are: copyedit suggestions, alternative text for images, index terms, translation drafts, and summaries.
-- An AI result is always a suggestion. A person accepts or rejects each result. Copyedit results use suggestion mode.
-- The administrator selects the provider: the Anthropic API, or a local model server with an OpenAI-compatible API.
-- Before Presswork sends content, it shows the content and the provider. The person must confirm.
-- In encrypted projects, AI assistance is off. A person can approve one request at a time.
-- If the provider has a setting that stops the use of content to train models, Presswork turns on this setting.
+AI assistance is off by default. Refer to [AI assistance](ai.md) for the AI functions, the AI gateway, the providers, and the MCP servers.
