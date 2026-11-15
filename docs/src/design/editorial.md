@@ -10,7 +10,7 @@ In suggestion mode, an edit does not change the text directly. It becomes a sugg
 - A deletion shows with a line through the text.
 - Each suggestion records the person and the time.
 
-The author accepts or rejects each suggestion, or all suggestions in a range. Suggestions are marks in the Loro document, so they also operate during live co-editing.
+The author accepts or rejects each suggestion, or all suggestions in a range. Suggestions are marks in the Loro document, so they also operate during live edits.
 
 The file on disk contains the text without the open suggestions. The preview can show the text with or without the suggestions.
 
@@ -62,6 +62,6 @@ The translation workspace shows the source text and the target text side by side
 - Each segment has a status: new, draft, translated, or approved.
 - Presswork can export and import XLIFF files for other translation tools.
 
-## Read-aloud proofing
+## Read aloud
 
-Presswork can read the text aloud. It marks each word while it speaks the word. This helps proofreaders find repeated words and words that are not there. Presswork uses the speech functions of the operating system.
+The read-aloud function reads the text aloud. It marks each word while it speaks the word. This helps proofreaders find repeated words and words that are not there. Presswork uses the speech functions of the operating system.

@@ -44,7 +44,7 @@ In an encrypted project, the server cannot do these things:
 - Show the project in the web portal.
 - Put content into summary emails.
 
-The desktop does this work. A member can select one desktop to run the routines of the project when it is online.
+The desktop does these jobs. A member can select one desktop to run the routines of the project when it is online.
 
 Before release 1.0, an external security audit examines the encryption design and its code.
 

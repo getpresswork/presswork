@@ -31,7 +31,7 @@ This chapter shows the core records. These chapters tell the other areas:
 | Area | Chapter |
 | --- | --- |
 | Library, annotations, and research notes | [Library](library.md) |
-| Views, planning, time, and budgets | [Tasks and schedules](schedules.md) |
+| Views, plans, time, and budgets | [Tasks and schedules](schedules.md) |
 | Suggestions, spelling, house style, termbase, index, and translation | [Editorial tools](editorial.md) |
 | Assets, clearances, identifiers, and metadata | [Production](production.md) |
 | Chat, inbox, portal, and submissions | [Communication](communication.md) |

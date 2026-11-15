@@ -70,7 +70,7 @@ One search finds all objects: the text in projects, the pages in the library, ta
 
 ## Status in context
 
-Each view shows the state of the related objects at the location where you work:
+Each view shows the state of the related objects at the location of your cursor or selection:
 
 - The outline shows the workflow stage of each chapter.
 - The editor gutter shows tickets, suggestions, spelling problems, and the results of the quote checker.

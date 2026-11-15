@@ -61,7 +61,7 @@ The desktop application has a signed updater:
 3. The updater downloads the package for the platform. It checks the Ed25519 signature and the SHA-256 checksum.
 4. The update installs when the application starts the next time.
 
-Users can turn off the update check. Installations from package managers do not use the updater. Refer to [Security](security.md) for the signing key.
+Users can turn off the update check. Installations from package managers do not use the updater. Refer to [Security](security.md) for the key of the signatures.
 
 ## Signatures
 

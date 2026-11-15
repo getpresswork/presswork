@@ -22,7 +22,7 @@ A person can save a view with its filters. A team can share saved views.
 
 The calendar has an ICS feed. Thus other calendar applications can show the Presswork dates. The feed address contains a secret token.
 
-## Planning
+## Schedules
 
 - A task can have dependencies on other tasks. A dependency has a type: finish to start, start to start, or finish to finish.
 - A milestone is a date that marks the end of a phase, for example "Proofs to author".

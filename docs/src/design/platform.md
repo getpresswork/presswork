@@ -38,4 +38,4 @@ AI assistance is off by default. An administrator must turn it on for the organi
 - The administrator selects the provider: the Anthropic API, or a local model server with an OpenAI-compatible API.
 - Before Presswork sends content, it shows the content and the provider. The person must confirm.
 - In encrypted projects, AI assistance is off. A person can approve one request at a time.
-- Presswork uses the provider settings that prevent training on the content, if the provider has these settings.
+- If the provider has a setting that stops the use of content to train models, Presswork turns on this setting.

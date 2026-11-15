@@ -1,6 +1,6 @@
 # Library
 
-This chapter tells how the team library keeps texts, and how the library connects to the writing.
+This chapter tells how the team library keeps texts, and how the library connects to the text of the publications.
 
 ## Purpose
 

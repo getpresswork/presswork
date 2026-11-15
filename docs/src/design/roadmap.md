@@ -21,7 +21,7 @@ Milestone 1 makes a small version of each part, from end to end. The goal is to 
 13. Desktop application: sign in, open a server project, edit with another person, complete tasks, and chat.
 14. Installers for all platforms.
 
-## Milestone 2: writing workbench (0.2)
+## Milestone 2: editor and preview (0.2)
 
 - Editor: many cursors, find and replace, completion, tooltips, go to definition, and folding.
 - Preview: spreads, guides, jumps between source and pages, and thumbnails.
@@ -80,7 +80,7 @@ Milestone 1 makes a small version of each part, from end to end. The goal is to 
 - The termbase.
 - The translation workspace, translation memory, and XLIFF.
 - Back-of-book index tools.
-- Read-aloud proofing.
+- The read-aloud function.
 - Calls for papers, submissions, and peer review.
 
 ## Milestone 8: platform (0.8)

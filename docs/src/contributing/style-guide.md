@@ -155,6 +155,7 @@ Some words have a different meaning in daily language. In Presswork text, use th
 | digest | The SHA-256 hash of a file. |
 | direct message | A chat conversation between two or more persons, outside of channels. |
 | edition | One published form of a work, for example an original, a translation, or a reprint. It has its own page numbers. |
+| folding | An editor function that hides parts of the text and shows them again. |
 | inbox | The list of mentions, assignments, replies, and approvals for one person. |
 | issue | One number of a periodical, for example Issue 42. |
 | manifest | The `presswork.toml` file of a project. |
@@ -179,6 +180,7 @@ Some words have a different meaning in daily language. In Presswork text, use th
 | role | A named set of permissions. |
 | routine | A sequence of steps that a schedule or an event starts. |
 | segment | A sentence or a short part of a text in the translation workspace. |
+| spelling | The correct letters of the words in a language. The spell checker examines it. |
 | stage | A state in a workflow, for example Copyedit. |
 | standard edition | An edition that a team selects for a work and a purpose. |
 | submission | A manuscript that a person sends through a call for papers. |
