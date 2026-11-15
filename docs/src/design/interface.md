@@ -34,7 +34,7 @@ The workspace bar at the top shows the workspaces in the sequence of a publicati
 
 - Each pane has tabs.
 - You can split, move, and close panes with the mouse or with commands.
-- Each panel can open in each pane. The panels are: project files, outline, editor, preview, diagnostics, build log, tickets, tasks, timeline, calendar, table, checklists, workflow, revisions, suggestions, comments, chat, inbox, related, library, annotations, research notes, termbase, translation memory, back-of-book index, assets, clearances, budget, time, fonts, packages, toolchains, preflight, covers, metadata, reports, and team.
+- Each panel can open in each pane. The panels are: project files, outline, editor, preview, diagnostics, build log, tickets, tasks, timeline, calendar, table, checklists, workflow, revisions, suggestions, comments, chat, inbox, related, library, annotations, research notes, termbase, translation memory, back-of-book index, assets, clearances, budget, time, contacts, contracts, structure board, variants, styles, QA report, proof corrections, history, logs, assistant, fonts, packages, toolchains, preflight, covers, metadata, reports, and team.
 
 ## Windows
 
@@ -66,14 +66,27 @@ Thus each action has one origin, and you can use all functions with the keyboard
 
 The status bar shows the workflow stage, the open tasks and queries, the diagnostics, the sync status, the team members in the document, and the Typst version.
 
-## Start screen
+## Home dashboard
 
-On the start screen, you can:
+The home dashboard is the start page. It shows:
+
+- Your tasks and your inbox.
+- The deadlines of the next days.
+- Your recent projects.
+- The activity of your teams.
+
+From the home dashboard, you can also:
 
 - Open a local folder.
-- Make a new project from a template: book, periodical, documentation, or paper.
+- Make a new project from a template or a brand kit: book, periodical, documentation, or paper.
 - Connect to a server and open a server project.
-- Open a recent project.
+- Open the Typst scratchpad. Refer to [Typesetting tools](typesetting-tools.md).
+
+## Operating system integration
+
+- Presswork registers itself for `.typ` files and for `presswork.toml` files.
+- The file managers show thumbnails of Typst documents, and macOS Quick Look shows a preview.
+- The jump lists of Windows and the dock menu of macOS show recent projects.
 
 ## Accessibility
 
