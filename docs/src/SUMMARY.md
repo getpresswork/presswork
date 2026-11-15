@@ -5,6 +5,7 @@
 # Design
 
 - [Overview](design/overview.md)
+- [Architecture](design/architecture.md)
 
 # Contributing
 
