@@ -6,11 +6,15 @@ Presswork is a typesetting and publication workbench for [Typst](https://typst.a
 
 ## Functions
 
-- **Typst workbench.** Edit Typst sources with a live preview, diagnostics, completion, and jumps between the source and the pages.
+- **Typst workbench.** Edit Typst sources with a live preview, diagnostics, completion, and jumps between the source and the pages. Detach the preview to a second screen.
 - **Toolchains.** Install Typst versions and pin one version for each project. Import manuscripts with Pandoc. Validate PDF/A and PDF/UA files with veraPDF.
-- **Live collaboration.** Edit the same document with your team at the same time. Edit offline and sync later.
-- **Production management.** Use tickets, tasks, roles, checklists, workflows, routines, and reports for books, periodicals, technical documentation, and academic publications.
-- **Workspaces.** Each role gets a clear layout: Write, Typeset, Review, Plan, and Publish.
+- **Team library.** Keep works, editions, and files with OCR. Set the standard editions for quotations. Check each quotation against its edition.
+- **Live collaboration.** Edit the same document with your team at the same time, with suggestion mode. Edit offline and sync later.
+- **Production management.** Use tickets, tasks, schedules, roles, checklists, workflows, routines, budgets, and reports for books, periodicals, technical documentation, and academic publications.
+- **Editorial tools.** Use spelling and house style checks, a termbase, back-of-book index tools, and a translation workspace.
+- **Production.** Make PDF, EPUB, covers, ONIX metadata, and print-ready files. Control assets and clearances.
+- **Team chat.** Use channels, direct messages, and comments on each object, with links between all parts.
+- **Workspaces.** Each role gets a clear layout: Plan, Research, Write, Translate, Review, Typeset, and Publish.
 - **No lock-in.** A Presswork project is a normal Typst project.
 
 ## Documentation
