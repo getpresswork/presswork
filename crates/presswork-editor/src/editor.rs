@@ -64,7 +64,20 @@ impl Editor {
         parts.join(boundary::line_break(buffer))
     }
 
-    pub fn perform(&mut self, action: Action, now: Instant) -> Result<(), TextError> {
+    pub fn apply_remote(&mut self, changes: &ChangeSet) -> Result<(), TextError> {
+        if changes.is_empty() {
+            return Ok(());
+        }
+        self.document.apply_remote(changes)?;
+        self.revision += 1;
+        Ok(())
+    }
+
+    pub fn perform(
+        &mut self,
+        action: Action,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
         self.goal = None;
         let buffer = self.document.buffer();
         match action {
@@ -92,7 +105,7 @@ impl Editor {
                     now,
                 )?;
                 self.goal = goal;
-                Ok(())
+                Ok(None)
             }
             Action::SelectAll => {
                 let all = Position::default()..Position::new(buffer.len());
@@ -118,38 +131,51 @@ impl Editor {
             }
             Action::Delete(deletion) => self.delete(deletion, now),
             Action::Undo => {
-                if self.document.undo()?.is_some() {
-                    self.revision += 1;
-                }
-                Ok(())
+                let changes = self.document.undo()?;
+                self.count(changes.as_ref());
+                Ok(changes)
             }
             Action::Redo => {
-                if self.document.redo()?.is_some() {
-                    self.revision += 1;
-                }
-                Ok(())
+                let changes = self.document.redo()?;
+                self.count(changes.as_ref());
+                Ok(changes)
             }
         }
     }
 
-    fn select(&mut self, selection: Selection, now: Instant) -> Result<(), TextError> {
+    fn count(&mut self, changes: Option<&ChangeSet>) {
+        if changes.is_some() {
+            self.revision += 1;
+        }
+    }
+
+    fn select(
+        &mut self,
+        selection: Selection,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
         let len = self.document.buffer().len();
         let transaction = Transaction::new(ChangeSet::empty(len)).with_selection(selection);
-        self.document.apply(transaction, now)
+        self.document.apply(transaction, now)?;
+        Ok(None)
     }
 
     fn select_range(
         &mut self,
         range: std::ops::Range<Position>,
         now: Instant,
-    ) -> Result<(), TextError> {
+    ) -> Result<Option<ChangeSet>, TextError> {
         self.select(
             Selection::single(SelectionRange::new(range.start, range.end)),
             now,
         )
     }
 
-    fn replace_selection(&mut self, text: &str, now: Instant) -> Result<(), TextError> {
+    fn replace_selection(
+        &mut self,
+        text: &str,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
         let selection = self.document.selection().clone();
         let edits = selection
             .ranges()
@@ -165,7 +191,7 @@ impl Editor {
         self.change(Transaction::new(changes).with_selection(selection), now)
     }
 
-    fn delete(&mut self, deletion: Deletion, now: Instant) -> Result<(), TextError> {
+    fn delete(&mut self, deletion: Deletion, now: Instant) -> Result<Option<ChangeSet>, TextError> {
         let buffer = self.document.buffer();
         let mut edits: Vec<Edit> = Vec::new();
         for range in self.document.selection().ranges() {
@@ -185,16 +211,21 @@ impl Editor {
             }
         }
         if edits.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
         let changes = ChangeSet::new(buffer.len(), edits)?;
         self.change(Transaction::new(changes), now)
     }
 
-    fn change(&mut self, transaction: Transaction, now: Instant) -> Result<(), TextError> {
+    fn change(
+        &mut self,
+        transaction: Transaction,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
+        let changes = transaction.changes.clone();
         self.document.apply(transaction, now)?;
         self.revision += 1;
-        Ok(())
+        Ok(Some(changes))
     }
 }
 
@@ -312,6 +343,38 @@ mod tests {
 
     fn insert(text: &str) -> Action {
         Action::Insert(text.to_owned())
+    }
+
+    fn applied(text: &str, changes: &ChangeSet) -> String {
+        let mut buffer = Buffer::from(text);
+        buffer.apply(changes).unwrap();
+        buffer.to_string()
+    }
+
+    #[test]
+    fn an_action_gives_the_changes_of_its_text() {
+        let mut editor = editor("ab|cd");
+
+        let typed = editor.perform(insert("X"), Instant::now()).unwrap();
+        let moved = editor.perform(step(Motion::Left), Instant::now()).unwrap();
+        let undone = editor.perform(Action::Undo, Instant::now()).unwrap();
+
+        assert_eq!(applied("abcd", &typed.unwrap()), "abXcd");
+        assert!(moved.is_none());
+        assert_eq!(applied("abXcd", &undone.unwrap()), "abcd");
+    }
+
+    #[test]
+    fn a_remote_change_moves_the_text_and_keeps_the_cursor_at_its_place() {
+        let mut editor = editor("ab|cd");
+        let revision = editor.revision();
+
+        editor
+            .apply_remote(&ChangeSet::new(4, [Edit::insert(Position::new(0), "Hi ")]).unwrap())
+            .unwrap();
+
+        assert_eq!(marked(&editor), "Hi ab|cd");
+        assert!(editor.revision() > revision);
     }
 
     #[test]
