@@ -7,14 +7,14 @@ pub enum Action {
     InvitePeople,
     WriteTasks,
     DeleteTask { own: bool },
+    EditDocuments,
 }
 
 #[must_use]
 pub fn allowed(role: Role, action: Action) -> bool {
     match (role, action) {
-        (Role::Administrator, _) | (Role::Member, Action::ReadProjects | Action::WriteTasks) => {
-            true
-        }
+        (Role::Administrator, _)
+        | (Role::Member, Action::ReadProjects | Action::WriteTasks | Action::EditDocuments) => true,
         (Role::Member, Action::DeleteTask { own }) => own,
         (Role::Member, Action::ManageProjects | Action::InvitePeople) => false,
     }
@@ -33,6 +33,7 @@ mod tests {
             Action::WriteTasks,
             Action::DeleteTask { own: false },
             Action::DeleteTask { own: true },
+            Action::EditDocuments,
         ] {
             assert!(allowed(Role::Administrator, action), "{action:?}");
         }
@@ -43,6 +44,7 @@ mod tests {
         assert!(allowed(Role::Member, Action::ReadProjects));
         assert!(allowed(Role::Member, Action::WriteTasks));
         assert!(allowed(Role::Member, Action::DeleteTask { own: true }));
+        assert!(allowed(Role::Member, Action::EditDocuments));
     }
 
     #[test]
