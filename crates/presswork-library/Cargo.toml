@@ -13,7 +13,10 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+hayagriva.workspace = true
+presswork-api.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+uuid.workspace = true

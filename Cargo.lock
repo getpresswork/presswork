@@ -5347,8 +5347,11 @@ dependencies = [
 name = "presswork-library"
 version = "0.1.0"
 dependencies = [
+ "hayagriva",
+ "presswork-api",
  "proptest",
  "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]
