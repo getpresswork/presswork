@@ -16,12 +16,15 @@ workspace = true
 axum.workspace = true
 presswork-api.workspace = true
 serde.workspace = true
+sqlx.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal"] }
 toml.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["fmt", "json"] }
 utoipa.workspace = true
 
 [dev-dependencies]
 http-body-util.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["macros", "rt"] }
 tower = { workspace = true, features = ["util"] }
