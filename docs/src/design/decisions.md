@@ -798,3 +798,17 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** The server hashes passwords with the `argon2` crate of the RustCrypto project. It uses Argon2id with 19 MiB of memory, 2 passes, and 1 lane. A password must have 12 characters or more. Server commands never receive a password. They make one-time links, and each person sets the password through the API.
 - **Reason:** These are the parameters that OWASP recommends for Argon2id. Passwords do not go into the history of a shell.
 - **Other options:** bcrypt. Commands that read a password from the terminal.
+
+## D114. Permissions of the two roles in milestone 1
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** In milestone 1, an organization has two roles. Administrators can do all operations. Members can see all projects and tasks of the organization. They can make, edit, and assign tasks, and change the state of tasks. A member can delete only the tasks that the member made. Only administrators make and rename projects and make invite links.
+- **Reason:** Each member can do the daily work. Administrators control the structure of the organization.
+- **Other options:** All members make projects. All members delete all tasks. Only administrators delete tasks.
+
+## D115. Due dates are calendar dates
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The due date of a task is a calendar date, for example 2026-11-23. It has no time and no time zone.
+- **Reason:** A due date means the same day for each person. Most task tools operate in this way.
+- **Other options:** A date and a time, shown in the time zone of each person.
