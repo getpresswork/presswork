@@ -28,8 +28,12 @@ pub enum ClientError {
     Tls(#[from] rustls::Error),
     #[error("the server did not answer in time")]
     TimedOut,
-    #[error("the server refused the connection: {message}")]
+    #[error("the server refused the request: {message}")]
     Refused { code: String, message: String },
+    #[error("the request to the server failed")]
+    Http(#[from] reqwest::Error),
+    #[error("the server answered with the status {0}")]
+    Status(u16),
     #[error("the server sent an unexpected message")]
     Unexpected,
     #[error("the connection closed")]
@@ -113,18 +117,24 @@ impl fmt::Debug for Live {
 }
 
 pub fn live_url(server: &str) -> Result<String, ClientError> {
-    let server = server.trim_end_matches('/');
-    let (scheme, rest) = if let Some(rest) = server.strip_prefix("https://") {
-        ("wss", rest)
-    } else if let Some(rest) = server.strip_prefix("http://") {
-        ("ws", rest)
-    } else {
-        return Err(ClientError::Address);
+    let server = server_base(server)?;
+    let (scheme, rest) = match server.strip_prefix("https://") {
+        Some(rest) => ("wss", rest),
+        None => ("ws", server.trim_start_matches("http://")),
     };
+    Ok(format!("{scheme}://{rest}{LIVE_PATH}"))
+}
+
+pub(crate) fn server_base(server: &str) -> Result<&str, ClientError> {
+    let server = server.trim_end_matches('/');
+    let rest = server
+        .strip_prefix("https://")
+        .or_else(|| server.strip_prefix("http://"))
+        .ok_or(ClientError::Address)?;
     if rest.is_empty() {
         return Err(ClientError::Address);
     }
-    Ok(format!("{scheme}://{rest}{LIVE_PATH}"))
+    Ok(server)
 }
 
 fn tls() -> Result<ClientConfig, ClientError> {

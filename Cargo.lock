@@ -4964,10 +4964,14 @@ dependencies = [
 name = "presswork-client"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "futures",
+ "jiff",
  "presswork-api",
+ "reqwest",
  "rustls",
  "rustls-platform-verifier",
+ "serde",
  "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite",
@@ -5597,6 +5601,8 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
+ "serde",
+ "serde_json",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",

@@ -15,12 +15,16 @@ workspace = true
 [dependencies]
 futures.workspace = true
 presswork-api.workspace = true
+reqwest = { workspace = true, features = ["json"] }
 rustls = { workspace = true, features = ["aws_lc_rs"] }
 rustls-platform-verifier.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net", "time"] }
 tokio-tungstenite = { workspace = true, features = ["connect", "rustls-tls-native-roots"] }
 uuid.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
+jiff.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
