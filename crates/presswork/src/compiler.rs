@@ -121,7 +121,7 @@ impl Compiler {
 }
 
 fn today() -> Option<Datetime> {
-    let date = jiff::Zoned::now().date();
+    let date = jiff::ZonedDateTime::now().date();
     Datetime::from_ymd(
         i32::from(date.year()),
         u8::try_from(date.month()).ok()?,

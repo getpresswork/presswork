@@ -235,7 +235,7 @@ fn level_tone(level: Level) -> Tone {
 fn entry_row<'a>(entry: &'a LogEntry, time_zone: &TimeZone) -> Element<'a, Message> {
     let time = entry
         .time
-        .to_zoned(time_zone.clone())
+        .to_zoned_datetime(time_zone.clone())
         .strftime("%H:%M:%S%.3f")
         .to_string();
     let fields = entry
