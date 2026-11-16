@@ -19,6 +19,8 @@ pub struct Colors {
     pub warning: Color,
     pub success: Color,
     pub info: Color,
+    pub close: Color,
+    pub on_close: Color,
     pub editor: EditorColors,
 }
 
@@ -55,6 +57,8 @@ pub const LIGHT: Colors = Colors {
     warning: rgb(0x86, 0x50, 0x00),
     success: rgb(0x2C, 0x66, 0x4A),
     info: rgb(0x1D, 0x4E, 0x89),
+    close: rgb(0xC4, 0x2B, 0x1C),
+    on_close: rgb(0xFF, 0xFF, 0xFF),
     editor: EditorColors {
         current_line: rgb(0xF4, 0xF1, 0xEB),
         selection: rgb(0xF2, 0xE3, 0xE4),
@@ -88,6 +92,8 @@ pub const DARK: Colors = Colors {
     warning: rgb(0xE3, 0xAE, 0x5E),
     success: rgb(0x7F, 0xC2, 0xA0),
     info: rgb(0x7F, 0xB0, 0xE8),
+    close: rgb(0xC4, 0x2B, 0x1C),
+    on_close: rgb(0xFF, 0xFF, 0xFF),
     editor: EditorColors {
         current_line: rgb(0x21, 0x1F, 0x1D),
         selection: rgb(0x3B, 0x25, 0x28),
@@ -255,6 +261,11 @@ pub(crate) mod tests {
                 &format!("{theme} accent on accent_soft"),
                 colors.accent,
                 colors.accent_soft,
+            );
+            assert_readable(
+                &format!("{theme} on_close on close"),
+                colors.on_close,
+                colors.close,
             );
         }
     }

@@ -1,6 +1,10 @@
-pub const TOP_BAR: f32 = 44.0;
+pub const TOP_BAR: f32 = 32.0;
 pub const STATUS_BAR: f32 = 28.0;
 pub const PANEL: f32 = 260.0;
 pub const ICON: f32 = 14.0;
 pub const ICON_SMALL: f32 = 12.0;
 pub const ICON_LARGE: f32 = 28.0;
+pub const WINDOW_BUTTON: f32 = 46.0;
+pub const RESIZE_EDGE: f32 = 6.0;
+pub const MENU: f32 = 248.0;
+pub const DIALOG: f32 = 420.0;

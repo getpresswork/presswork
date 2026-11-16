@@ -7,6 +7,9 @@ use crate::theme::colors;
 
 const BADGE_TINT: f32 = 0.14;
 const NOTICE_HOVER_TINT: f32 = 0.22;
+const PRESSED_CLOSE: f32 = 0.9;
+const POPUP_SHADOW: f32 = 0.16;
+const SCRIM: f32 = 0.32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
@@ -164,6 +167,142 @@ pub fn ghost(theme: &Theme, status: button::Status) -> button::Style {
 }
 
 #[must_use]
+pub fn window_button(theme: &Theme, status: button::Status) -> button::Style {
+    let colors = colors(theme);
+    let background = match status {
+        button::Status::Hovered => Some(colors.hover),
+        button::Status::Pressed => Some(colors.rule_strong),
+        button::Status::Active | button::Status::Disabled => None,
+    };
+    flat(background, colors.ink)
+}
+
+#[must_use]
+pub fn close_button(theme: &Theme, status: button::Status) -> button::Style {
+    let colors = colors(theme);
+    match status {
+        button::Status::Hovered => flat(Some(colors.close), colors.on_close),
+        button::Status::Pressed => flat(
+            Some(Color {
+                a: PRESSED_CLOSE,
+                ..colors.close
+            }),
+            colors.on_close,
+        ),
+        button::Status::Active | button::Status::Disabled => window_button(theme, status),
+    }
+}
+
+#[must_use]
+pub fn menu_item(theme: &Theme, status: button::Status) -> button::Style {
+    let colors = colors(theme);
+    let (background, text_color) = match status {
+        button::Status::Hovered | button::Status::Pressed => (Some(colors.hover), colors.ink),
+        button::Status::Disabled => (None, colors.ink_faint),
+        button::Status::Active => (None, colors.ink),
+    };
+    button::Style {
+        border: Border {
+            radius: radius::SMALL.into(),
+            ..Border::default()
+        },
+        ..flat(background, text_color)
+    }
+}
+
+#[must_use]
+pub fn primary(theme: &Theme, status: button::Status) -> button::Style {
+    let colors = colors(theme);
+    let background = match status {
+        button::Status::Hovered | button::Status::Pressed => colors.accent_strong,
+        button::Status::Active | button::Status::Disabled => colors.accent,
+    };
+    button::Style {
+        border: Border {
+            radius: radius::MEDIUM.into(),
+            ..Border::default()
+        },
+        ..flat(Some(background), colors.on_accent)
+    }
+}
+
+#[must_use]
+pub fn secondary(theme: &Theme, status: button::Status) -> button::Style {
+    let colors = colors(theme);
+    let background = match status {
+        button::Status::Hovered | button::Status::Pressed => colors.hover,
+        button::Status::Active | button::Status::Disabled => colors.raised,
+    };
+    button::Style {
+        border: Border {
+            color: colors.rule_strong,
+            width: 1.0,
+            radius: radius::MEDIUM.into(),
+        },
+        ..flat(Some(background), colors.ink)
+    }
+}
+
+fn flat(background: Option<Color>, text_color: Color) -> button::Style {
+    button::Style {
+        background: background.map(Background::Color),
+        text_color,
+        border: Border::default(),
+        shadow: Shadow::default(),
+        snap: true,
+    }
+}
+
+#[must_use]
+pub fn popup(theme: &Theme) -> container::Style {
+    let colors = colors(theme);
+    container::Style {
+        text_color: Some(colors.ink),
+        background: Some(colors.raised.into()),
+        border: Border {
+            color: colors.rule,
+            width: 1.0,
+            radius: radius::MEDIUM.into(),
+        },
+        shadow: Shadow {
+            color: Color {
+                a: POPUP_SHADOW,
+                ..Color::BLACK
+            },
+            offset: iced::Vector::new(0.0, 4.0),
+            blur_radius: 16.0,
+        },
+        ..container::Style::default()
+    }
+}
+
+#[must_use]
+pub fn scrim(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(
+            Color {
+                a: SCRIM,
+                ..Color::BLACK
+            }
+            .into(),
+        ),
+        ..container::Style::default()
+    }
+}
+
+#[must_use]
+pub fn outline(theme: &Theme) -> container::Style {
+    container::Style {
+        border: Border {
+            color: colors(theme).rule,
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+#[must_use]
 pub fn field(theme: &Theme, status: text_input::Status) -> text_input::Style {
     let colors = colors(theme);
     let border = match status {
@@ -249,6 +388,90 @@ mod tests {
         assert_eq!(quiet.text_color, LIGHT.danger);
         assert_ne!(quiet.background, hovered.background);
         assert_eq!(quiet.background, badge(Tone::Danger)(&light()).background);
+    }
+
+    #[test]
+    fn window_buttons_show_the_hover_color_under_the_pointer() {
+        let quiet = window_button(&light(), button::Status::Active);
+        let hovered = window_button(&light(), button::Status::Hovered);
+
+        assert_eq!(quiet.background, None);
+        assert_eq!(quiet.text_color, LIGHT.ink);
+        assert_eq!(hovered.background, Some(Background::Color(LIGHT.hover)));
+    }
+
+    #[test]
+    fn the_close_button_becomes_red_under_the_pointer() {
+        for (theme, colors) in [(light(), LIGHT), (dark(), DARK)] {
+            let quiet = close_button(&theme, button::Status::Active);
+            let hovered = close_button(&theme, button::Status::Hovered);
+
+            assert_eq!(quiet.background, None);
+            assert_eq!(hovered.background, Some(Background::Color(colors.close)));
+            assert_eq!(hovered.text_color, colors.on_close);
+        }
+    }
+
+    #[test]
+    fn a_popup_is_raised_with_a_rule_and_a_shadow() {
+        let style = popup(&light());
+
+        assert_eq!(style.background, Some(Background::Color(LIGHT.raised)));
+        assert_eq!(style.border.color, LIGHT.rule);
+        assert_eq!(style.border.width, 1.0);
+        assert!(style.shadow.blur_radius > 0.0);
+    }
+
+    #[test]
+    fn a_menu_item_is_faint_when_it_is_not_available() {
+        let hovered = menu_item(&light(), button::Status::Hovered);
+        let disabled = menu_item(&light(), button::Status::Disabled);
+
+        assert_eq!(hovered.background, Some(Background::Color(LIGHT.hover)));
+        assert_eq!(hovered.text_color, LIGHT.ink);
+        assert_eq!(disabled.text_color, LIGHT.ink_faint);
+    }
+
+    #[test]
+    fn the_primary_button_uses_the_accent() {
+        let quiet = primary(&light(), button::Status::Active);
+        let hovered = primary(&light(), button::Status::Hovered);
+
+        assert_eq!(quiet.background, Some(Background::Color(LIGHT.accent)));
+        assert_eq!(quiet.text_color, LIGHT.on_accent);
+        assert_eq!(
+            hovered.background,
+            Some(Background::Color(LIGHT.accent_strong))
+        );
+    }
+
+    #[test]
+    fn a_secondary_button_is_raised_with_a_rule() {
+        let quiet = secondary(&light(), button::Status::Active);
+        let hovered = secondary(&light(), button::Status::Hovered);
+
+        assert_eq!(quiet.background, Some(Background::Color(LIGHT.raised)));
+        assert_eq!(quiet.border.color, LIGHT.rule_strong);
+        assert_eq!(quiet.text_color, LIGHT.ink);
+        assert_eq!(hovered.background, Some(Background::Color(LIGHT.hover)));
+    }
+
+    #[test]
+    fn the_scrim_darkens_the_window_partly() {
+        let Some(Background::Color(color)) = scrim(&light()).background else {
+            panic!("the scrim has no color");
+        };
+
+        assert!(color.a > 0.0 && color.a < 1.0, "{color:?}");
+    }
+
+    #[test]
+    fn the_window_outline_is_a_rule() {
+        let style = outline(&dark());
+
+        assert_eq!(style.border.color, DARK.rule);
+        assert_eq!(style.border.width, 1.0);
+        assert_eq!(style.background, None);
     }
 
     #[test]
