@@ -81,6 +81,10 @@ impl LiveSession {
         }
     }
 
+    pub(crate) fn connection(&self) -> &Connection {
+        &self.connection
+    }
+
     pub(crate) fn document(&self) -> Option<&Document> {
         self.document.as_ref().map(|live| &live.document)
     }

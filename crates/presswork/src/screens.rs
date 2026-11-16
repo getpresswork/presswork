@@ -9,7 +9,7 @@ use presswork_ui::theme::Mode;
 use presswork_ui::{font, font_size};
 
 use presswork_api::live::{ChatMessage, ServerMessage as LiveMessage};
-use presswork_api::{Document, Project};
+use presswork_api::{Document, Project, Task, TaskState};
 use presswork_client::Api;
 use presswork_editor::{Action as EditorAction, Motion};
 use presswork_preview::Action as PreviewAction;
@@ -22,6 +22,7 @@ use crate::app::{App, Message, send};
 use crate::chat_panel::Message as ChatPanelMessage;
 use crate::live_session::Event as LiveEvent;
 use crate::server_dialog::{Connection, Message as ServerMessage, Shelf};
+use crate::task_list::Message as TaskListMessage;
 use crate::toolchain_panel::Message as ToolchainMessage;
 use crate::workspace::Workspace;
 use crate::{log_panel, menu, unsaved};
@@ -228,6 +229,8 @@ fn render_screens() {
     send(&mut app, Message::Toolchains(ToolchainMessage::Toggle));
 
     render_server(&mut app);
+    render_chat(&mut app);
+    render_tasks(&mut app);
 }
 
 fn render_server(app: &mut App) {
@@ -298,7 +301,9 @@ fn render_server(app: &mut App) {
     );
     app.compile_now();
     render(app, "server-live");
+}
 
+fn render_chat(app: &mut App) {
     let said = |id: u128, author: &str, minutes: i64, text: &str| ChatMessage {
         id: Uuid::from_u128(id),
         organization: Uuid::from_u128(1),
@@ -334,6 +339,42 @@ fn render_server(app: &mut App) {
         Message::Chat(ChatPanelMessage::Draft("Noon is fine.".to_owned())),
     );
     render(app, "server-chat");
+    send(app, Message::Chat(ChatPanelMessage::Toggle));
+}
+
+fn render_tasks(app: &mut App) {
+    send(app, Message::SelectWorkspace(Workspace::Plan));
+    let task = |id: u128, title: &str, state: TaskState, due: Option<(i16, i8, i8)>| Task {
+        id: Uuid::from_u128(id),
+        project_id: Uuid::from_u128(2),
+        title: title.to_owned(),
+        description: String::new(),
+        state,
+        assignee_id: None,
+        due_date: due.map(|(year, month, day)| jiff::civil::date(year, month, day)),
+        created_by: None,
+        created_at: Timestamp::UNIX_EPOCH,
+        updated_at: Timestamp::UNIX_EPOCH,
+    };
+    let tasks = vec![
+        task(1, "Order the paper", TaskState::Done, Some((2026, 11, 18))),
+        task(2, "Check the table of weights", TaskState::Done, None),
+        task(
+            3,
+            "Add the plates",
+            TaskState::InProgress,
+            Some((2026, 11, 20)),
+        ),
+        task(4, "Proof the cover", TaskState::ToDo, Some((2026, 11, 23))),
+        task(
+            5,
+            "Send the proofs to the printer",
+            TaskState::ToDo,
+            Some((2026, 11, 23)),
+        ),
+    ];
+    send(app, Message::Tasks(TaskListMessage::Loaded(Ok(tasks))));
+    render(app, "server-tasks");
 }
 
 fn sample_releases() -> Vec<Release> {

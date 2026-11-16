@@ -11,6 +11,7 @@ mod menu;
 #[cfg(test)]
 mod screens;
 mod server_dialog;
+mod task_list;
 #[cfg(test)]
 mod testing;
 mod toolchain_panel;

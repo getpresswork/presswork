@@ -119,6 +119,20 @@ impl ServerDialog {
         self.signing_in
     }
 
+    pub(crate) fn project_name(&self, project: Uuid) -> Option<String> {
+        let Some(Browse {
+            listing: Listing::Loaded(shelves),
+            ..
+        }) = &self.browse
+        else {
+            return None;
+        };
+        shelves
+            .iter()
+            .find(|shelf| shelf.project.id == project)
+            .map(|shelf| shelf.project.name.clone())
+    }
+
     pub(crate) fn organization_of(&self, document: &Document) -> Option<(Uuid, String)> {
         let Some(Browse {
             listing: Listing::Loaded(shelves),
@@ -438,7 +452,7 @@ async fn shelves(connection: Connection) -> Result<Vec<Shelf>, Problem> {
     Ok(shelves)
 }
 
-fn problem(error: ClientError) -> Problem {
+pub(crate) fn problem(error: ClientError) -> Problem {
     match error {
         ClientError::Address => Problem::Address,
         ClientError::Refused { message, .. } => Problem::Refused(message),
@@ -447,7 +461,7 @@ fn problem(error: ClientError) -> Problem {
     }
 }
 
-fn problem_text(problem: &Problem, localizer: &Localizer) -> String {
+pub(crate) fn problem_text(problem: &Problem, localizer: &Localizer) -> String {
     match problem {
         Problem::Address => localizer.text("server-problem-address"),
         Problem::Unreachable => localizer.text("server-problem-unreachable"),

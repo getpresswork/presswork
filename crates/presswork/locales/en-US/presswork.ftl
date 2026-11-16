@@ -32,6 +32,12 @@ server-problem-address = The server address must start with http:// or https://.
 server-problem-unreachable = Presswork cannot connect to the server. Make sure that the address is correct.
 server-problem-status = The server answered with the status { $status }.
 
+tasks-title = Tasks · { $project }
+tasks-loading = Presswork gets the tasks.
+tasks-empty = This project has no tasks. Add the first task.
+tasks-placeholder = New task
+tasks-add = Add
+
 chat-toggle = Chat
 chat-title = Chat · { $organization }
 chat-empty = No messages yet. Write the first message.

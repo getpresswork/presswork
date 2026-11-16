@@ -32,6 +32,7 @@ use crate::live_session::{self, LiveSession};
 use crate::log_panel::{self, LogPanel};
 use crate::menu;
 use crate::server_dialog::{self, ServerDialog};
+use crate::task_list::{self, TaskList};
 use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
 use crate::unsaved;
 use crate::workspace::Workspace;
@@ -67,6 +68,7 @@ pub(crate) struct App {
     server_dialog: ServerDialog,
     live: Option<LiveSession>,
     chat: ChatPanel,
+    tasks: Option<TaskList>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +101,7 @@ pub(crate) enum Message {
     Server(server_dialog::Message),
     Live(live_session::Event),
     Chat(chat_panel::Message),
+    Tasks(task_list::Message),
     Window(window::Id, chrome::Action),
     WindowResized(window::Id),
     Maximized(window::Id, bool),
@@ -136,6 +139,7 @@ impl App {
             server_dialog: ServerDialog::default(),
             live: None,
             chat: ChatPanel::default(),
+            tasks: None,
         }
     }
 
@@ -282,6 +286,7 @@ impl App {
                 if let Some(live) = &mut self.live {
                     live.close_document();
                 }
+                self.tasks = None;
                 self.editor = Editor::new(&opened.text);
                 self.saved = self.editor.revision();
                 let root = opened.project.root().to_path_buf();
@@ -305,9 +310,12 @@ impl App {
 
     fn open_server_document(&mut self, document: Document) -> Task<Message> {
         let organization = self.server_dialog.organization_of(&document);
+        let project = document.project_id;
+        let project_name = self.server_dialog.project_name(project).unwrap_or_default();
         let Some(live) = &mut self.live else {
             return Task::none();
         };
+        self.tasks = Some(TaskList::new(project, project_name));
         tracing::info!(path = %document.path, "Server document opened");
         live.open_document(document);
         if let Some((organization, name)) = organization {
@@ -366,6 +374,26 @@ impl App {
         if opening {
             self.logs.update(log_panel::Message::Close);
             self.toolchains.close();
+        }
+    }
+
+    fn select_workspace(&mut self, workspace: Workspace) -> Task<Message> {
+        tracing::debug!(?workspace, "Workspace selected");
+        self.workspace = workspace;
+        match (&self.tasks, &self.live) {
+            (Some(tasks), Some(live)) if workspace == Workspace::Plan => {
+                tasks.load(live.connection()).map(Message::Tasks)
+            }
+            _ => Task::none(),
+        }
+    }
+
+    fn task_message(&mut self, message: task_list::Message) -> Task<Message> {
+        match (&mut self.tasks, &self.live) {
+            (Some(tasks), Some(live)) => {
+                tasks.update(message, live.connection()).map(Message::Tasks)
+            }
+            _ => Task::none(),
         }
     }
 
@@ -599,10 +627,7 @@ impl App {
 
     pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::SelectWorkspace(workspace) => {
-                tracing::debug!(?workspace, "Workspace selected");
-                self.workspace = workspace;
-            }
+            Message::SelectWorkspace(workspace) => return self.select_workspace(workspace),
             Message::Logs(message) => {
                 self.logs.update(message);
                 if self.logs.is_open() {
@@ -633,6 +658,7 @@ impl App {
             Message::Server(message) => return self.server(message),
             Message::Live(event) => return self.live_event(event),
             Message::Chat(message) => self.chat_message(message),
+            Message::Tasks(message) => return self.task_message(message),
             Message::Compiled {
                 generation,
                 revision,
@@ -927,6 +953,11 @@ impl App {
 
     fn workspace_area(&self) -> Element<'_, Message> {
         let workspace = self.workspace;
+        if workspace == Workspace::Plan
+            && let Some(tasks) = &self.tasks
+        {
+            return tasks.view(&self.localizer).map(Message::Tasks);
+        }
         if workspace == Workspace::Write {
             let colors = ui_theme::colors(&self.theme());
             let editor = presswork_editor::view(&self.editor, colors, Message::Editor)
@@ -2225,6 +2256,38 @@ mod tests {
     }
 
     #[test]
+    fn the_plan_workspace_shows_the_tasks_of_the_server_project() {
+        let mut app = app();
+        let _receiver = open_with_chat(&mut app);
+
+        send(&mut app, Message::SelectWorkspace(Workspace::Plan));
+        assert!(simulator(app.view()).find("Tasks · Field Notes").is_ok());
+        assert!(
+            simulator(app.view())
+                .find("Presswork gets the tasks.")
+                .is_ok()
+        );
+        let task = presswork_api::Task {
+            id: uuid::Uuid::from_u128(5),
+            project_id: uuid::Uuid::from_u128(2),
+            title: "Proof the cover".to_owned(),
+            description: String::new(),
+            state: presswork_api::TaskState::ToDo,
+            assignee_id: None,
+            due_date: None,
+            created_by: None,
+            created_at: jiff::Timestamp::UNIX_EPOCH,
+            updated_at: jiff::Timestamp::UNIX_EPOCH,
+        };
+        send(
+            &mut app,
+            Message::Tasks(task_list::Message::Loaded(Ok(vec![task]))),
+        );
+
+        assert!(simulator(app.view()).find("Proof the cover").is_ok());
+    }
+
+    #[test]
     fn a_local_project_takes_the_place_of_the_server_document_but_keeps_the_chat() {
         let mut app = app();
         let _receiver = open_with_chat(&mut app);
@@ -2235,6 +2298,7 @@ mod tests {
         let live = app.live.as_ref().unwrap();
         assert!(live.document().is_none());
         assert!(live.chat().is_some());
+        assert!(app.tasks.is_none());
         assert!(simulator(app.view()).find("The Book · main.typ").is_ok());
     }
 
