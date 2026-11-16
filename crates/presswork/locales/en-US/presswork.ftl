@@ -5,6 +5,14 @@ window-maximize = Maximize
 window-restore = Restore
 window-close = Close
 
+menu-open-folder = Open folder…
+menu-save = Save
+menu-typst = Typst versions
+menu-logs = Logs
+menu-quit = Quit
+shortcut = Ctrl+{ $key }
+shortcut-mac = Cmd+{ $key }
+
 workspace-plan = Plan
 workspace-research = Research
 workspace-write = Write

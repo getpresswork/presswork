@@ -7,7 +7,7 @@ use presswork_ui::icon::{Icon, icon};
 use presswork_ui::{font_size, size, space as gap, style};
 
 use crate::app::Message;
-use crate::i18n::Localizer;
+use crate::i18n::{FluentArgs, Localizer};
 
 pub(crate) const MINIMUM_SIZE: Size = Size::new(720.0, 480.0);
 const TRAFFIC_LIGHTS: f32 = 76.0;
@@ -161,6 +161,17 @@ pub(crate) fn bar<'a>(
             .into(),
         Controls::Native => area.into(),
     }
+}
+
+pub(crate) fn shortcut(localizer: &Localizer, key: char) -> String {
+    let mut args = FluentArgs::new();
+    args.set("key", key.to_string());
+    let id = if cfg!(target_os = "macos") {
+        "shortcut-mac"
+    } else {
+        "shortcut"
+    };
+    localizer.format(id, &args)
 }
 
 pub(crate) fn tip<'a>(
@@ -520,6 +531,17 @@ mod tests {
         assert_eq!(custom.min_size, Some(MINIMUM_SIZE));
         assert!(!custom.exit_on_close_request);
         assert!(!native.exit_on_close_request);
+    }
+
+    #[test]
+    fn shortcuts_use_the_modifier_of_the_system() {
+        let expected = if cfg!(target_os = "macos") {
+            "Cmd+O"
+        } else {
+            "Ctrl+O"
+        };
+
+        assert_eq!(shortcut(&Localizer::english(), 'O'), expected);
     }
 
     #[test]

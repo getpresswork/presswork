@@ -5,6 +5,7 @@ mod files;
 mod i18n;
 mod log_panel;
 mod logging;
+mod menu;
 #[cfg(test)]
 mod screens;
 mod toolchain_panel;

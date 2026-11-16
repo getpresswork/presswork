@@ -5,9 +5,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{button, column, container, row, rule, space, text};
+use iced::widget::{button, column, container, row, rule, space, stack, text};
 use iced::{
-    Element, Fill, FillPortion, Size, Subscription, Task, Theme, keyboard, padding, system, window,
+    Element, Fill, FillPortion, Size, Subscription, Task, Theme, event, keyboard, padding, system,
+    window,
 };
 use presswork_editor::{Editor, Mark, MarkKind};
 use presswork_log::{Level, LogStore};
@@ -26,10 +27,12 @@ use crate::compiler::{self, Backend, Compiler};
 use crate::files;
 use crate::i18n::{FluentArgs, Localizer};
 use crate::log_panel::{self, LogPanel};
+use crate::menu;
 use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
 use crate::workspace::Workspace;
 
 const MARK_SIZE: f32 = 10.0;
+const BRAND: &str = "presswork-menu";
 const DESCRIPTION_WIDTH: f32 = 380.0;
 const MAIN_WINDOW: Size = Size::new(1280.0, 800.0);
 const PREVIEW_WINDOW: Size = Size::new(720.0, 900.0);
@@ -52,6 +55,7 @@ pub(crate) struct App {
     main_window: window::Id,
     preview_window: Option<window::Id>,
     maximized: HashSet<window::Id>,
+    menu_open: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +81,9 @@ pub(crate) enum Message {
     Save,
     Key(keyboard::Event),
     DismissNotice,
+    ToggleMenu,
+    CloseMenu,
+    MenuItem(menu::Item),
     Window(window::Id, chrome::Action),
     WindowResized(window::Id),
     Maximized(window::Id, bool),
@@ -109,6 +116,7 @@ impl App {
             main_window: window::Id::unique(),
             preview_window: None,
             maximized: HashSet::new(),
+            menu_open: false,
         }
     }
 
@@ -506,6 +514,12 @@ impl App {
             Message::Preview(presswork_preview::Action::Attach) => {
                 return self.preview_window.map_or_else(Task::none, window::close);
             }
+            Message::ToggleMenu => self.menu_open = !self.menu_open,
+            Message::CloseMenu => self.menu_open = false,
+            Message::MenuItem(item) => {
+                self.menu_open = false;
+                return self.choose(item);
+            }
             Message::Window(id, action) => return chrome::perform(id, action),
             Message::WindowResized(id) => {
                 return window::is_maximized(id)
@@ -534,6 +548,7 @@ impl App {
             }) if modifiers.command() => match key.to_latin(physical_key) {
                 Some('s') => self.save(),
                 Some('o') => return self.open_folder(),
+                Some('q') => return iced::exit(),
                 _ => {}
             },
             Message::FolderPicked(None) | Message::Key(_) => {}
@@ -543,12 +558,31 @@ impl App {
     }
 
     pub(crate) fn subscription(&self) -> Subscription<Message> {
+        let menu = if self.menu_open {
+            event::listen_with(menu::menu_key)
+        } else {
+            Subscription::none()
+        };
         Subscription::batch([
             self.logs.subscription().map(Message::Logs),
             system::theme_changes().map(Message::SystemTheme),
             keyboard::listen().map(Message::Key),
             window::events().filter_map(window_event),
+            menu,
         ])
+    }
+
+    fn choose(&mut self, item: menu::Item) -> Task<Message> {
+        match item {
+            menu::Item::OpenFolder => self.open_folder(),
+            menu::Item::Save => {
+                self.save();
+                Task::none()
+            }
+            menu::Item::Typst => self.update(Message::Toolchains(toolchain_panel::Message::Toggle)),
+            menu::Item::Logs => self.update(Message::Logs(log_panel::Message::Toggle)),
+            menu::Item::Quit => iced::exit(),
+        }
     }
 
     pub(crate) fn view(&self) -> Element<'_, Message> {
@@ -567,12 +601,34 @@ impl App {
             );
         }
         let content = content.push(hairline()).push(self.status_bar());
-        chrome::window(self.frame(self.main_window), content)
+        let mut layers = stack![content];
+        if self.menu_open {
+            layers = layers.push(menu::view(
+                &self.localizer,
+                self.project.is_some(),
+                Controls::CURRENT,
+            ));
+        }
+        chrome::window(self.frame(self.main_window), layers)
     }
 
     fn top_bar(&self) -> Element<'_, Message> {
         let mark = container(space().width(MARK_SIZE).height(MARK_SIZE)).style(style::mark);
-        let title = text(self.title()).font(font::UI_SEMIBOLD);
+        let brand = button(
+            row![
+                mark,
+                text(self.title()).font(font::UI_SEMIBOLD),
+                icon(Icon::ChevronDown)
+                    .size(size::ICON_SMALL)
+                    .style(style::muted)
+            ]
+            .spacing(gap::XS + gap::XXS)
+            .align_y(Vertical::Center),
+        )
+        .padding([gap::XS, gap::S])
+        .style(style::tab(self.menu_open))
+        .on_press(Message::ToggleMenu);
+        let brand = container(brand).id(BRAND);
         let tabs = row(Workspace::ALL
             .into_iter()
             .map(|workspace| self.workspace_tab(workspace)))
@@ -589,10 +645,8 @@ impl App {
         .style(style::ghost)
         .on_press(Message::OpenFolder);
         let content = row![
-            space().width(gap::S),
-            mark,
-            title,
-            space().width(gap::XL),
+            brand,
+            space().width(gap::XS),
             tabs,
             space().width(Fill),
             open
@@ -1580,6 +1634,49 @@ mod tests {
         send(&mut app, Message::WindowClosed(preview));
 
         assert!(!app.frame(preview).maximized);
+    }
+
+    #[test]
+    fn a_click_on_the_mark_opens_the_presswork_menu() {
+        let mut app = app();
+        let mut ui = simulator(app.view());
+
+        ui.click(iced_test::selector::id("presswork-menu"))
+            .expect("the mark is in the top bar");
+        for message in ui.into_messages() {
+            send(&mut app, message);
+        }
+
+        assert!(simulator(app.view()).find("Typst versions").is_ok());
+        send(&mut app, Message::CloseMenu);
+        assert!(simulator(app.view()).find("Typst versions").is_err());
+    }
+
+    #[test]
+    fn menu_items_run_their_commands_and_close_the_menu() {
+        let mut app = app();
+
+        send(&mut app, Message::ToggleMenu);
+        send(&mut app, Message::MenuItem(menu::Item::Logs));
+        assert!(app.logs.is_open());
+        assert!(!app.menu_open);
+
+        send(&mut app, Message::ToggleMenu);
+        send(&mut app, Message::MenuItem(menu::Item::Typst));
+        assert!(app.toolchains.is_open());
+        assert!(!app.menu_open);
+    }
+
+    #[test]
+    fn save_in_the_menu_saves_the_file() {
+        let folder = book();
+        let mut app = app();
+        open(&mut app, &folder);
+        send(&mut app, insert("x"));
+
+        send(&mut app, Message::MenuItem(menu::Item::Save));
+
+        assert!(app.is_saved());
     }
 
     #[test]

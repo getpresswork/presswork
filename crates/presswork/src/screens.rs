@@ -123,6 +123,10 @@ fn render_screens() {
     app.compile_now();
     render(&mut app, "main-window");
 
+    send(&mut app, Message::ToggleMenu);
+    render(&mut app, "menu");
+    send(&mut app, Message::CloseMenu);
+
     send(
         &mut app,
         Message::Logs(log_panel::Message::Show(Level::Debug)),
