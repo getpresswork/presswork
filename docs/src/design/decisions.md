@@ -812,3 +812,52 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** The due date of a task is a calendar date, for example 2026-11-23. It has no time and no time zone.
 - **Reason:** A due date means the same day for each person. Most task tools operate in this way.
 - **Other options:** A date and a time, shown in the time zone of each person.
+
+## D116. Presswork draws its own top bar
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** On Windows and Linux, the windows of Presswork have no system title bar. Presswork draws the top bar, the minimize, maximize, and close buttons, and the resize edges. On Windows 11, the windows keep the shadow and the round corners of the system. The snap layouts of Windows 11 open with Win+Z, but not when the pointer is on the maximize button. On macOS, the traffic lights of the system stay. They float in the top bar of Presswork, because the system title bar is transparent and the content fills the full window.
+- **Reason:** One bar instead of two gives more space to the document. The windows look the same on Windows and Linux. macOS users keep the controls that they know. genie uses the same design.
+- **Other options:** Presswork also draws its own buttons on macOS. Only Windows gets the Presswork bar. The system title bars stay.
+
+## D117. A top bar of 32 pixels
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The top bar is 32 pixels high. It contains the Presswork menu, the workspace tabs, the Open folder button, and the window buttons.
+- **Reason:** 32 pixels is the usual height of a title bar on Windows and macOS. The traffic lights of macOS are almost at the vertical center of the bar. winit cannot move them down for a higher bar.
+- **Other options:** 36, 40, or 44 pixels.
+
+## D118. The Presswork menu
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The mark and the name at the left of the top bar open the Presswork menu. The menu shows the commands and their keys: Open folder, Save, Typst versions, Logs, and Quit. Escape or a click outside of the menu closes it.
+- **Reason:** Windows and Linux have no menu bar for these commands. The menu shows the keys, thus users can learn them. genie uses the same design.
+- **Other options:** The mark and the name only show the name of the application.
+
+## D119. A small bar for the detached preview
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The window of the detached preview has its own top bar of 32 pixels. The bar shows the title of the window and the window buttons.
+- **Reason:** The two windows look the same. The preview window has no system title bar on Windows and Linux (D116).
+- **Other options:** The preview window keeps the system title bar.
+
+## D120. Ask before changes are lost
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Before Presswork closes, it examines the open file. If the file has changes that are not saved, a dialog asks: Save, Do not save, or Cancel. Quit in the Presswork menu, Ctrl+Q, the close button, and the close command of the system (for example Alt+F4) show the dialog. If Presswork cannot save the file, it stays open and shows the problem. On macOS, Cmd+Q in the system menu ends Presswork at once in this release. winit makes this menu, and it does not let an application stop the quit.
+- **Reason:** One click must not remove the work of the user.
+- **Other options:** Presswork closes, and the changes are lost. Presswork saves the file without a question.
+
+## D121. Details of the window frame
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** A double-click on an empty area of the top bar maximizes or restores the window. A right-click on an empty area opens the window menu of the system, on Windows and on Wayland. Each window button has a tooltip. The close button becomes red (#C42B1C) with a white symbol when the pointer is on it, as on Windows 11. When the window is maximized, the maximize button shows the restore symbol, and the resize edges are not available. The resize edges are 6 pixels wide. On Linux, a rule of 1 pixel surrounds the window when it is not maximized, because Linux desktops do not draw a shadow for a window without a system frame.
+- **Reason:** These are the conventions of each system.
+- **Other options:** The frame of genie, without the red close button, the restore symbol, and the window menu.
+
+## D122. Workspace tabs in narrow windows
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** When the top bar does not have sufficient space for the labels of the workspace tabs, the tabs show only their icons. A tooltip shows the name of each tab. A window is 720 by 480 pixels or larger.
+- **Reason:** The window buttons must always be visible. Each workspace stays one click away.
+- **Other options:** Tabs that scroll. A larger minimum width, for example 1100 pixels.
