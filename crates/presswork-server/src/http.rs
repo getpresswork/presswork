@@ -7,6 +7,7 @@ use axum::response::{IntoResponse, Response};
 use presswork_api::ApiError;
 
 use crate::accounts::AccountError;
+use crate::links::LinkError;
 use crate::routes::AppState;
 use crate::sessions::{self, SessionError, Signed};
 
@@ -18,7 +19,9 @@ pub(crate) enum HttpError {
     WrongCredentials,
     Invalid(String),
     Conflict(String),
+    Forbidden,
     NotFound,
+    LinkNotValid,
     Internal(String),
 }
 
@@ -37,6 +40,16 @@ impl IntoResponse for HttpError {
             ),
             Self::Invalid(message) => (StatusCode::BAD_REQUEST, "invalid_request", message),
             Self::Conflict(message) => (StatusCode::CONFLICT, "conflict", message),
+            Self::Forbidden => (
+                StatusCode::FORBIDDEN,
+                "forbidden",
+                "You do not have the permission for this function.".to_owned(),
+            ),
+            Self::LinkNotValid => (
+                StatusCode::GONE,
+                "link_not_valid",
+                "The link was used, expired, or does not exist.".to_owned(),
+            ),
             Self::NotFound => (
                 StatusCode::NOT_FOUND,
                 "not_found",
@@ -79,6 +92,19 @@ impl From<SessionError> for HttpError {
             SessionError::Random(_) | SessionError::Database(_) => {
                 Self::Internal(error.to_string())
             }
+        }
+    }
+}
+
+impl From<LinkError> for HttpError {
+    fn from(error: LinkError) -> Self {
+        match error {
+            LinkError::NotValid => Self::LinkNotValid,
+            LinkError::UnknownUser => Self::NotFound,
+            LinkError::InvalidName => Self::Invalid(sentence(&error.to_string())),
+            LinkError::Account(error) => error.into(),
+            LinkError::Session(error) => error.into(),
+            LinkError::Database(_) => Self::Internal(error.to_string()),
         }
     }
 }

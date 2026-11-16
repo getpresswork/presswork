@@ -1,4 +1,5 @@
 use jiff_sqlx::Timestamp as SqlTimestamp;
+pub use presswork_api::Role;
 use presswork_api::Session;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -11,31 +12,6 @@ pub const RESET_PREFIX: &str = "pwr_";
 const INVITE_DAYS: i32 = 7;
 const RESET_HOURS: i32 = 24;
 const MAX_ORGANIZATION_NAME_CHARACTERS: usize = 200;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Role {
-    Administrator,
-    Member,
-}
-
-impl Role {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Administrator => "administrator",
-            Self::Member => "member",
-        }
-    }
-
-    #[must_use]
-    pub fn parse(text: &str) -> Option<Self> {
-        match text {
-            "administrator" => Some(Self::Administrator),
-            "member" => Some(Self::Member),
-            _ => None,
-        }
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum LinkError {
@@ -428,12 +404,5 @@ mod tests {
             reset_link(&database.pool, "nobody@example.com").await,
             Err(LinkError::UnknownUser)
         ));
-    }
-
-    #[test]
-    fn roles_have_lowercase_names() {
-        assert_eq!(Role::Administrator.as_str(), "administrator");
-        assert_eq!(Role::parse("member"), Some(Role::Member));
-        assert_eq!(Role::parse("owner"), None);
     }
 }

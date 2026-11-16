@@ -2,14 +2,17 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use presswork_api::{ApiError, Health, Session, SignIn, SignedIn, Status};
+use presswork_api::{
+    AcceptInvite, ApiError, CreatedInvite, Health, Joined, NewInvite, NewPassword, Role, Session,
+    SignIn, SignedIn, Status,
+};
 use sqlx::PgPool;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use uuid::Uuid;
 
 use crate::http::{Caller, HttpError};
-use crate::{accounts, database, sessions};
+use crate::{accounts, database, links, sessions};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -19,8 +22,30 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         title = "Presswork",
         description = "The API of the Presswork collaboration server."
     ),
-    paths(live, ready, sign_in, list_sessions, end_session),
-    components(schemas(Health, Status, ApiError, SignIn, SignedIn, Session)),
+    paths(
+        live,
+        ready,
+        sign_in,
+        list_sessions,
+        end_session,
+        accept_invite,
+        reset_password,
+        create_invite
+    ),
+    components(schemas(
+        Health,
+        Status,
+        ApiError,
+        SignIn,
+        SignedIn,
+        Session,
+        Role,
+        AcceptInvite,
+        Joined,
+        NewPassword,
+        NewInvite,
+        CreatedInvite
+    )),
     modifiers(&Bearer)
 )]
 struct Description;
@@ -49,7 +74,104 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/openapi.json", get(openapi))
         .route("/api/v1/sessions", post(sign_in).get(list_sessions))
         .route("/api/v1/sessions/{id}", delete(end_session))
+        .route("/api/v1/invites/{token}/accept", post(accept_invite))
+        .route("/api/v1/password-resets/{token}", post(reset_password))
+        .route("/api/v1/organizations/{id}/invites", post(create_invite))
         .with_state(state)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/invites/{token}/accept",
+    tag = "organizations",
+    params(("token" = String, Path, description = "The token of the invite link.")),
+    request_body = AcceptInvite,
+    responses(
+        (status = 201, description = "The person is a member and has a session for this device.", body = Joined),
+        (status = 400, description = "The request is not valid.", body = ApiError),
+        (status = 401, description = "The password of the existing account is not correct.", body = ApiError),
+        (status = 410, description = "The link was used, expired, or does not exist.", body = ApiError)
+    )
+)]
+async fn accept_invite(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Json(request): Json<AcceptInvite>,
+) -> Result<(StatusCode, Json<Joined>), HttpError> {
+    let accepted = links::accept_invite(
+        &state.database,
+        &token,
+        &request.name,
+        &request.password,
+        &request.device,
+    )
+    .await?;
+    tracing::info!(
+        user = %accepted.user.id,
+        organization = %accepted.organization_id,
+        "Invite accepted"
+    );
+    let joined = Joined {
+        organization_id: accepted.organization_id,
+        role: accepted.role,
+        token: accepted.session_token,
+        session: accepted.session,
+    };
+    Ok((StatusCode::CREATED, Json(joined)))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/password-resets/{token}",
+    tag = "sessions",
+    params(("token" = String, Path, description = "The token of the password reset link.")),
+    request_body = NewPassword,
+    responses(
+        (status = 204, description = "The password changed, and all sessions of the user ended."),
+        (status = 400, description = "The password is not valid.", body = ApiError),
+        (status = 410, description = "The link was used, expired, or does not exist.", body = ApiError)
+    )
+)]
+async fn reset_password(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Json(request): Json<NewPassword>,
+) -> Result<StatusCode, HttpError> {
+    links::reset_password(&state.database, &token, &request.password).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/organizations/{id}/invites",
+    tag = "organizations",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the organization.")),
+    request_body = NewInvite,
+    responses(
+        (status = 201, description = "The invite link. Send it to the person.", body = CreatedInvite),
+        (status = 401, description = "The request has no valid session.", body = ApiError),
+        (status = 403, description = "Only administrators of the organization make invite links.", body = ApiError)
+    )
+)]
+async fn create_invite(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+    Json(request): Json<NewInvite>,
+) -> Result<(StatusCode, Json<CreatedInvite>), HttpError> {
+    if links::role(&state.database, id, signed.user_id).await? != Some(Role::Administrator) {
+        return Err(HttpError::Forbidden);
+    }
+    let (token, invite) = links::invite(&state.database, id, &request.email, request.role).await?;
+    tracing::info!(organization = %id, invite = %invite.id, "Invite made");
+    let created = CreatedInvite {
+        token,
+        email: invite.email,
+        role: invite.role,
+        expires_at: invite.expires_at,
+    };
+    Ok((StatusCode::CREATED, Json(created)))
 }
 
 #[utoipa::path(
@@ -396,6 +518,149 @@ mod tests {
             body["components"]["securitySchemes"]["bearer"]["scheme"],
             "bearer"
         );
+    }
+
+    async fn press_with_invite(pool: &PgPool, role: Role) -> (Uuid, String) {
+        let organization = crate::links::create_organization(pool, "Field Press")
+            .await
+            .unwrap();
+        let (token, _) = crate::links::invite(pool, organization.id, "bob@example.com", role)
+            .await
+            .unwrap();
+        (organization.id, token)
+    }
+
+    async fn accept(pool: &PgPool, token: &str) -> (StatusCode, Value) {
+        send(
+            app(pool),
+            "POST",
+            &format!("/api/v1/invites/{token}/accept"),
+            None,
+            Some(json!({ "name": "Bob", "password": PASSWORD, "device": "Laptop" })),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn an_invite_link_signs_in_the_new_member() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let (organization, token) = press_with_invite(&database.pool, Role::Member).await;
+
+        let (status, body) = accept(&database.pool, &token).await;
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(body["organization_id"], organization.to_string());
+        assert_eq!(body["role"], "member");
+        assert!(body["token"].as_str().unwrap().starts_with("pws_"));
+    }
+
+    #[tokio::test]
+    async fn a_used_invite_link_is_gone() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let (_, token) = press_with_invite(&database.pool, Role::Member).await;
+        accept(&database.pool, &token).await;
+
+        let (status, body) = accept(&database.pool, &token).await;
+
+        assert_eq!(status, StatusCode::GONE);
+        assert_eq!(body["code"], "link_not_valid");
+    }
+
+    #[tokio::test]
+    async fn administrators_make_invite_links_and_members_cannot() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let (organization, token) = press_with_invite(&database.pool, Role::Administrator).await;
+        let (_, administrator) = accept(&database.pool, &token).await;
+        let (member_token, _) =
+            crate::links::invite(&database.pool, organization, "cy@example.com", Role::Member)
+                .await
+                .unwrap();
+        let (_, member) = send(
+            app(&database.pool),
+            "POST",
+            &format!("/api/v1/invites/{member_token}/accept"),
+            None,
+            Some(json!({ "name": "Cy", "password": PASSWORD, "device": "Phone" })),
+        )
+        .await;
+        let path = format!("/api/v1/organizations/{organization}/invites");
+        let request = json!({ "email": "dee@example.com", "role": "member" });
+
+        let (status, invite) = send(
+            app(&database.pool),
+            "POST",
+            &path,
+            administrator["token"].as_str(),
+            Some(request.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(invite["token"].as_str().unwrap().starts_with("pwi_"));
+        assert_eq!(invite["email"], "dee@example.com");
+
+        let (status, body) = send(
+            app(&database.pool),
+            "POST",
+            &path,
+            member["token"].as_str(),
+            Some(request),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["code"], "forbidden");
+    }
+
+    #[tokio::test]
+    async fn a_reset_link_sets_a_new_password() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        sign_in_ann(&database.pool).await;
+        let token = crate::links::reset_link(&database.pool, "ann@example.com")
+            .await
+            .unwrap();
+        let new_password = "a brand new password";
+
+        let (status, _) = send(
+            app(&database.pool),
+            "POST",
+            &format!("/api/v1/password-resets/{token}"),
+            None,
+            Some(json!({ "password": new_password })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        let (status, _) = send(
+            app(&database.pool),
+            "POST",
+            "/api/v1/sessions",
+            None,
+            Some(
+                json!({ "email": "ann@example.com", "password": new_password, "device": "Laptop" }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+
+    #[tokio::test]
+    async fn the_openapi_description_contains_the_link_routes() {
+        let (_, body) = get("/api/v1/openapi.json").await;
+
+        for (path, method) in [
+            ("/api/v1/invites/{token}/accept", "post"),
+            ("/api/v1/password-resets/{token}", "post"),
+            ("/api/v1/organizations/{id}/invites", "post"),
+        ] {
+            assert!(body["paths"][path][method].is_object(), "{path}");
+        }
     }
 
     #[tokio::test]
