@@ -121,6 +121,9 @@ impl TextDocument {
     }
 
     fn export_since(&self, version: &VersionVector) -> Result<Vec<u8>, SyncError> {
+        if version.includes_vv(&self.doc.oplog_vv()) {
+            return Ok(Vec::new());
+        }
         self.doc
             .export(ExportMode::updates(version))
             .map_err(SyncError::Export)
@@ -328,6 +331,15 @@ mod tests {
         bob.receive(&update);
 
         assert_eq!(bob.text(), "Proof");
+    }
+
+    #[test]
+    fn updates_since_a_version_with_all_changes_are_empty() {
+        let (ann, bob) = shared("Proof");
+
+        let missing = ann.document.updates_since(&bob.document.version()).unwrap();
+
+        assert!(missing.is_empty(), "{} bytes", missing.len());
     }
 
     #[test]
