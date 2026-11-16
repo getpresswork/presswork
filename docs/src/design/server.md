@@ -59,6 +59,23 @@ A request gives its session token in the `Authorization: Bearer` header. An erro
 
 In milestone 1, the server does not limit the number of sign-in attempts. Personal access tokens are also not available yet.
 
+### Projects and tasks in milestone 1
+
+A project belongs to one organization. A task belongs to one project. A task has a title, a Markdown description, a state (`to_do`, `in_progress`, or `done`), one assignee, and a due date (D106). The due date is a calendar date, for example `2026-11-23` (D115). The assignee must be a member of the organization.
+
+The `presswork-domain` crate contains the permission check (D114). Administrators can do all operations. Members can see all projects and tasks, make and change tasks, and delete the tasks that they made. If a user is not a member of the organization, the server answers 404, so that it does not tell which items exist.
+
+| Operation | Use | Permission |
+| --- | --- | --- |
+| `GET /api/v1/organizations` | List the organizations of the user, with the role in each. | Session |
+| `GET /api/v1/organizations/{id}/projects` | List the projects. | Member |
+| `POST /api/v1/organizations/{id}/projects` | Make a project. | Administrator |
+| `PATCH /api/v1/projects/{id}` | Rename a project. | Administrator |
+| `GET /api/v1/projects/{id}/tasks` | List the tasks of a project. | Member |
+| `POST /api/v1/projects/{id}/tasks` | Make a task. | Member |
+| `PATCH /api/v1/tasks/{id}` | Change a task. Absent fields stay the same. `null` removes the assignee or the due date. | Member |
+| `DELETE /api/v1/tasks/{id}` | Delete a task. | Administrator, or the member who made the task |
+
 ## Permissions
 
 - To do an API operation, a user must have its permission, for example `ticket.create` or `document.write`.
