@@ -76,7 +76,7 @@ All crates are in the `crates` folder. Each crate has one purpose. This table sh
 | `presswork-preview` | Adapter | The page preview widget. |
 | `presswork-typst` | Adapter | The embedded Typst engine: compilation, page images, export, and IDE functions. |
 | `presswork-client` | Adapter | The HTTP and WebSocket client for the server API. |
-| `presswork-ocr` | Adapter | The `OcrEngine` trait with the ocrs and Tesseract engines. |
+| `presswork-ocr` | Adapter | The text of PDF pages: the text layer, and the `OcrEngine` trait with the ocrs and Tesseract engines. |
 | `presswork-search` | Adapter | Full-text search with Tantivy. |
 | `presswork-plugin` | Adapter | The WebAssembly plugin host, with wasmtime. |
 | `presswork-ai` | Adapter | The AI gateway and the adapters for the Anthropic API and for local model servers. |

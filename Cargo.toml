@@ -33,11 +33,13 @@ directories = "6.0.0"
 fluent-bundle = "0.16.0"
 futures = "0.3.34"
 getrandom = "0.4.3"
+hayro-interpret = "0.7.0"
 http-body-util = "0.1.5"
 iced = "0.14.0"
 iced_test = "0.14.0"
 jiff = "1.0.0"
 jiff-sqlx = { version = "1.0.0", features = ["postgres"] }
+kurbo = "0.13.1"
 loro = { version = "1.18.0", default-features = false }
 lzma-rust2 = { version = "0.25.0", default-features = false, features = ["std", "xz"] }
 lucide-icons = { version = "1.73.0", default-features = false }
