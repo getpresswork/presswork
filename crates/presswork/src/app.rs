@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,6 +21,7 @@ use presswork_ui::style::{self, Tone};
 use presswork_ui::theme::{self as ui_theme, Mode};
 use presswork_ui::{font, font_size, size, space as gap};
 
+use crate::chrome::{self, Controls, Frame};
 use crate::compiler::{self, Backend, Compiler};
 use crate::files;
 use crate::i18n::{FluentArgs, Localizer};
@@ -49,6 +51,7 @@ pub(crate) struct App {
     notice: Option<String>,
     main_window: window::Id,
     preview_window: Option<window::Id>,
+    maximized: HashSet<window::Id>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +77,9 @@ pub(crate) enum Message {
     Save,
     Key(keyboard::Event),
     DismissNotice,
+    Window(window::Id, chrome::Action),
+    WindowResized(window::Id),
+    Maximized(window::Id, bool),
     WindowClosed(window::Id),
 }
 
@@ -102,14 +108,14 @@ impl App {
             notice: None,
             main_window: window::Id::unique(),
             preview_window: None,
+            maximized: HashSet::new(),
         }
     }
 
     pub(crate) fn open_main_window(&mut self) -> Task<Message> {
         let (id, opened) = window::open(window::Settings {
-            size: MAIN_WINDOW,
             position: window::Position::Centered,
-            ..window::Settings::default()
+            ..chrome::settings(MAIN_WINDOW, Controls::CURRENT)
         });
         self.main_window = id;
         opened.discard()
@@ -130,6 +136,7 @@ impl App {
     }
 
     pub(crate) fn window_closed(&mut self, id: window::Id) -> bool {
+        self.maximized.remove(&id);
         if self.preview_window == Some(id) {
             self.preview_window = None;
             self.preview.set_detached(false);
@@ -161,6 +168,14 @@ impl App {
 
     pub(crate) fn window_theme(&self, _id: window::Id) -> Theme {
         self.theme()
+    }
+
+    fn frame(&self, id: window::Id) -> Frame {
+        Frame {
+            id,
+            controls: Controls::CURRENT,
+            maximized: self.maximized.contains(&id),
+        }
     }
 
     pub(crate) fn marks(&self) -> Vec<Mark> {
@@ -491,6 +506,17 @@ impl App {
             Message::Preview(presswork_preview::Action::Attach) => {
                 return self.preview_window.map_or_else(Task::none, window::close);
             }
+            Message::Window(id, action) => return chrome::perform(id, action),
+            Message::WindowResized(id) => {
+                return window::is_maximized(id)
+                    .map(move |maximized| Message::Maximized(id, maximized));
+            }
+            Message::Maximized(id, true) => {
+                self.maximized.insert(id);
+            }
+            Message::Maximized(id, false) => {
+                self.maximized.remove(&id);
+            }
             Message::WindowClosed(id) => {
                 if self.window_closed(id) {
                     return iced::exit();
@@ -521,7 +547,7 @@ impl App {
             self.logs.subscription().map(Message::Logs),
             system::theme_changes().map(Message::SystemTheme),
             keyboard::listen().map(Message::Key),
-            window::close_events().map(Message::WindowClosed),
+            window::events().filter_map(window_event),
         ])
     }
 
@@ -540,14 +566,13 @@ impl App {
                     .map(Message::Toolchains),
             );
         }
-        content.push(hairline()).push(self.status_bar()).into()
+        let content = content.push(hairline()).push(self.status_bar());
+        chrome::window(self.frame(self.main_window), content)
     }
 
     fn top_bar(&self) -> Element<'_, Message> {
         let mark = container(space().width(MARK_SIZE).height(MARK_SIZE)).style(style::mark);
-        let title = text(self.title())
-            .font(font::UI_SEMIBOLD)
-            .size(font_size::LARGE);
+        let title = text(self.title()).font(font::UI_SEMIBOLD);
         let tabs = row(Workspace::ALL
             .into_iter()
             .map(|workspace| self.workspace_tab(workspace)))
@@ -563,24 +588,18 @@ impl App {
         .padding([gap::XS, gap::S])
         .style(style::ghost)
         .on_press(Message::OpenFolder);
-        container(
-            row![
-                mark,
-                title,
-                space().width(gap::XL),
-                tabs,
-                space().width(Fill),
-                open
-            ]
-            .spacing(gap::S)
-            .align_y(Vertical::Center),
-        )
-        .padding(padding::left(gap::L).right(gap::S))
-        .width(Fill)
-        .height(size::TOP_BAR)
-        .align_y(Vertical::Center)
-        .style(style::chrome)
-        .into()
+        let content = row![
+            space().width(gap::S),
+            mark,
+            title,
+            space().width(gap::XL),
+            tabs,
+            space().width(Fill),
+            open
+        ]
+        .spacing(gap::S)
+        .align_y(Vertical::Center);
+        chrome::bar(self.frame(self.main_window), &self.localizer, content)
     }
 
     fn workspace_tab(&self, workspace: Workspace) -> Element<'_, Message> {
@@ -770,6 +789,15 @@ fn compiled(generation: u64, revision: u64, result: Result<Output, String>) -> M
 
 fn hairline<'a>() -> Element<'a, Message> {
     rule::horizontal(1).style(style::hairline).into()
+}
+
+fn window_event((id, event): (window::Id, window::Event)) -> Option<Message> {
+    match event {
+        window::Event::Closed => Some(Message::WindowClosed(id)),
+        window::Event::CloseRequested => Some(Message::Window(id, chrome::Action::Close)),
+        window::Event::Resized(_) => Some(Message::WindowResized(id)),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -1510,5 +1538,57 @@ mod tests {
         }
 
         assert_eq!(app.workspace, Workspace::Plan);
+    }
+
+    #[test]
+    fn window_events_become_messages() {
+        let id = window::Id::unique();
+
+        assert!(matches!(
+            window_event((id, window::Event::Closed)),
+            Some(Message::WindowClosed(target)) if target == id
+        ));
+        assert!(matches!(
+            window_event((id, window::Event::CloseRequested)),
+            Some(Message::Window(target, chrome::Action::Close)) if target == id
+        ));
+        assert!(matches!(
+            window_event((id, window::Event::Resized(Size::new(900.0, 600.0)))),
+            Some(Message::WindowResized(target)) if target == id
+        ));
+        assert!(window_event((id, window::Event::Focused)).is_none());
+    }
+
+    #[test]
+    fn the_frame_knows_when_a_window_is_maximized() {
+        let mut app = app();
+        let main = app.main_window;
+
+        send(&mut app, Message::Maximized(main, true));
+        assert!(app.frame(main).maximized);
+
+        send(&mut app, Message::Maximized(main, false));
+        assert!(!app.frame(main).maximized);
+    }
+
+    #[test]
+    fn a_closed_window_forgets_that_it_was_maximized() {
+        let mut app = app();
+        let preview = detach(&mut app);
+        send(&mut app, Message::Maximized(preview, true));
+
+        send(&mut app, Message::WindowClosed(preview));
+
+        assert!(!app.frame(preview).maximized);
+    }
+
+    #[test]
+    fn only_a_window_without_system_buttons_shows_window_buttons() {
+        let app = app();
+        let mut ui = simulator(app.view());
+
+        let found = ui.find(iced_test::selector::id("window-close")).is_ok();
+
+        assert_eq!(found, Controls::CURRENT == Controls::Custom);
     }
 }

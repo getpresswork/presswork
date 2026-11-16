@@ -1,5 +1,10 @@
 app-title = Presswork
 
+window-minimize = Minimize
+window-maximize = Maximize
+window-restore = Restore
+window-close = Close
+
 workspace-plan = Plan
 workspace-research = Research
 workspace-write = Write

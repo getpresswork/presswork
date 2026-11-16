@@ -1,4 +1,5 @@
 mod app;
+mod chrome;
 mod compiler;
 mod files;
 mod i18n;
