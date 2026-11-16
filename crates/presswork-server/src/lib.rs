@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod chat;
 pub mod cli;
 mod config;
 mod database;

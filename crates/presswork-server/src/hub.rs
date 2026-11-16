@@ -3,11 +3,12 @@ use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
 
-use presswork_api::live::ServerMessage;
+use presswork_api::live::{ChatMessage, ServerMessage};
 use presswork_sync::{SyncError, TextDocument};
 use tokio::sync::{Mutex, mpsc};
 use uuid::Uuid;
 
+use crate::chat::ChatError;
 use crate::documents::DocumentError;
 
 #[derive(Debug)]
@@ -29,9 +30,58 @@ pub(crate) enum HubError {
 #[derive(Default)]
 pub(crate) struct Hub {
     rooms: Mutex<HashMap<Uuid, Arc<Room>>>,
+    chats: Mutex<HashMap<Uuid, HashMap<u64, Outbox>>>,
 }
 
 impl Hub {
+    pub(crate) async fn join<F, Fut>(
+        &self,
+        organization: Uuid,
+        connection: u64,
+        outbox: Outbox,
+        recent: F,
+    ) -> Result<(), ChatError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<Vec<ChatMessage>, ChatError>>,
+    {
+        let mut chats = self.chats.lock().await;
+        let messages = recent().await?;
+        let joined = ServerMessage::Joined {
+            organization,
+            messages,
+        };
+        if outbox.send(Outgoing::Message(joined)).is_ok() {
+            chats
+                .entry(organization)
+                .or_default()
+                .insert(connection, outbox);
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn announce(&self, message: ChatMessage) {
+        let chats = self.chats.lock().await;
+        if let Some(members) = chats.get(&message.organization) {
+            for outbox in members.values() {
+                let said = ServerMessage::Said {
+                    message: message.clone(),
+                };
+                let _ = outbox.send(Outgoing::Message(said));
+            }
+        }
+    }
+
+    pub(crate) async fn leave_chat(&self, organization: Uuid, connection: u64) {
+        let mut chats = self.chats.lock().await;
+        if let Some(members) = chats.get_mut(&organization) {
+            members.remove(&connection);
+            if members.is_empty() {
+                chats.remove(&organization);
+            }
+        }
+    }
+
     pub(crate) async fn room<F, Fut>(&self, document: Uuid, load: F) -> Result<Arc<Room>, HubError>
     where
         F: FnOnce() -> Fut,
@@ -163,7 +213,7 @@ impl Room {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use presswork_api::live::ServerMessage;
+    use presswork_api::live::{ChatMessage, ServerMessage};
     use presswork_sync::TextDocument;
     use presswork_text::{ChangeSet, Edit, Position};
     use tokio::sync::mpsc;
@@ -321,6 +371,76 @@ mod tests {
         assert!(!Arc::ptr_eq(&room, &again));
         let (data, _) = subscribed(&again, 1).await;
         assert_eq!(TextDocument::load(&data).unwrap().text(), "Proof");
+    }
+
+    const PRESS: Uuid = Uuid::from_u128(0x0193_0000_0000_7000_8000_0000_0000_00a1);
+
+    fn chat_message(text: &str) -> ChatMessage {
+        ChatMessage {
+            id: Uuid::now_v7(),
+            organization: PRESS,
+            author: Uuid::nil(),
+            author_name: "Ann".to_owned(),
+            text: text.to_owned(),
+            sent_at: jiff::Timestamp::UNIX_EPOCH,
+        }
+    }
+
+    #[tokio::test]
+    async fn joining_the_chat_gives_the_recent_messages() {
+        let hub = Hub::default();
+        let (sender, mut inbox) = outbox();
+        let recent = vec![chat_message("Ready.")];
+        let copy = recent.clone();
+
+        hub.join(PRESS, 1, sender, || async move { Ok(copy) })
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            next(&mut inbox),
+            Outgoing::Message(ServerMessage::Joined { organization: PRESS, messages }) if messages == recent
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_chat_message_reaches_each_member_and_the_author() {
+        let hub = Hub::default();
+        let (ann, mut ann_inbox) = outbox();
+        let (bob, mut bob_inbox) = outbox();
+        hub.join(PRESS, 1, ann, || async { Ok(Vec::new()) })
+            .await
+            .unwrap();
+        hub.join(PRESS, 2, bob, || async { Ok(Vec::new()) })
+            .await
+            .unwrap();
+        next(&mut ann_inbox);
+        next(&mut bob_inbox);
+        let message = chat_message("Ready.");
+
+        hub.announce(message.clone()).await;
+
+        for inbox in [&mut ann_inbox, &mut bob_inbox] {
+            assert!(matches!(
+                next(inbox),
+                Outgoing::Message(ServerMessage::Said { message: said }) if said == message
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_member_who_left_the_chat_gets_no_messages() {
+        let hub = Hub::default();
+        let (ann, mut inbox) = outbox();
+        hub.join(PRESS, 1, ann, || async { Ok(Vec::new()) })
+            .await
+            .unwrap();
+        next(&mut inbox);
+
+        hub.leave_chat(PRESS, 1).await;
+        hub.announce(chat_message("Ready.")).await;
+
+        assert!(inbox.try_recv().is_err());
     }
 
     #[tokio::test]

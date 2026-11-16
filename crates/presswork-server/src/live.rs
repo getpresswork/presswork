@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,6 +15,7 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 use uuid::Uuid;
 
+use crate::chat::{self, ChatError};
 use crate::hub::{HubError, Outbox, Outgoing, Room};
 use crate::routes::AppState;
 use crate::{documents, links, sessions};
@@ -35,6 +36,7 @@ struct Connection {
     user: Uuid,
     outbox: Outbox,
     subscriptions: HashMap<Uuid, bool>,
+    chats: HashSet<Uuid>,
 }
 
 async fn session(mut socket: WebSocket, state: AppState) {
@@ -47,6 +49,7 @@ async fn session(mut socket: WebSocket, state: AppState) {
         user,
         outbox,
         subscriptions: HashMap::new(),
+        chats: HashSet::new(),
     };
     loop {
         tokio::select! {
@@ -73,6 +76,9 @@ async fn session(mut socket: WebSocket, state: AppState) {
     }
     for document in connection.subscriptions.keys() {
         state.hub.leave(*document, connection.id).await;
+    }
+    for organization in &connection.chats {
+        state.hub.leave_chat(*organization, connection.id).await;
     }
 }
 
@@ -132,6 +138,10 @@ impl Connection {
             Ok(ClientMessage::Updates { document, id, data }) => {
                 self.publish(state, document, id, data).await
             }
+            Ok(ClientMessage::Join { organization }) => self.join(state, organization).await,
+            Ok(ClientMessage::Say { organization, text }) => {
+                self.say(state, organization, &text).await
+            }
             Ok(ClientMessage::Hello { .. }) => {
                 Err(invalid("The connection has a session already."))
             }
@@ -179,6 +189,51 @@ impl Connection {
         })
         .await
         .map_err(hub_error)
+    }
+}
+
+impl Connection {
+    async fn join(&mut self, state: &AppState, organization: Uuid) -> Result<(), ServerMessage> {
+        let role = links::role(&state.database, organization, self.user)
+            .await
+            .map_err(|problem| failed(&problem))?
+            .ok_or_else(not_found)?;
+        if !allowed(role, Action::UseChat) {
+            return Err(forbidden());
+        }
+        let pool = state.database.clone();
+        state
+            .hub
+            .join(organization, self.id, self.outbox.clone(), || async move {
+                chat::recent(&pool, organization, chat::RECENT).await
+            })
+            .await
+            .map_err(chat_error)?;
+        self.chats.insert(organization);
+        Ok(())
+    }
+
+    async fn say(
+        &self,
+        state: &AppState,
+        organization: Uuid,
+        text: &str,
+    ) -> Result<(), ServerMessage> {
+        if !self.chats.contains(&organization) {
+            return Err(invalid("Join the chat before you send messages."));
+        }
+        let message = chat::post(&state.database, organization, self.user, text)
+            .await
+            .map_err(chat_error)?;
+        state.hub.announce(message).await;
+        Ok(())
+    }
+}
+
+fn chat_error(problem: ChatError) -> ServerMessage {
+    match problem {
+        ChatError::InvalidText => invalid("A message must have 1 to 4000 characters."),
+        ChatError::Database(problem) => failed(&problem),
     }
 }
 
@@ -260,7 +315,7 @@ mod tests {
     use std::time::Duration;
 
     use presswork_api::Role;
-    use presswork_api::live::{ClientMessage, ServerMessage};
+    use presswork_api::live::{ChatMessage, ClientMessage, ServerMessage};
     use presswork_client::{ClientError, Live};
     use presswork_sync::TextDocument;
     use presswork_text::{ChangeSet, Edit, Position};
@@ -280,6 +335,7 @@ mod tests {
 
     struct Press {
         server: String,
+        organization: Uuid,
         ann: String,
         bob: String,
         eve: String,
@@ -326,6 +382,7 @@ mod tests {
         let [ann, bob, eve] = <[String; 3]>::try_from(tokens).unwrap();
         Press {
             server: format!("http://{address}"),
+            organization,
             ann,
             bob,
             eve,
@@ -410,6 +467,84 @@ mod tests {
             ServerMessage::Error { code, .. } => code,
             other => panic!("an error was expected, not {other:?}"),
         }
+    }
+
+    async fn join(live: &mut Live, organization: Uuid) -> Vec<ChatMessage> {
+        live.send(&ClientMessage::Join { organization })
+            .await
+            .unwrap();
+        let ServerMessage::Joined { messages, .. } = next(live).await else {
+            panic!("the server did not answer the join");
+        };
+        messages
+    }
+
+    fn say(organization: Uuid, text: &str) -> ClientMessage {
+        ClientMessage::Say {
+            organization,
+            text: text.to_owned(),
+        }
+    }
+
+    #[tokio::test]
+    async fn two_persons_chat_live() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let press = press(&database.pool).await;
+        let mut ann = Person::connect(&press, &press.ann).await;
+        let mut bob = Person::connect(&press, &press.bob).await;
+        assert_eq!(join(&mut ann, press.organization).await, []);
+        join(&mut bob, press.organization).await;
+
+        ann.send(&say(press.organization, "The proofs are ready."))
+            .await
+            .unwrap();
+
+        for live in [&mut ann, &mut bob] {
+            let ServerMessage::Said { message } = next(live).await else {
+                panic!("the message did not arrive");
+            };
+            assert_eq!(message.text, "The proofs are ready.");
+            assert_eq!(message.author_name, "Someone");
+        }
+        let mut late = Person::connect(&press, &press.bob).await;
+        let history = join(&mut late, press.organization).await;
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].text, "The proofs are ready.");
+    }
+
+    #[tokio::test]
+    async fn an_outsider_cannot_join_the_chat() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let press = press(&database.pool).await;
+        let mut eve = Person::connect(&press, &press.eve).await;
+
+        eve.send(&ClientMessage::Join {
+            organization: press.organization,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(code(&next(&mut eve).await), "not_found");
+    }
+
+    #[tokio::test]
+    async fn a_message_needs_the_chat_and_some_text() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let press = press(&database.pool).await;
+        let mut ann = Person::connect(&press, &press.ann).await;
+
+        ann.send(&say(press.organization, "Hello")).await.unwrap();
+        assert_eq!(code(&next(&mut ann).await), "invalid_request");
+
+        join(&mut ann, press.organization).await;
+        ann.send(&say(press.organization, "   ")).await.unwrap();
+        assert_eq!(code(&next(&mut ann).await), "invalid_request");
     }
 
     #[tokio::test]

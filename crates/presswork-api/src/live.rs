@@ -1,10 +1,21 @@
 use std::fmt;
 
+use jiff::Timestamp;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub const PROTOCOL: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub id: Uuid,
+    pub organization: Uuid,
+    pub author: Uuid,
+    pub author_name: String,
+    pub text: String,
+    pub sent_at: Timestamp,
+}
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -23,6 +34,13 @@ pub enum ClientMessage {
         id: u64,
         #[serde(with = "serde_bytes")]
         data: Vec<u8>,
+    },
+    Join {
+        organization: Uuid,
+    },
+    Say {
+        organization: Uuid,
+        text: String,
     },
 }
 
@@ -51,6 +69,13 @@ pub enum ServerMessage {
     Error {
         code: String,
         message: String,
+    },
+    Joined {
+        organization: Uuid,
+        messages: Vec<ChatMessage>,
+    },
+    Said {
+        message: ChatMessage,
     },
 }
 
@@ -92,7 +117,24 @@ impl fmt::Debug for ClientMessage {
                 .field("id", id)
                 .field("data", &Bytes(data.len()))
                 .finish(),
+            Self::Join { organization } => formatter
+                .debug_struct("Join")
+                .field("organization", organization)
+                .finish(),
+            Self::Say { organization, text } => formatter
+                .debug_struct("Say")
+                .field("organization", organization)
+                .field("text", &Characters(text.chars().count()))
+                .finish(),
         }
+    }
+}
+
+struct Characters(usize);
+
+impl fmt::Debug for Characters {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{} characters", self.0)
     }
 }
 
@@ -128,6 +170,18 @@ impl fmt::Debug for ServerMessage {
                 .field("code", code)
                 .field("message", message)
                 .finish(),
+            Self::Joined {
+                organization,
+                messages,
+            } => formatter
+                .debug_struct("Joined")
+                .field("organization", organization)
+                .field("messages", &messages.len())
+                .finish(),
+            Self::Said { message } => formatter
+                .debug_struct("Said")
+                .field("message", &message.id)
+                .finish(),
         }
     }
 }
@@ -141,6 +195,17 @@ mod tests {
 
     fn document() -> Uuid {
         Uuid::from_u128(0x0193_0000_0000_7000_8000_0000_0000_0001)
+    }
+
+    fn chat_message() -> ChatMessage {
+        ChatMessage {
+            id: Uuid::from_u128(9),
+            organization: document(),
+            author: Uuid::from_u128(1),
+            author_name: "Ann".to_owned(),
+            text: "The proofs are ready.".to_owned(),
+            sent_at: "2026-11-16T09:30:00Z".parse().unwrap(),
+        }
     }
 
     #[test]
@@ -158,6 +223,13 @@ mod tests {
                 document: document(),
                 id: 7,
                 data: vec![200; 40],
+            },
+            ClientMessage::Join {
+                organization: document(),
+            },
+            ClientMessage::Say {
+                organization: document(),
+                text: "The proofs are ready.".to_owned(),
             },
         ] {
             let bytes = encode(&message).unwrap();
@@ -186,6 +258,13 @@ mod tests {
             ServerMessage::Error {
                 code: "forbidden".to_owned(),
                 message: "You do not have the permission for this function.".to_owned(),
+            },
+            ServerMessage::Joined {
+                organization: document(),
+                messages: vec![chat_message()],
+            },
+            ServerMessage::Said {
+                message: chat_message(),
             },
         ] {
             let bytes = encode(&message).unwrap();
