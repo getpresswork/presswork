@@ -45,6 +45,43 @@ The workspace bar at the top shows the workspaces in the sequence of a publicati
 - Commands apply to the window that has the focus.
 - The chat and the inbox can open in their own window, outside of a project.
 
+## Top bar
+
+Each window has a top bar of 32 pixels (D117). On Windows and Linux, Presswork draws the top bar and the window buttons, and the window has no system title bar (D116). On macOS, the traffic lights of the system are at the left of the top bar.
+
+The top bar of the project window shows these items, from left to right:
+
+- The Presswork mark and name. Click them to open the Presswork menu.
+- The workspace tabs. If the window is too narrow for the labels, the tabs show only their icons (D122).
+- The **Open folder** button. In a narrow window, it shows only its icon.
+- On Windows and Linux, the minimize, maximize, and close buttons.
+
+To move the window, drag an empty area of the top bar. To maximize or restore the window, double-click an empty area. On Windows and on Wayland, right-click an empty area to open the window menu of the system. To change the size of the window, drag an edge or a corner. A window is 720 by 480 pixels or larger.
+
+The window of the detached preview has its own top bar. It shows the title of the window and the window buttons (D119).
+
+### Presswork menu
+
+| Item | Keys | Result |
+| --- | --- | --- |
+| Open folder… | Ctrl+O | Opens a project folder. |
+| Save | Ctrl+S | Saves the main file. This item is not available when no project is open. |
+| Typst versions | | Opens or closes the Toolchains panel. |
+| Logs | | Opens or closes the log panel. |
+| Quit | Ctrl+Q | Closes Presswork. |
+
+On macOS, the keys use Cmd. To close the menu, push Escape or click outside of the menu.
+
+### Changes that are not saved
+
+If the main file has changes that are not saved, a dialog opens before Presswork closes (D120). Quit, Ctrl+Q, the close button of the project window, and the close command of the system (for example Alt+F4) open the dialog. The close button of the detached preview only attaches the preview to the project window again.
+
+- **Save** saves the file and closes Presswork. If Presswork cannot save the file, it stays open and shows the problem.
+- **Do not save** closes Presswork. The changes are lost.
+- **Cancel** closes the dialog. Presswork stays open.
+
+Escape gives the same result as **Cancel**, and Enter gives the same result as **Save**. On macOS, Cmd+Q in the system menu closes Presswork at once in this release.
+
 ## Commands
 
 All actions are commands. A command has an identifier, a title, an optional shortcut, and a condition that tells when it is available.
@@ -75,6 +112,7 @@ The interface has a quiet editorial style. Warm paper colors, ink colors, and th
 | Spacing | 2, 4, 8, 12, 16, 24, and 32 pixels |
 | Radii | 4, 6, and 10 pixels |
 | Icon sizes | 12, 14, and 28 pixels |
+| Bars | Top bar: 32 pixels. Status bar: 28 pixels. Window buttons: 46 pixels wide. Resize edges: 6 pixels. |
 
 ### Color roles
 
@@ -89,6 +127,7 @@ The interface has a quiet editorial style. Warm paper colors, ink colors, and th
 | Faint ink | Disabled items only |
 | Accent | The selected item, the focus, and the primary action |
 | Danger, warning, success, and info | Status only |
+| Close | The close button of the window when the pointer is on it, with a white symbol. It is #C42B1C in all themes, as on Windows 11. |
 
 ### Rules
 
@@ -124,7 +163,7 @@ A project is a folder with a `presswork.toml` manifest. The manifest has a `[pro
 
 Presswork ignores the keys that it does not know. Thus an older Presswork release can open a project from a newer release.
 
-- To open a project, click **Open folder** in the top bar, or push Ctrl+O. Then select the project folder.
+- To open a project, click **Open folder** in the top bar, select **Open folder…** in the Presswork menu, or push Ctrl+O. Then select the project folder.
 - The Write workspace shows the main file in the editor and its pages in the preview.
 - To save the main file, push Ctrl+S.
 - If the folder is not a project, a notice tells the problem.
@@ -160,5 +199,6 @@ From the home dashboard, you can also:
 
 ## Platform conventions
 
-- On macOS, shortcuts use Cmd, and the menu is in the global menu bar. On Windows and Linux, shortcuts use Ctrl, and the menu is in the window.
+- On macOS, shortcuts use Cmd. On Windows and Linux, shortcuts use Ctrl.
+- In milestone 1, the Presswork menu is in the top bar on all platforms. A later release adds the global menu bar of macOS.
 - Presswork uses the native file dialogs of each platform.
