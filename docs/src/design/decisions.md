@@ -945,3 +945,10 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** The client sends `Join` with an organization ID on the live WebSocket. The server answers `Joined` with the last 100 messages. The client sends `Say` with the text and an ID. The server stores the message and sends `Said` with the stored message to all clients that joined, also to the author. The desktop application shares one live connection between the open document and the chat.
 - **Reason:** One connection carries all live data (D14). `Said` to the author confirms the store, as `Ack` does for document updates.
 - **Other options:** A second WebSocket for the chat. HTTP requests for new messages at intervals.
+
+## D135. Tasks of the server project in the Plan workspace
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** When a server document is open, the Plan workspace shows the tasks of its project as a list: the title, the state, and the due date. A check box sets a task to done, or back to to do. A field at the top adds a task with a title. The list loads again each time the user selects the Plan workspace.
+- **Reason:** Roadmap step 14 asks to complete tasks in the desktop application. The board, the timeline, and the calendar come in milestone 5.
+- **Other options:** A Tasks panel at the bottom of the window. Live task events through the WebSocket now.
