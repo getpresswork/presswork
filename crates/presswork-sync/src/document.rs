@@ -36,8 +36,26 @@ impl TextDocument {
 
     pub fn load(updates: &[u8]) -> Result<Self, SyncError> {
         let mut document = Self::new();
-        document.import(updates)?;
+        document.merge(updates)?;
         Ok(document)
+    }
+
+    pub fn load_all(updates: &[Vec<u8>]) -> Result<Self, SyncError> {
+        let document = Self::new();
+        if !updates.is_empty() {
+            document
+                .doc
+                .import_batch(updates)
+                .map_err(SyncError::Update)?;
+        }
+        Ok(document)
+    }
+
+    pub fn merge(&mut self, update: &[u8]) -> Result<(), SyncError> {
+        if !update.is_empty() {
+            self.doc.import(update).map_err(SyncError::Update)?;
+        }
+        Ok(())
     }
 
     #[must_use]
@@ -323,6 +341,44 @@ mod tests {
             .unwrap();
 
         assert_eq!(TextDocument::load(&all).unwrap().text(), "Proofs");
+    }
+
+    #[test]
+    fn a_document_loads_from_many_stored_updates() {
+        let (mut ann, _) = shared("Proof");
+        let mut stored = vec![
+            ann.document
+                .updates_since(&TextDocument::new().version())
+                .unwrap(),
+        ];
+        stored.push(ann.edit(&insert(&ann.document, 5, "s")));
+        stored.push(ann.edit(&insert(&ann.document, 0, "The ")));
+
+        let loaded = TextDocument::load_all(&stored).unwrap();
+
+        assert_eq!(loaded.text(), "The Proofs");
+        assert_eq!(loaded.version(), ann.document.version());
+    }
+
+    #[test]
+    fn merge_applies_an_update_without_a_change_set() {
+        let (mut ann, bob) = shared("Proof");
+        let everything = bob
+            .document
+            .updates_since(&TextDocument::new().version())
+            .unwrap();
+        let mut server = TextDocument::load(&everything).unwrap();
+
+        server
+            .merge(&ann.edit(&insert(&ann.document, 5, "s")))
+            .unwrap();
+
+        assert_eq!(server.text(), "Proofs");
+        assert!(matches!(
+            server.merge(b"garbage"),
+            Err(SyncError::Update(_))
+        ));
+        assert_eq!(server.text(), "Proofs");
     }
 
     #[test]
