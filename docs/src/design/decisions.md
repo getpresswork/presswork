@@ -931,3 +931,17 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** When the user opens a server document, the editor and the preview show it instead of the local project or the scratch text. The preview compiles the document as one file. Each change set of the editor goes to the server at once. The status bar shows the path of the document and the state of the connection: connecting, live, or offline.
 - **Reason:** Milestone 1 has one editor. Panes with many files, and server projects with many files, come in milestone 2.
 - **Other options:** A second window for server documents.
+
+## D133. One chat channel for each organization in milestone 1
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** Each organization has one chat channel. All members can read and write its messages. A message has plain text of 1 to 4000 characters, an author, and a time. The server stores the messages in PostgreSQL.
+- **Reason:** This is the thin slice of roadmap step 13. Channels, direct messages, replies, and files come in milestone 3.
+- **Other options:** One channel for each project. Markdown messages now.
+
+## D134. Chat on the live WebSocket
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** The client sends `Join` with an organization ID on the live WebSocket. The server answers `Joined` with the last 100 messages. The client sends `Say` with the text and an ID. The server stores the message and sends `Said` with the stored message to all clients that joined, also to the author. The desktop application shares one live connection between the open document and the chat.
+- **Reason:** One connection carries all live data (D14). `Said` to the author confirms the store, as `Ack` does for document updates.
+- **Other options:** A second WebSocket for the chat. HTTP requests for new messages at intervals.
