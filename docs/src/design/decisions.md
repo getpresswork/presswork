@@ -861,3 +861,52 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** When the top bar does not have sufficient space for the labels of the workspace tabs, the tabs show only their icons. A tooltip shows the name of each tab. A window is 720 by 480 pixels or larger.
 - **Reason:** The window buttons must always be visible. Each workspace stays one click away.
 - **Other options:** Tabs that scroll. A larger minimum width, for example 1100 pixels.
+
+## D123. Loro text documents with UTF-8 positions
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** The `presswork-sync` crate uses the `loro` crate, version 1. Each text file is one Loro document with one text container, `text`. Local edits go into the document with UTF-8 positions, the same unit as the text model. Remote changes come out of the document as a change set for the text model, with one edit for each changed area. Each loaded document gets a new random peer ID.
+- **Reason:** D3 selected Loro. UTF-8 positions need no conversion. A change set with exact edits keeps the cursors and the undo history of the user correct.
+- **Other options:** A comparison of the full text after each import, which is simple but moves the cursor of the user too much. Unicode scalar positions with a conversion.
+
+## D124. MessagePack messages with rmp-serde
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** The `presswork-api` crate defines the live messages as serde types. The rmp-serde crate encodes them as MessagePack maps with field names. Loro updates and version vectors are MessagePack binary values.
+- **Reason:** Field names let a newer peer add optional fields without a break. Binary values keep the Loro updates compact (D14).
+- **Other options:** MessagePack arrays without field names, which are smaller but break when a field changes. CBOR.
+
+## D125. Append-only storage of document updates
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** The server stores each accepted Loro update as one row of the `document_updates` table, with its author and its time. Milestone 1 does not compact the updates. For each open document, the server keeps a Loro document in memory. It loads the document from the rows when a client first subscribes.
+- **Reason:** This is the simplest correct storage. Each change keeps its author for the history slider. Compaction into snapshots comes later (refer to Document storage in [Server](server.md)).
+- **Other options:** One snapshot for each document, which loses the record of each change. A new snapshot after each change.
+
+## D126. Documents of a project in milestone 1
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** A project has text documents. Each document has an ID and a path in the project, for example `main.typ`. A path is unique in its project. All members of the organization can make, read, and edit the documents of its projects.
+- **Reason:** This is sufficient for one shared file (roadmap step 11). The file tree document of [Collaboration](collaboration.md) comes later, with the permissions for each file.
+- **Other options:** The file tree document now. Only administrators make documents.
+
+## D127. One server process for live sync in milestone 1
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** The server sends each update to the other subscribers through channels in its process. Milestone 1 supports one server process. PostgreSQL `LISTEN` and `NOTIFY` for many processes come later (refer to Events in [Server](server.md)).
+- **Reason:** This is simple and fast for the first releases. The database stays the only durable state, so a later release can add more processes without a data migration.
+- **Other options:** `LISTEN` and `NOTIFY` now.
+
+## D128. The session token in the Hello message
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** The client opens the WebSocket without credentials. Its first message, `Hello`, contains the session token. The server closes the connection if the first message is not a valid `Hello` in 10 seconds.
+- **Reason:** A token in a URL can go into the logs of proxies. Browsers cannot set the `Authorization` header for a WebSocket, and the web portal comes later.
+- **Other options:** The `Authorization` header. A token in the query string.
+
+## D129. tokio-tungstenite for the WebSocket client
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** The `presswork-client` crate uses tokio-tungstenite 0.29, the version that axum uses. TLS uses rustls with the aws-lc-rs provider and the certificate verifier of the operating system, as reqwest does in the toolchain manager.
+- **Reason:** The dependency tree has one WebSocket implementation. All connections of the desktop application use the same TLS behavior.
+- **Other options:** tokio-websockets. fastwebsockets.
