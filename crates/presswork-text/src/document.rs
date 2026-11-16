@@ -63,12 +63,12 @@ impl Document {
         Ok(())
     }
 
-    pub fn undo(&mut self) -> Result<bool, TextError> {
+    pub fn undo(&mut self) -> Result<Option<ChangeSet>, TextError> {
         let transaction = self.history.undo(&self.buffer, &self.selection)?;
         self.restore(transaction)
     }
 
-    pub fn redo(&mut self) -> Result<bool, TextError> {
+    pub fn redo(&mut self) -> Result<Option<ChangeSet>, TextError> {
         let transaction = self.history.redo(&self.buffer, &self.selection)?;
         self.restore(transaction)
     }
@@ -81,13 +81,16 @@ impl Document {
         Ok(())
     }
 
-    fn restore(&mut self, transaction: Option<Transaction>) -> Result<bool, TextError> {
+    fn restore(
+        &mut self,
+        transaction: Option<Transaction>,
+    ) -> Result<Option<ChangeSet>, TextError> {
         let Some(Transaction { changes, selection }) = transaction else {
-            return Ok(false);
+            return Ok(None);
         };
         self.buffer.apply(&changes)?;
         self.selection = selection.unwrap_or_else(|| self.selection.map(&changes));
-        Ok(true)
+        Ok(Some(changes))
     }
 }
 
@@ -172,11 +175,11 @@ mod tests {
         let mut document = Document::new("Typst");
         type_at(&mut document, 5, "!", Instant::now());
 
-        assert!(document.undo().unwrap());
+        assert!(document.undo().unwrap().is_some());
         assert_eq!(text_of(&document), "Typst");
         assert_eq!(document.selection(), &Selection::cursor(at(0)));
 
-        assert!(document.redo().unwrap());
+        assert!(document.redo().unwrap().is_some());
         assert_eq!(text_of(&document), "Typst!");
         assert_eq!(document.selection(), &Selection::cursor(at(6)));
     }
@@ -185,9 +188,27 @@ mod tests {
     fn undo_with_an_empty_history_changes_nothing() {
         let mut document = Document::new("Typst");
 
-        assert!(!document.undo().unwrap());
-        assert!(!document.redo().unwrap());
+        assert!(document.undo().unwrap().is_none());
+        assert!(document.redo().unwrap().is_none());
         assert_eq!(text_of(&document), "Typst");
+    }
+
+    fn applied(text: &str, changes: &ChangeSet) -> String {
+        let mut buffer = Buffer::from(text);
+        buffer.apply(changes).unwrap();
+        buffer.to_string()
+    }
+
+    #[test]
+    fn undo_and_redo_give_the_changes_that_they_apply() {
+        let mut document = Document::new("Typst");
+        type_at(&mut document, 5, "!", Instant::now());
+
+        let undone = document.undo().unwrap().unwrap();
+        let redone = document.redo().unwrap().unwrap();
+
+        assert_eq!(applied("Typst!", &undone), "Typst");
+        assert_eq!(applied("Typst", &redone), "Typst!");
     }
 
     #[test]
@@ -279,9 +300,9 @@ mod tests {
             .apply_remote(&ChangeSet::new(5, [Edit::delete(at(4)..at(5))]).unwrap())
             .unwrap();
 
-        assert!(document.undo().unwrap());
+        assert!(document.undo().unwrap().is_some());
         assert_eq!(text_of(&document), "abc");
-        assert!(!document.undo().unwrap());
+        assert!(document.undo().unwrap().is_none());
     }
 
     fn apply_local(document: &mut Document, raw: RawEdits, time: Instant) {
@@ -302,7 +323,7 @@ mod tests {
                 time += Duration::from_secs(1);
             }
 
-            while document.undo().unwrap() {}
+            while document.undo().unwrap().is_some() {}
 
             prop_assert_eq!(text_of(&document), text);
         }
@@ -326,9 +347,9 @@ mod tests {
                 .unwrap();
             let before_undo = text_of(&document);
 
-            while document.undo().unwrap() {}
+            while document.undo().unwrap().is_some() {}
             let undone = text_of(&document);
-            while document.redo().unwrap() {}
+            while document.redo().unwrap().is_some() {}
 
             for text in inserted {
                 prop_assert!(undone.contains(&text));

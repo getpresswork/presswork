@@ -118,13 +118,13 @@ impl Editor {
             }
             Action::Delete(deletion) => self.delete(deletion, now),
             Action::Undo => {
-                if self.document.undo()? {
+                if self.document.undo()?.is_some() {
                     self.revision += 1;
                 }
                 Ok(())
             }
             Action::Redo => {
-                if self.document.redo()? {
+                if self.document.redo()?.is_some() {
                     self.revision += 1;
                 }
                 Ok(())
