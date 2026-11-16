@@ -1,7 +1,9 @@
 pub mod accounts;
 mod config;
 mod database;
+mod http;
 mod routes;
+pub mod sessions;
 #[cfg(test)]
 mod testing;
 

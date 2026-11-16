@@ -2914,6 +2914,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "jiff-sqlx"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4996ad290ff7f7081becdda47e28556fbebb81618c599eac5d09182b5a60e38"
+dependencies = [
+ "jiff",
+ "sqlx",
+]
+
+[[package]]
 name = "jiff-static"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4308,9 +4318,11 @@ dependencies = [
 name = "presswork-api"
 version = "0.1.0"
 dependencies = [
+ "jiff",
  "serde",
  "serde_json",
  "utoipa",
+ "uuid",
 ]
 
 [[package]]
@@ -4367,10 +4379,14 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "axum",
+ "getrandom 0.4.3",
  "http-body-util",
+ "jiff",
+ "jiff-sqlx",
  "presswork-api",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "sqlx",
  "thiserror 2.0.21",
  "tokio",
@@ -7061,6 +7077,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+ "uuid",
 ]
 
 [[package]]

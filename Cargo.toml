@@ -28,10 +28,12 @@ comemo = "0.5.1"
 directories = "6.0.0"
 fluent-bundle = "0.16.0"
 futures = "0.3.34"
+getrandom = "0.4.3"
 http-body-util = "0.1.5"
 iced = "0.14.0"
 iced_test = "0.14.0"
 jiff = "1.0.0"
+jiff-sqlx = { version = "1.0.0", features = ["postgres"] }
 lzma-rust2 = { version = "0.25.0", default-features = false, features = ["std", "xz"] }
 lucide-icons = { version = "1.73.0", default-features = false }
 png = "0.18.1"
