@@ -1,3 +1,4 @@
+pub mod accounts;
 mod config;
 mod database;
 mod routes;

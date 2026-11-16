@@ -22,6 +22,7 @@ presswork-toolchain = { path = "crates/presswork-toolchain" }
 presswork-typst = { path = "crates/presswork-typst" }
 presswork-ui = { path = "crates/presswork-ui" }
 
+argon2 = "0.6.0"
 axum = "0.8.9"
 comemo = "0.5.1"
 directories = "6.0.0"
@@ -43,7 +44,7 @@ serde ={ version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.10.9"
 skrifa = "0.44.0"
-sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-ring-native-roots", "migrate", "macros"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-ring-native-roots", "migrate", "macros", "uuid"] }
 tar = { version = "0.4.46", default-features = false }
 tempfile = "3.27.0"
 thiserror = "2.0.21"
@@ -62,6 +63,7 @@ tracing-subscriber ={ version = "0.3.23", default-features = false, features = [
 unic-langid = "0.9.6"
 unicode-segmentation = "1.13.3"
 utoipa = "6.0.0"
+uuid = { version = "1.29.2", features = ["v7"] }
 zip = { version = "9.6.0", default-features = false, features = ["deflate-flate2"] }
 
 [workspace.lints.rust]

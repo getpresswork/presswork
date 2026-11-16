@@ -13,6 +13,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+argon2.workspace = true
 axum.workspace = true
 presswork-api.workspace = true
 serde.workspace = true
@@ -23,6 +24,7 @@ toml.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["fmt", "json"] }
 utoipa.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 http-body-util.workspace = true
