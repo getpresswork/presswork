@@ -32,6 +32,12 @@ server-problem-address = The server address must start with http:// or https://.
 server-problem-unreachable = Presswork cannot connect to the server. Make sure that the address is correct.
 server-problem-status = The server answered with the status { $status }.
 
+chat-toggle = Chat
+chat-title = Chat · { $organization }
+chat-empty = No messages yet. Write the first message.
+chat-placeholder = Write a message
+chat-send = Send
+
 unsaved-title = Save the changes to { $file }?
 unsaved-body = If you do not save, the changes are lost.
 unsaved-save = Save

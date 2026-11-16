@@ -119,8 +119,18 @@ impl ServerDialog {
         self.signing_in
     }
 
-    pub(crate) fn connection(&self) -> Option<&Connection> {
-        self.browse.as_ref().map(|browse| &browse.connection)
+    pub(crate) fn organization_of(&self, document: &Document) -> Option<(Uuid, String)> {
+        let Some(Browse {
+            listing: Listing::Loaded(shelves),
+            ..
+        }) = &self.browse
+        else {
+            return None;
+        };
+        shelves
+            .iter()
+            .find(|shelf| shelf.project.id == document.project_id)
+            .map(|shelf| (shelf.project.organization_id, shelf.organization.clone()))
     }
 
     pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
@@ -686,6 +696,18 @@ mod tests {
         let _ = dialog.update(Message::Made(Ok(main_document(ATLAS))));
 
         assert!(!shows(&dialog, "Make main.typ"));
+    }
+
+    #[test]
+    fn a_listed_document_knows_its_organization() {
+        let mut dialog = browsing();
+        let _ = dialog.update(Message::Loaded(Ok(shelves())));
+
+        assert_eq!(
+            dialog.organization_of(&main_document(NOTES)),
+            Some((PRESS, "Field Press".to_owned()))
+        );
+        assert_eq!(dialog.organization_of(&main_document(Uuid::nil())), None);
     }
 
     #[test]

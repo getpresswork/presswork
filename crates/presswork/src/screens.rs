@@ -8,7 +8,7 @@ use presswork_log::{Level, LogEntry, LogStore};
 use presswork_ui::theme::Mode;
 use presswork_ui::{font, font_size};
 
-use presswork_api::live::ServerMessage as LiveMessage;
+use presswork_api::live::{ChatMessage, ServerMessage as LiveMessage};
 use presswork_api::{Document, Project};
 use presswork_client::Api;
 use presswork_editor::{Action as EditorAction, Motion};
@@ -19,7 +19,8 @@ use presswork_toolchain::{Digest, Platform, Release, ReleaseFile, Version};
 use uuid::Uuid;
 
 use crate::app::{App, Message, send};
-use crate::live_document::Event as LiveEvent;
+use crate::chat_panel::Message as ChatPanelMessage;
+use crate::live_session::Event as LiveEvent;
 use crate::server_dialog::{Connection, Message as ServerMessage, Shelf};
 use crate::toolchain_panel::Message as ToolchainMessage;
 use crate::workspace::Workspace;
@@ -297,6 +298,42 @@ fn render_server(app: &mut App) {
     );
     app.compile_now();
     render(app, "server-live");
+
+    let said = |id: u128, author: &str, minutes: i64, text: &str| ChatMessage {
+        id: Uuid::from_u128(id),
+        organization: Uuid::from_u128(1),
+        author: Uuid::nil(),
+        author_name: author.to_owned(),
+        text: text.to_owned(),
+        sent_at: Timestamp::from_second(1_795_340_000 + minutes * 60).unwrap(),
+    };
+    send(
+        app,
+        Message::Live(LiveEvent::Received(LiveMessage::Joined {
+            organization: Uuid::from_u128(1),
+            messages: vec![
+                said(
+                    1,
+                    "Bob",
+                    0,
+                    "I changed the table of weights. Please check it.",
+                ),
+                said(2, "Ann", 3, "Looks good. I will add the plates now."),
+                said(
+                    3,
+                    "Bob",
+                    4,
+                    "Thank you. The proofs go to the printer at noon.",
+                ),
+            ],
+        })),
+    );
+    send(app, Message::Chat(ChatPanelMessage::Toggle));
+    send(
+        app,
+        Message::Chat(ChatPanelMessage::Draft("Noon is fine.".to_owned())),
+    );
+    render(app, "server-chat");
 }
 
 fn sample_releases() -> Vec<Release> {

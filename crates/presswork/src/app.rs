@@ -23,11 +23,12 @@ use presswork_ui::style::{self, Tone};
 use presswork_ui::theme::{self as ui_theme, Mode};
 use presswork_ui::{font, font_size, size, space as gap};
 
+use crate::chat_panel::{self, ChatPanel};
 use crate::chrome::{self, Controls, Frame};
 use crate::compiler::{self, Backend, Compiler};
 use crate::files;
 use crate::i18n::{FluentArgs, Localizer};
-use crate::live_document::{self, LiveDocument};
+use crate::live_session::{self, LiveSession};
 use crate::log_panel::{self, LogPanel};
 use crate::menu;
 use crate::server_dialog::{self, ServerDialog};
@@ -64,7 +65,8 @@ pub(crate) struct App {
     menu_open: bool,
     quitting: bool,
     server_dialog: ServerDialog,
-    live: Option<LiveDocument>,
+    live: Option<LiveSession>,
+    chat: ChatPanel,
 }
 
 #[derive(Debug, Clone)]
@@ -95,7 +97,8 @@ pub(crate) enum Message {
     MenuItem(menu::Item),
     Unsaved(unsaved::Answer),
     Server(server_dialog::Message),
-    Live(live_document::Event),
+    Live(live_session::Event),
+    Chat(chat_panel::Message),
     Window(window::Id, chrome::Action),
     WindowResized(window::Id),
     Maximized(window::Id, bool),
@@ -132,6 +135,7 @@ impl App {
             quitting: false,
             server_dialog: ServerDialog::default(),
             live: None,
+            chat: ChatPanel::default(),
         }
     }
 
@@ -298,11 +302,15 @@ impl App {
     }
 
     fn open_server_document(&mut self, document: Document) -> Task<Message> {
-        let Some(connection) = self.server_dialog.connection().cloned() else {
+        let organization = self.server_dialog.organization_of(&document);
+        let Some(live) = &mut self.live else {
             return Task::none();
         };
         tracing::info!(path = %document.path, "Server document opened");
-        self.live = Some(LiveDocument::new(connection, document));
+        live.open_document(document);
+        if let Some((organization, name)) = organization {
+            live.join_chat(organization, name);
+        }
         self.editor = Editor::new("");
         self.saved = self.editor.revision();
         self.project = None;
@@ -329,6 +337,11 @@ impl App {
     }
 
     fn server(&mut self, message: server_dialog::Message) -> Task<Message> {
+        if let server_dialog::Message::SignedIn(Ok(connection)) = &message
+            && self.server_dialog.is_open()
+        {
+            self.live = Some(LiveSession::new(connection.clone()));
+        }
         let opened = match &message {
             server_dialog::Message::Open(document) => Some(document.clone()),
             _ => None,
@@ -340,6 +353,35 @@ impl App {
         }
     }
 
+    fn chat_message(&mut self, message: chat_panel::Message) {
+        let opening = matches!(message, chat_panel::Message::Toggle) && !self.chat.is_open();
+        if let Some(text) = self.chat.update(message)
+            && let Some(live) = &mut self.live
+            && live.say(&text)
+        {
+            self.chat.clear_draft();
+        }
+        if opening {
+            self.logs.update(log_panel::Message::Close);
+            self.toolchains.close();
+        }
+    }
+
+    fn chat_button(&self) -> Element<'_, Message> {
+        button(
+            row![
+                icon(Icon::MessagesSquare).size(size::ICON_SMALL),
+                text(self.localizer.text("chat-toggle")).size(font_size::SMALL)
+            ]
+            .spacing(gap::XS)
+            .align_y(Vertical::Center),
+        )
+        .padding([gap::XXS, gap::S])
+        .style(style::tab(self.chat.is_open()))
+        .on_press(Message::Chat(chat_panel::Message::Toggle))
+        .into()
+    }
+
     fn share(&mut self, changes: &ChangeSet) {
         if let Some(live) = &mut self.live
             && let Err(error) = live.local(changes)
@@ -348,7 +390,7 @@ impl App {
         }
     }
 
-    fn live_event(&mut self, event: live_document::Event) -> Task<Message> {
+    fn live_event(&mut self, event: live_session::Event) -> Task<Message> {
         let Some(live) = &mut self.live else {
             return Task::none();
         };
@@ -563,6 +605,7 @@ impl App {
                 self.logs.update(message);
                 if self.logs.is_open() {
                     self.toolchains.close();
+                    self.chat.close();
                 }
             }
             Message::Toolchains(toolchain_panel::Message::Use(version)) => {
@@ -574,6 +617,7 @@ impl App {
                 let task = self.toolchains.update(message);
                 if toggled && self.toolchains.is_open() {
                     self.logs.update(log_panel::Message::Close);
+                    self.chat.close();
                 }
                 let sync = self.sync_backend();
                 return Task::batch([task.map(Message::Toolchains), sync]);
@@ -586,6 +630,7 @@ impl App {
             Message::Editor(action) => return self.edit(action),
             Message::Server(message) => return self.server(message),
             Message::Live(event) => return self.live_event(event),
+            Message::Chat(message) => self.chat_message(message),
             Message::Compiled {
                 generation,
                 revision,
@@ -739,6 +784,15 @@ impl App {
                 self.toolchains
                     .view(&self.localizer, choice.as_ref())
                     .map(Message::Toolchains),
+            );
+        }
+        if self.chat.is_open()
+            && let Some(chat) = self.live.as_ref().and_then(LiveSession::chat)
+        {
+            content = content.push(hairline()).push(
+                self.chat
+                    .view(chat.name(), chat.messages(), &self.localizer)
+                    .map(Message::Chat),
             );
         }
         let content = content.push(hairline()).push(self.status_bar());
@@ -905,13 +959,15 @@ impl App {
     }
 
     fn location(&self) -> String {
-        if let Some(live) = &self.live {
+        if let Some(live) = &self.live
+            && let (Some(document), Some(state)) = (live.document(), live.state())
+        {
             let mut args = FluentArgs::new();
-            args.set("path", live.document().path.clone());
-            let id = match live.state() {
-                live_document::State::Connecting => "status-live-connecting",
-                live_document::State::Live => "status-live",
-                live_document::State::Offline => "status-live-offline",
+            args.set("path", document.path.clone());
+            let id = match state {
+                live_session::State::Connecting => "status-live-connecting",
+                live_session::State::Live => "status-live",
+                live_session::State::Offline => "status-live-offline",
             };
             return self.localizer.format(id, &args);
         }
@@ -980,6 +1036,9 @@ impl App {
                     indicators.push(status_text(self.localizer.format("status-compiled", &args)));
             }
             indicators = indicators.push(status_text(self.cursor_position()));
+        }
+        if self.live.as_ref().and_then(LiveSession::chat).is_some() {
+            indicators = indicators.push(self.chat_button());
         }
         indicators = indicators.push(self.typst_button());
         if errors > 0 {
@@ -1969,8 +2028,8 @@ mod tests {
         };
         send(app, Message::Server(server_dialog::Message::Open(document)));
         let (sender, receiver) = futures::channel::mpsc::unbounded();
-        send(app, Message::Live(live_document::Event::Ready(sender)));
-        send(app, Message::Live(live_document::Event::Connected));
+        send(app, Message::Live(live_session::Event::Ready(sender)));
+        send(app, Message::Live(live_session::Event::Connected));
         receiver
     }
 
@@ -1985,7 +2044,7 @@ mod tests {
     fn subscribed(app: &mut App, server: &TextDocument) {
         send(
             app,
-            Message::Live(live_document::Event::Received(ServerMessage::Subscribed {
+            Message::Live(live_session::Event::Received(ServerMessage::Subscribed {
                 document: SERVER_DOCUMENT,
                 version: server.version(),
                 data: server
@@ -2064,7 +2123,7 @@ mod tests {
             .unwrap();
         send(
             &mut app,
-            Message::Live(live_document::Event::Received(ServerMessage::Updates {
+            Message::Live(live_session::Event::Received(ServerMessage::Updates {
                 document: SERVER_DOCUMENT,
                 data,
             })),
@@ -2077,12 +2136,112 @@ mod tests {
         );
     }
 
+    const PRESS_ORGANIZATION: uuid::Uuid = uuid::Uuid::from_u128(1);
+
+    fn open_with_chat(app: &mut App) -> futures::channel::mpsc::UnboundedReceiver<ClientMessage> {
+        signed_in(app);
+        let project = uuid::Uuid::from_u128(2);
+        let document = presswork_api::Document {
+            id: SERVER_DOCUMENT,
+            project_id: project,
+            path: "main.typ".to_owned(),
+        };
+        let shelf = server_dialog::Shelf {
+            organization: "Field Press".to_owned(),
+            project: presswork_api::Project {
+                id: project,
+                organization_id: PRESS_ORGANIZATION,
+                name: "Field Notes".to_owned(),
+            },
+            documents: vec![document.clone()],
+        };
+        send(
+            app,
+            Message::Server(server_dialog::Message::Loaded(Ok(vec![shelf]))),
+        );
+        send(app, Message::Server(server_dialog::Message::Open(document)));
+        let (sender, receiver) = futures::channel::mpsc::unbounded();
+        send(app, Message::Live(live_session::Event::Ready(sender)));
+        send(app, Message::Live(live_session::Event::Connected));
+        receiver
+    }
+
+    #[test]
+    fn the_chat_of_the_organization_opens_from_the_status_bar() {
+        let mut app = app();
+        let mut receiver = open_with_chat(&mut app);
+        assert!(drained(&mut receiver).contains(&ClientMessage::Join {
+            organization: PRESS_ORGANIZATION
+        }));
+        let message = presswork_api::live::ChatMessage {
+            id: uuid::Uuid::from_u128(7),
+            organization: PRESS_ORGANIZATION,
+            author: uuid::Uuid::nil(),
+            author_name: "Bob".to_owned(),
+            text: "Are the proofs ready?".to_owned(),
+            sent_at: jiff::Timestamp::UNIX_EPOCH,
+        };
+        send(
+            &mut app,
+            Message::Live(live_session::Event::Received(ServerMessage::Joined {
+                organization: PRESS_ORGANIZATION,
+                messages: vec![message],
+            })),
+        );
+
+        let mut ui = simulator(app.view());
+        ui.click("Chat")
+            .expect("the status bar has the chat button");
+        for message in ui.into_messages() {
+            send(&mut app, message);
+        }
+
+        assert!(simulator(app.view()).find("Are the proofs ready?").is_ok());
+    }
+
+    #[test]
+    fn send_in_the_chat_sends_the_text_and_clears_the_draft() {
+        let mut app = app();
+        let mut receiver = open_with_chat(&mut app);
+        drained(&mut receiver);
+        send(&mut app, Message::Chat(chat_panel::Message::Toggle));
+        send(
+            &mut app,
+            Message::Chat(chat_panel::Message::Draft("Ready.".to_owned())),
+        );
+
+        send(&mut app, Message::Chat(chat_panel::Message::Send));
+
+        assert_eq!(
+            drained(&mut receiver),
+            [ClientMessage::Say {
+                organization: PRESS_ORGANIZATION,
+                text: "Ready.".to_owned(),
+            }]
+        );
+        assert!(simulator(app.view()).find("Ready.").is_err());
+    }
+
+    #[test]
+    fn the_chat_and_the_log_panel_do_not_open_together() {
+        let mut app = app();
+        let _receiver = open_with_chat(&mut app);
+        send(&mut app, Message::Chat(chat_panel::Message::Toggle));
+
+        send(&mut app, Message::Logs(log_panel::Message::Toggle));
+        assert!(!app.chat.is_open());
+
+        send(&mut app, Message::Chat(chat_panel::Message::Toggle));
+        assert!(app.chat.is_open());
+        assert!(!app.logs.is_open());
+    }
+
     #[test]
     fn a_lost_connection_shows_offline() {
         let mut app = app();
         let _receiver = open_server_document(&mut app);
 
-        send(&mut app, Message::Live(live_document::Event::Disconnected));
+        send(&mut app, Message::Live(live_session::Event::Disconnected));
 
         assert!(simulator(app.view()).find("main.typ · Offline").is_ok());
     }

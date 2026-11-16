@@ -1,9 +1,10 @@
 mod app;
+mod chat_panel;
 mod chrome;
 mod compiler;
 mod files;
 mod i18n;
-mod live_document;
+mod live_session;
 mod log_panel;
 mod logging;
 mod menu;
