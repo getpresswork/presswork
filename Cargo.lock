@@ -5254,6 +5254,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "presswork-library"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "presswork-log"
 version = "0.1.0"
 dependencies = [
