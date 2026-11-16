@@ -3,9 +3,9 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use presswork_api::{
-    AcceptInvite, ApiError, CreatedInvite, Health, Joined, Membership, NewInvite, NewPassword,
-    NewProject, NewTask, Project, ProjectChange, Role, Session, SignIn, SignedIn, Status, Task,
-    TaskChange, TaskState,
+    AcceptInvite, ApiError, CreatedInvite, Document, Health, Joined, Membership, NewDocument,
+    NewInvite, NewPassword, NewProject, NewTask, Project, ProjectChange, Role, Session, SignIn,
+    SignedIn, Status, Task, TaskChange, TaskState,
 };
 use sqlx::PgPool;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
@@ -15,7 +15,7 @@ use uuid::Uuid;
 use presswork_domain::{Action, allowed};
 
 use crate::http::{Caller, HttpError};
-use crate::{accounts, database, links, sessions, work};
+use crate::{accounts, database, documents, links, sessions, work};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -41,7 +41,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         list_tasks,
         create_task,
         update_task,
-        delete_task
+        delete_task,
+        list_documents,
+        create_document
     ),
     components(schemas(
         Health,
@@ -63,7 +65,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         Task,
         TaskState,
         NewTask,
-        TaskChange
+        TaskChange,
+        Document,
+        NewDocument
     )),
     modifiers(&Bearer)
 )]
@@ -107,6 +111,10 @@ pub fn router(state: AppState) -> Router {
             get(list_tasks).post(create_task),
         )
         .route("/api/v1/tasks/{id}", patch(update_task).delete(delete_task))
+        .route(
+            "/api/v1/projects/{id}/documents",
+            get(list_documents).post(create_document),
+        )
         .with_state(state)
 }
 
@@ -219,6 +227,54 @@ async fn rename_project(
     Ok(Json(
         work::rename_project(&state.database, id, &request.name).await?,
     ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/projects/{id}/documents",
+    tag = "documents",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the project.")),
+    responses(
+        (status = 200, description = "The documents of the project, in the sequence of their paths.", body = [Document]),
+        (status = 404, description = "The project does not exist for this user.", body = ApiError)
+    )
+)]
+async fn list_documents(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<Document>>, HttpError> {
+    let organization = project_organization(&state, id).await?;
+    authorize(&state, organization, signed.user_id, Action::ReadProjects).await?;
+    Ok(Json(documents::documents(&state.database, id).await?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/projects/{id}/documents",
+    tag = "documents",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the project.")),
+    request_body = NewDocument,
+    responses(
+        (status = 201, description = "The new document. It is empty.", body = Document),
+        (status = 400, description = "The path is not valid.", body = ApiError),
+        (status = 404, description = "The project does not exist for this user.", body = ApiError),
+        (status = 409, description = "The project has a document with this path.", body = ApiError)
+    )
+)]
+async fn create_document(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+    Json(request): Json<NewDocument>,
+) -> Result<(StatusCode, Json<Document>), HttpError> {
+    let organization = project_organization(&state, id).await?;
+    authorize(&state, organization, signed.user_id, Action::EditDocuments).await?;
+    let document =
+        documents::create_document(&state.database, id, signed.user_id, &request.path).await?;
+    Ok((StatusCode::CREATED, Json(document)))
 }
 
 #[utoipa::path(
@@ -1148,6 +1204,88 @@ mod tests {
             ("/api/v1/tasks/{id}", "delete"),
         ] {
             assert!(body["paths"][path][method].is_object(), "{method} {path}");
+        }
+    }
+
+    async fn document(
+        pool: &PgPool,
+        project: &str,
+        token: &str,
+        path: &str,
+    ) -> (StatusCode, Value) {
+        send(
+            app(pool),
+            "POST",
+            &format!("/api/v1/projects/{project}/documents"),
+            Some(token),
+            Some(json!({ "path": path })),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn members_make_and_list_the_documents_of_a_project() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let team = team(pool).await;
+        let project = project(pool, &team).await;
+
+        let (status, main) = document(pool, &project, &team.member, "main.typ").await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(main["path"], "main.typ");
+        assert_eq!(main["project_id"], project);
+        let (status, _) = document(pool, &project, &team.administrator, "chapters/one.typ").await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        let (status, documents) = send(
+            app(pool),
+            "GET",
+            &format!("/api/v1/projects/{project}/documents"),
+            Some(&team.member),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let paths: Vec<&str> = documents
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|document| document["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(paths, ["chapters/one.typ", "main.typ"]);
+    }
+
+    #[tokio::test]
+    async fn a_document_needs_a_member_and_a_valid_unused_path() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let team = team(pool).await;
+        let project = project(pool, &team).await;
+        document(pool, &project, &team.member, "main.typ").await;
+
+        let (status, body) = document(pool, &project, &team.member, "main.typ").await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["code"], "conflict");
+        let (status, body) = document(pool, &project, &team.member, "../main.typ").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["code"], "invalid_request");
+        let (status, _) = document(pool, &project, &team.outsider, "notes.typ").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn the_openapi_description_contains_the_document_routes() {
+        let (_, body) = get("/api/v1/openapi.json").await;
+
+        for method in ["get", "post"] {
+            assert!(
+                body["paths"]["/api/v1/projects/{id}/documents"][method].is_object(),
+                "{method}"
+            );
         }
     }
 

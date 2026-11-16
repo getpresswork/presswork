@@ -7,6 +7,7 @@ use axum::response::{IntoResponse, Response};
 use presswork_api::ApiError;
 
 use crate::accounts::AccountError;
+use crate::documents::DocumentError;
 use crate::links::LinkError;
 use crate::routes::AppState;
 use crate::sessions::{self, SessionError, Signed};
@@ -106,6 +107,16 @@ impl From<LinkError> for HttpError {
             LinkError::Account(error) => error.into(),
             LinkError::Session(error) => error.into(),
             LinkError::Database(_) => Self::Internal(error.to_string()),
+        }
+    }
+}
+
+impl From<DocumentError> for HttpError {
+    fn from(error: DocumentError) -> Self {
+        match error {
+            DocumentError::InvalidPath => Self::Invalid(sentence(&error.to_string())),
+            DocumentError::PathTaken => Self::Conflict(sentence(&error.to_string())),
+            DocumentError::Database(_) => Self::Internal(error.to_string()),
         }
     }
 }
