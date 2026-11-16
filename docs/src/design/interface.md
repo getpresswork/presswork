@@ -191,6 +191,16 @@ Presswork keeps the session in memory only (D131). After a restart, sign in agai
 
 When a server document is open, the **Chat** button in the status bar opens the chat of its organization. Refer to [Communication](communication.md).
 
+If you open a local project, it takes the place of the server document. The connection and the chat stay open.
+
+### Tasks
+
+When a server document is open, the Plan workspace shows the tasks of its project (D135). Each line shows the title and the due date of a task. A task that is in progress also shows **In progress**.
+
+- To set a task to done, click its check box. To set it back to to do, click the check box again. The change goes to the server at once. If the server refuses the change, a message tells the problem and the list loads again.
+- To add a task, type its title in the field at the top. Then select **Add** or push Enter.
+- The list loads again each time that you select the Plan workspace.
+
 ## Home dashboard
 
 The home dashboard is the start page. It shows:
