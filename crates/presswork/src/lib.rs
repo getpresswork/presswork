@@ -8,7 +8,10 @@ mod logging;
 mod menu;
 #[cfg(test)]
 mod screens;
+#[cfg(test)]
+mod testing;
 mod toolchain_panel;
+mod unsaved;
 mod workspace;
 
 use app::App;

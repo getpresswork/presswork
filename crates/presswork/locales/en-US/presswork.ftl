@@ -13,6 +13,12 @@ menu-quit = Quit
 shortcut = Ctrl+{ $key }
 shortcut-mac = Cmd+{ $key }
 
+unsaved-title = Save the changes to { $file }?
+unsaved-body = If you do not save, the changes are lost.
+unsaved-save = Save
+unsaved-discard = Do not save
+unsaved-cancel = Cancel
+
 workspace-plan = Plan
 workspace-research = Research
 workspace-write = Write

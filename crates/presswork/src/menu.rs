@@ -126,7 +126,7 @@ fn separator<'a>() -> Element<'a, Message> {
 
 #[cfg(test)]
 mod tests {
-    use iced::keyboard::{self, key};
+    use iced::keyboard::key;
     use iced::{Element, Point, Settings, event, window};
     use iced_test::simulator::{self, simulator};
     use iced_test::{Simulator, selector};
@@ -136,6 +136,7 @@ mod tests {
     use crate::app::Message;
     use crate::chrome::Controls;
     use crate::i18n::Localizer;
+    use crate::testing::key_press;
 
     const LABELS: [(&str, Item); 5] = [
         ("Open folder…", Item::OpenFolder),
@@ -147,19 +148,6 @@ mod tests {
 
     fn menu(can_save: bool, controls: Controls) -> Element<'static, Message> {
         view(&Localizer::english(), can_save, controls)
-    }
-
-    fn key_press(named: key::Named) -> iced::Event {
-        let key = keyboard::Key::Named(named);
-        iced::Event::Keyboard(keyboard::Event::KeyPressed {
-            key: key.clone(),
-            modified_key: key,
-            physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Escape),
-            location: keyboard::Location::Standard,
-            modifiers: keyboard::Modifiers::empty(),
-            text: None,
-            repeat: false,
-        })
     }
 
     #[test]

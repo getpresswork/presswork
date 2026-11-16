@@ -14,9 +14,9 @@ use presswork_text::Position;
 use presswork_toolchain::{Digest, Platform, Release, ReleaseFile, Version};
 
 use crate::app::{App, Message, send};
-use crate::log_panel;
 use crate::toolchain_panel::Message as ToolchainMessage;
 use crate::workspace::Workspace;
+use crate::{log_panel, menu, unsaved};
 
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 800.0;
@@ -173,6 +173,10 @@ fn render_screens() {
     let start = BOOK.find(sentence).unwrap();
     select(&mut app, start, start + sentence.len());
     render(&mut app, "project");
+
+    send(&mut app, Message::MenuItem(menu::Item::Quit));
+    render(&mut app, "unsaved");
+    send(&mut app, Message::Unsaved(unsaved::Answer::Cancel));
 
     send(&mut app, Message::Preview(PreviewAction::ZoomIn));
     send(&mut app, Message::Preview(PreviewAction::ZoomIn));

@@ -29,6 +29,7 @@ use crate::i18n::{FluentArgs, Localizer};
 use crate::log_panel::{self, LogPanel};
 use crate::menu;
 use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
+use crate::unsaved;
 use crate::workspace::Workspace;
 
 const MARK_SIZE: f32 = 10.0;
@@ -56,6 +57,7 @@ pub(crate) struct App {
     preview_window: Option<window::Id>,
     maximized: HashSet<window::Id>,
     menu_open: bool,
+    quitting: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +86,7 @@ pub(crate) enum Message {
     ToggleMenu,
     CloseMenu,
     MenuItem(menu::Item),
+    Unsaved(unsaved::Answer),
     Window(window::Id, chrome::Action),
     WindowResized(window::Id),
     Maximized(window::Id, bool),
@@ -117,6 +120,7 @@ impl App {
             preview_window: None,
             maximized: HashSet::new(),
             menu_open: false,
+            quitting: false,
         }
     }
 
@@ -498,6 +502,7 @@ impl App {
                 tracing::debug!(?mode, "System theme changed");
                 self.mode = mode;
             }
+            Message::Editor(_) if self.quitting => {}
             Message::Editor(action) => {
                 let revision = self.editor.revision();
                 if let Err(error) = self.editor.perform(action, Instant::now()) {
@@ -532,6 +537,8 @@ impl App {
                 self.menu_open = false;
                 return self.choose(item);
             }
+            Message::Unsaved(answer) => return self.answer(answer),
+            Message::Window(id, chrome::Action::Close) => return self.close_window(id),
             Message::Window(id, action) => return chrome::perform(id, action),
             Message::WindowResized(id) => {
                 return window::is_maximized(id)
@@ -560,7 +567,7 @@ impl App {
             }) if modifiers.command() => match key.to_latin(physical_key) {
                 Some('s') => self.save(),
                 Some('o') => return self.open_folder(),
-                Some('q') => return iced::exit(),
+                Some('q') => return self.quit(),
                 _ => {}
             },
             Message::FolderPicked(None) | Message::Key(_) => {}
@@ -575,13 +582,51 @@ impl App {
         } else {
             Subscription::none()
         };
+        let dialog = if self.quitting {
+            event::listen_with(unsaved::dialog_key)
+        } else {
+            Subscription::none()
+        };
         Subscription::batch([
             self.logs.subscription().map(Message::Logs),
             system::theme_changes().map(Message::SystemTheme),
             keyboard::listen().map(Message::Key),
             window::events().filter_map(window_event),
             menu,
+            dialog,
         ])
+    }
+
+    fn close_window(&mut self, id: window::Id) -> Task<Message> {
+        if self.preview_window == Some(id) {
+            return window::close(id);
+        }
+        self.quit()
+    }
+
+    fn quit(&mut self) -> Task<Message> {
+        self.menu_open = false;
+        if self.is_saved() {
+            return iced::exit();
+        }
+        self.quitting = true;
+        Task::none()
+    }
+
+    fn answer(&mut self, answer: unsaved::Answer) -> Task<Message> {
+        self.quitting = false;
+        match answer {
+            unsaved::Answer::Save => {
+                self.save();
+                if self.is_saved() {
+                    iced::exit()
+                } else {
+                    Task::none()
+                }
+            }
+            unsaved::Answer::Discard => iced::exit(),
+            unsaved::Answer::Cancel => Task::none(),
+        }
     }
 
     fn choose(&mut self, item: menu::Item) -> Task<Message> {
@@ -593,7 +638,7 @@ impl App {
             }
             menu::Item::Typst => self.update(Message::Toolchains(toolchain_panel::Message::Toggle)),
             menu::Item::Logs => self.update(Message::Logs(log_panel::Message::Toggle)),
-            menu::Item::Quit => iced::exit(),
+            menu::Item::Quit => self.quit(),
         }
     }
 
@@ -620,6 +665,10 @@ impl App {
                 self.project.is_some(),
                 Controls::CURRENT,
             ));
+        }
+        if let Some(project) = self.project.as_ref().filter(|_| self.quitting) {
+            let file = project.manifest().main.display().to_string();
+            layers = layers.push(unsaved::view(&self.localizer, &file));
         }
         chrome::window(self.frame(self.main_window), layers)
     }
@@ -1703,6 +1752,143 @@ mod tests {
         send(&mut app, Message::MenuItem(menu::Item::Save));
 
         assert!(app.is_saved());
+    }
+
+    const UNSAVED_QUESTION: &str = "Save the changes to main.typ?";
+
+    fn changed_book(app: &mut App) -> tempfile::TempDir {
+        let folder = book();
+        open(app, &folder);
+        send(app, insert("x"));
+        folder
+    }
+
+    fn control_key(letter: char) -> Message {
+        let pressed = keyboard::Key::Character(letter.to_string().into());
+        Message::Key(keyboard::Event::KeyPressed {
+            key: pressed.clone(),
+            modified_key: pressed,
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::COMMAND,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    fn close_main(app: &mut App) {
+        let main = app.main_window;
+        send(app, Message::Window(main, chrome::Action::Close));
+    }
+
+    #[test]
+    fn closing_with_changes_that_are_not_saved_asks_first() {
+        let mut app = app();
+        let _folder = changed_book(&mut app);
+
+        close_main(&mut app);
+
+        assert!(simulator(app.view()).find(UNSAVED_QUESTION).is_ok());
+    }
+
+    #[test]
+    fn closing_without_changes_does_not_ask() {
+        let folder = book();
+        let mut app = app();
+        open(&mut app, &folder);
+
+        close_main(&mut app);
+
+        assert!(simulator(app.view()).find(UNSAVED_QUESTION).is_err());
+    }
+
+    #[test]
+    fn quit_and_control_q_ask_when_there_are_changes() {
+        for message in [Message::MenuItem(menu::Item::Quit), control_key('q')] {
+            let mut app = app();
+            let _folder = changed_book(&mut app);
+
+            send(&mut app, message);
+
+            assert!(simulator(app.view()).find(UNSAVED_QUESTION).is_ok());
+        }
+    }
+
+    #[test]
+    fn cancel_keeps_presswork_open_with_the_changes() {
+        let mut app = app();
+        let _folder = changed_book(&mut app);
+        close_main(&mut app);
+
+        send(&mut app, Message::Unsaved(unsaved::Answer::Cancel));
+
+        assert!(simulator(app.view()).find(UNSAVED_QUESTION).is_err());
+        assert!(!app.is_saved());
+        assert!(app.editor.document().buffer().to_string().starts_with('x'));
+    }
+
+    #[test]
+    fn save_in_the_dialog_saves_the_file() {
+        let mut app = app();
+        let folder = changed_book(&mut app);
+        close_main(&mut app);
+
+        send(&mut app, Message::Unsaved(unsaved::Answer::Save));
+
+        assert!(app.is_saved());
+        let text = fs::read_to_string(folder.path().join("main.typ")).unwrap();
+        assert_eq!(text, "x= Book");
+    }
+
+    #[test]
+    fn do_not_save_leaves_the_file_as_it_was() {
+        let mut app = app();
+        let folder = changed_book(&mut app);
+        close_main(&mut app);
+
+        send(&mut app, Message::Unsaved(unsaved::Answer::Discard));
+
+        let text = fs::read_to_string(folder.path().join("main.typ")).unwrap();
+        assert_eq!(text, "= Book");
+    }
+
+    #[test]
+    fn a_failed_save_keeps_presswork_open_and_shows_the_problem() {
+        let mut app = app();
+        let folder = changed_book(&mut app);
+        close_main(&mut app);
+        fs::remove_dir_all(folder.path()).unwrap();
+
+        send(&mut app, Message::Unsaved(unsaved::Answer::Save));
+
+        assert!(!app.is_saved());
+        let mut ui = simulator(app.view());
+        assert!(ui.find(UNSAVED_QUESTION).is_err());
+        assert!(app.notice.is_some());
+    }
+
+    #[test]
+    fn the_editor_ignores_typing_while_the_dialog_is_open() {
+        let mut app = app();
+        let _folder = changed_book(&mut app);
+        close_main(&mut app);
+
+        send(&mut app, insert("y"));
+
+        assert!(app.editor.document().buffer().to_string().starts_with("x="));
+    }
+
+    #[test]
+    fn the_preview_window_closes_without_a_question() {
+        let mut app = app();
+        let _folder = changed_book(&mut app);
+        let preview = detach(&mut app);
+
+        send(&mut app, Message::Window(preview, chrome::Action::Close));
+
+        assert!(simulator(app.view()).find(UNSAVED_QUESTION).is_err());
     }
 
     #[test]
