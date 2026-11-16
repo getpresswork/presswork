@@ -10,6 +10,7 @@ use crate::accounts::AccountError;
 use crate::links::LinkError;
 use crate::routes::AppState;
 use crate::sessions::{self, SessionError, Signed};
+use crate::work::WorkError;
 
 const BEARER: &str = "Bearer ";
 
@@ -105,6 +106,19 @@ impl From<LinkError> for HttpError {
             LinkError::Account(error) => error.into(),
             LinkError::Session(error) => error.into(),
             LinkError::Database(_) => Self::Internal(error.to_string()),
+        }
+    }
+}
+
+impl From<WorkError> for HttpError {
+    fn from(error: WorkError) -> Self {
+        match error {
+            WorkError::InvalidName
+            | WorkError::InvalidTitle
+            | WorkError::LongDescription
+            | WorkError::AssigneeNotMember => Self::Invalid(sentence(&error.to_string())),
+            WorkError::NotFound => Self::NotFound,
+            WorkError::Database(_) => Self::Internal(error.to_string()),
         }
     }
 }

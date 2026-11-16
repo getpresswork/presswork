@@ -1,10 +1,11 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use presswork_api::{
-    AcceptInvite, ApiError, CreatedInvite, Health, Joined, NewInvite, NewPassword, Role, Session,
-    SignIn, SignedIn, Status,
+    AcceptInvite, ApiError, CreatedInvite, Health, Joined, Membership, NewInvite, NewPassword,
+    NewProject, NewTask, Project, ProjectChange, Role, Session, SignIn, SignedIn, Status, Task,
+    TaskChange, TaskState,
 };
 use sqlx::PgPool;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
@@ -14,7 +15,7 @@ use uuid::Uuid;
 use presswork_domain::{Action, allowed};
 
 use crate::http::{Caller, HttpError};
-use crate::{accounts, database, links, sessions};
+use crate::{accounts, database, links, sessions, work};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -32,7 +33,15 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         end_session,
         accept_invite,
         reset_password,
-        create_invite
+        create_invite,
+        list_organizations,
+        list_projects,
+        create_project,
+        rename_project,
+        list_tasks,
+        create_task,
+        update_task,
+        delete_task
     ),
     components(schemas(
         Health,
@@ -46,7 +55,15 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         Joined,
         NewPassword,
         NewInvite,
-        CreatedInvite
+        CreatedInvite,
+        Membership,
+        Project,
+        NewProject,
+        ProjectChange,
+        Task,
+        TaskState,
+        NewTask,
+        TaskChange
     )),
     modifiers(&Bearer)
 )]
@@ -79,7 +96,235 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/invites/{token}/accept", post(accept_invite))
         .route("/api/v1/password-resets/{token}", post(reset_password))
         .route("/api/v1/organizations/{id}/invites", post(create_invite))
+        .route("/api/v1/organizations", get(list_organizations))
+        .route(
+            "/api/v1/organizations/{id}/projects",
+            get(list_projects).post(create_project),
+        )
+        .route("/api/v1/projects/{id}", patch(rename_project))
+        .route(
+            "/api/v1/projects/{id}/tasks",
+            get(list_tasks).post(create_task),
+        )
+        .route("/api/v1/tasks/{id}", patch(update_task).delete(delete_task))
         .with_state(state)
+}
+
+async fn authorize(
+    state: &AppState,
+    organization_id: Uuid,
+    user_id: Uuid,
+    action: Action,
+) -> Result<(), HttpError> {
+    match links::role(&state.database, organization_id, user_id).await? {
+        None => Err(HttpError::NotFound),
+        Some(role) if allowed(role, action) => Ok(()),
+        Some(_) => Err(HttpError::Forbidden),
+    }
+}
+
+async fn project_organization(state: &AppState, project_id: Uuid) -> Result<Uuid, HttpError> {
+    work::project_organization(&state.database, project_id)
+        .await?
+        .ok_or(HttpError::NotFound)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/organizations",
+    tag = "organizations",
+    security(("bearer" = [])),
+    responses(
+        (status = 200, description = "The organizations of the user, with the role in each.", body = [Membership]),
+        (status = 401, description = "The request has no valid session.", body = ApiError)
+    )
+)]
+async fn list_organizations(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+) -> Result<Json<Vec<Membership>>, HttpError> {
+    Ok(Json(
+        work::memberships(&state.database, signed.user_id).await?,
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/organizations/{id}/projects",
+    tag = "projects",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the organization.")),
+    responses(
+        (status = 200, description = "The projects of the organization.", body = [Project]),
+        (status = 401, description = "The request has no valid session.", body = ApiError),
+        (status = 404, description = "The user is not a member of the organization.", body = ApiError)
+    )
+)]
+async fn list_projects(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<Project>>, HttpError> {
+    authorize(&state, id, signed.user_id, Action::ReadProjects).await?;
+    Ok(Json(work::projects(&state.database, id).await?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/organizations/{id}/projects",
+    tag = "projects",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the organization.")),
+    request_body = NewProject,
+    responses(
+        (status = 201, description = "The new project.", body = Project),
+        (status = 400, description = "The request is not valid.", body = ApiError),
+        (status = 403, description = "Only administrators make projects.", body = ApiError),
+        (status = 404, description = "The user is not a member of the organization.", body = ApiError)
+    )
+)]
+async fn create_project(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+    Json(request): Json<NewProject>,
+) -> Result<(StatusCode, Json<Project>), HttpError> {
+    authorize(&state, id, signed.user_id, Action::ManageProjects).await?;
+    let project = work::create_project(&state.database, id, &request.name).await?;
+    Ok((StatusCode::CREATED, Json(project)))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/projects/{id}",
+    tag = "projects",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the project.")),
+    request_body = ProjectChange,
+    responses(
+        (status = 200, description = "The renamed project.", body = Project),
+        (status = 400, description = "The request is not valid.", body = ApiError),
+        (status = 403, description = "Only administrators rename projects.", body = ApiError),
+        (status = 404, description = "The project does not exist for this user.", body = ApiError)
+    )
+)]
+async fn rename_project(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+    Json(request): Json<ProjectChange>,
+) -> Result<Json<Project>, HttpError> {
+    let organization = project_organization(&state, id).await?;
+    authorize(&state, organization, signed.user_id, Action::ManageProjects).await?;
+    Ok(Json(
+        work::rename_project(&state.database, id, &request.name).await?,
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/projects/{id}/tasks",
+    tag = "tasks",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the project.")),
+    responses(
+        (status = 200, description = "The tasks of the project.", body = [Task]),
+        (status = 404, description = "The project does not exist for this user.", body = ApiError)
+    )
+)]
+async fn list_tasks(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<Task>>, HttpError> {
+    let organization = project_organization(&state, id).await?;
+    authorize(&state, organization, signed.user_id, Action::ReadProjects).await?;
+    Ok(Json(work::tasks(&state.database, id).await?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/projects/{id}/tasks",
+    tag = "tasks",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the project.")),
+    request_body = NewTask,
+    responses(
+        (status = 201, description = "The new task. Its state is to_do.", body = Task),
+        (status = 400, description = "The request is not valid.", body = ApiError),
+        (status = 404, description = "The project does not exist for this user.", body = ApiError)
+    )
+)]
+async fn create_task(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+    Json(request): Json<NewTask>,
+) -> Result<(StatusCode, Json<Task>), HttpError> {
+    let organization = project_organization(&state, id).await?;
+    authorize(&state, organization, signed.user_id, Action::WriteTasks).await?;
+    let task = work::create_task(&state.database, id, signed.user_id, &request).await?;
+    Ok((StatusCode::CREATED, Json(task)))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/tasks/{id}",
+    tag = "tasks",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the task.")),
+    request_body = TaskChange,
+    responses(
+        (status = 200, description = "The changed task.", body = Task),
+        (status = 400, description = "The request is not valid.", body = ApiError),
+        (status = 404, description = "The task does not exist for this user.", body = ApiError)
+    )
+)]
+async fn update_task(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+    Json(request): Json<TaskChange>,
+) -> Result<Json<Task>, HttpError> {
+    let (organization, _) = work::task_owner(&state.database, id)
+        .await?
+        .ok_or(HttpError::NotFound)?;
+    authorize(&state, organization, signed.user_id, Action::WriteTasks).await?;
+    Ok(Json(
+        work::update_task(&state.database, id, &request).await?,
+    ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/tasks/{id}",
+    tag = "tasks",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the task.")),
+    responses(
+        (status = 204, description = "The task is deleted."),
+        (status = 403, description = "A member can delete only the tasks that the member made.", body = ApiError),
+        (status = 404, description = "The task does not exist for this user.", body = ApiError)
+    )
+)]
+async fn delete_task(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, HttpError> {
+    let (organization, creator) = work::task_owner(&state.database, id)
+        .await?
+        .ok_or(HttpError::NotFound)?;
+    let own = creator == Some(signed.user_id);
+    authorize(
+        &state,
+        organization,
+        signed.user_id,
+        Action::DeleteTask { own },
+    )
+    .await?;
+    work::delete_task(&state.database, id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -162,10 +407,7 @@ async fn create_invite(
     Path(id): Path<Uuid>,
     Json(request): Json<NewInvite>,
 ) -> Result<(StatusCode, Json<CreatedInvite>), HttpError> {
-    let role = links::role(&state.database, id, signed.user_id).await?;
-    if !role.is_some_and(|role| allowed(role, Action::InvitePeople)) {
-        return Err(HttpError::Forbidden);
-    }
+    authorize(&state, id, signed.user_id, Action::InvitePeople).await?;
     let (token, invite) = links::invite(&state.database, id, &request.email, request.role).await?;
     tracing::info!(organization = %id, invite = %invite.id, "Invite made");
     let created = CreatedInvite {
@@ -663,6 +905,249 @@ mod tests {
             ("/api/v1/organizations/{id}/invites", "post"),
         ] {
             assert!(body["paths"][path][method].is_object(), "{path}");
+        }
+    }
+
+    struct Team {
+        organization: Uuid,
+        administrator: String,
+        member: String,
+        outsider: String,
+    }
+
+    async fn team(pool: &PgPool) -> Team {
+        let organization = crate::links::create_organization(pool, "Field Press")
+            .await
+            .unwrap()
+            .id;
+        let mut tokens = Vec::new();
+        for (email, role) in [
+            ("ann@example.com", Some(Role::Administrator)),
+            ("bob@example.com", Some(Role::Member)),
+            ("eve@example.com", None),
+        ] {
+            let user = crate::accounts::create_user(pool, email, "Someone", PASSWORD)
+                .await
+                .unwrap();
+            if let Some(role) = role {
+                sqlx::query(
+                    "INSERT INTO memberships (organization_id, user_id, role) VALUES ($1, $2, $3)",
+                )
+                .bind(organization)
+                .bind(user.id)
+                .bind(role.as_str())
+                .execute(pool)
+                .await
+                .unwrap();
+            }
+            let (token, _) = sessions::start(pool, user.id, "Laptop").await.unwrap();
+            tokens.push(token);
+        }
+        let [administrator, member, outsider] = <[String; 3]>::try_from(tokens).unwrap();
+        Team {
+            organization,
+            administrator,
+            member,
+            outsider,
+        }
+    }
+
+    async fn project(pool: &PgPool, team: &Team) -> String {
+        let (status, body) = send(
+            app(pool),
+            "POST",
+            &format!("/api/v1/organizations/{}/projects", team.organization),
+            Some(&team.administrator),
+            Some(json!({ "name": "Field Notes" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        body["id"].as_str().unwrap().to_owned()
+    }
+
+    async fn task(pool: &PgPool, project: &str, token: &str) -> String {
+        let (status, body) = send(
+            app(pool),
+            "POST",
+            &format!("/api/v1/projects/{project}/tasks"),
+            Some(token),
+            Some(json!({ "title": "Proof the cover", "due_date": "2026-11-23" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(body["state"], "to_do");
+        body["id"].as_str().unwrap().to_owned()
+    }
+
+    #[tokio::test]
+    async fn members_see_their_organizations_and_projects() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let team = team(&database.pool).await;
+        let project = project(&database.pool, &team).await;
+
+        let (status, memberships) = send(
+            app(&database.pool),
+            "GET",
+            "/api/v1/organizations",
+            Some(&team.member),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(memberships[0]["name"], "Field Press");
+        assert_eq!(memberships[0]["role"], "member");
+
+        let path = format!("/api/v1/organizations/{}/projects", team.organization);
+        let (status, projects) =
+            send(app(&database.pool), "GET", &path, Some(&team.member), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(projects[0]["id"], project);
+
+        let (status, _) = send(
+            app(&database.pool),
+            "GET",
+            &path,
+            Some(&team.outsider),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn only_administrators_make_and_rename_projects() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let team = team(&database.pool).await;
+        let project = project(&database.pool, &team).await;
+
+        let (status, body) = send(
+            app(&database.pool),
+            "POST",
+            &format!("/api/v1/organizations/{}/projects", team.organization),
+            Some(&team.member),
+            Some(json!({ "name": "Other" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["code"], "forbidden");
+
+        let path = format!("/api/v1/projects/{project}");
+        let rename = json!({ "name": "Field Notes, 2nd edition" });
+        let (status, _) = send(
+            app(&database.pool),
+            "PATCH",
+            &path,
+            Some(&team.member),
+            Some(rename.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, renamed) = send(
+            app(&database.pool),
+            "PATCH",
+            &path,
+            Some(&team.administrator),
+            Some(rename),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(renamed["name"], "Field Notes, 2nd edition");
+    }
+
+    #[tokio::test]
+    async fn members_make_change_and_complete_tasks() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let team = team(&database.pool).await;
+        let project = project(&database.pool, &team).await;
+        let task = task(&database.pool, &project, &team.member).await;
+
+        let (status, changed) = send(
+            app(&database.pool),
+            "PATCH",
+            &format!("/api/v1/tasks/{task}"),
+            Some(&team.member),
+            Some(json!({ "state": "done", "due_date": null })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(changed["state"], "done");
+        assert_eq!(changed["due_date"], Value::Null);
+        assert_eq!(changed["title"], "Proof the cover");
+
+        let (status, tasks) = send(
+            app(&database.pool),
+            "GET",
+            &format!("/api/v1/projects/{project}/tasks"),
+            Some(&team.administrator),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(tasks[0]["state"], "done");
+    }
+
+    #[tokio::test]
+    async fn a_member_deletes_only_their_own_tasks() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let team = team(&database.pool).await;
+        let project = project(&database.pool, &team).await;
+        let administrators_task = task(&database.pool, &project, &team.administrator).await;
+        let members_task = task(&database.pool, &project, &team.member).await;
+        let pool = &database.pool;
+
+        assert_eq!(
+            delete_task(pool, &administrators_task, &team.member).await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            delete_task(pool, &members_task, &team.outsider).await,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            delete_task(pool, &members_task, &team.member).await,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            delete_task(pool, &administrators_task, &team.administrator).await,
+            StatusCode::NO_CONTENT
+        );
+    }
+
+    async fn delete_task(pool: &PgPool, task: &str, token: &str) -> StatusCode {
+        send(
+            app(pool),
+            "DELETE",
+            &format!("/api/v1/tasks/{task}"),
+            Some(token),
+            None,
+        )
+        .await
+        .0
+    }
+
+    #[tokio::test]
+    async fn the_openapi_description_contains_the_project_and_task_routes() {
+        let (_, body) = get("/api/v1/openapi.json").await;
+
+        for (path, method) in [
+            ("/api/v1/organizations", "get"),
+            ("/api/v1/organizations/{id}/projects", "get"),
+            ("/api/v1/organizations/{id}/projects", "post"),
+            ("/api/v1/projects/{id}", "patch"),
+            ("/api/v1/projects/{id}/tasks", "get"),
+            ("/api/v1/projects/{id}/tasks", "post"),
+            ("/api/v1/tasks/{id}", "patch"),
+            ("/api/v1/tasks/{id}", "delete"),
+        ] {
+            assert!(body["paths"][path][method].is_object(), "{method} {path}");
         }
     }
 
