@@ -1,0 +1,21 @@
+[package]
+name = "presswork-sync"
+description = "The Loro documents of Presswork and their link to the text model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+loro.workspace = true
+presswork-text.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

@@ -36,6 +36,7 @@ iced = "0.14.0"
 iced_test = "0.14.0"
 jiff = "1.0.0"
 jiff-sqlx = { version = "1.0.0", features = ["postgres"] }
+loro = { version = "1.18.0", default-features = false }
 lzma-rust2 = { version = "0.25.0", default-features = false, features = ["std", "xz"] }
 lucide-icons = { version = "1.73.0", default-features = false }
 png = "0.18.1"
