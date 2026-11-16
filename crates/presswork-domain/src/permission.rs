@@ -9,6 +9,8 @@ pub enum Action {
     DeleteTask { own: bool },
     EditDocuments,
     UseChat,
+    ReadLibrary,
+    AddToLibrary,
 }
 
 #[must_use]
@@ -17,7 +19,12 @@ pub fn allowed(role: Role, action: Action) -> bool {
         (Role::Administrator, _)
         | (
             Role::Member,
-            Action::ReadProjects | Action::WriteTasks | Action::EditDocuments | Action::UseChat,
+            Action::ReadProjects
+            | Action::WriteTasks
+            | Action::EditDocuments
+            | Action::UseChat
+            | Action::ReadLibrary
+            | Action::AddToLibrary,
         ) => true,
         (Role::Member, Action::DeleteTask { own }) => own,
         (Role::Member, Action::ManageProjects | Action::InvitePeople) => false,
@@ -39,6 +46,8 @@ mod tests {
             Action::DeleteTask { own: true },
             Action::EditDocuments,
             Action::UseChat,
+            Action::ReadLibrary,
+            Action::AddToLibrary,
         ] {
             assert!(allowed(Role::Administrator, action), "{action:?}");
         }
@@ -51,6 +60,8 @@ mod tests {
         assert!(allowed(Role::Member, Action::DeleteTask { own: true }));
         assert!(allowed(Role::Member, Action::EditDocuments));
         assert!(allowed(Role::Member, Action::UseChat));
+        assert!(allowed(Role::Member, Action::ReadLibrary));
+        assert!(allowed(Role::Member, Action::AddToLibrary));
     }
 
     #[test]
