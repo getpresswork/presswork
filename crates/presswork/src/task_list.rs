@@ -12,12 +12,13 @@ use crate::server_dialog::{Connection, Problem, problem, problem_text};
 const LIST_WIDTH: f32 = 640.0;
 
 #[cfg(test)]
-pub(crate) const TEXT_IDS: [&str; 5] = [
+pub(crate) const TEXT_IDS: [&str; 6] = [
     "tasks-title",
     "tasks-loading",
     "tasks-empty",
     "tasks-placeholder",
     "tasks-add",
+    "tasks-in-progress",
 ];
 
 #[derive(Debug, Clone)]
@@ -187,9 +188,11 @@ impl TaskList {
             Some(tasks) if tasks.is_empty() => text(localizer.text("tasks-empty"))
                 .style(style::muted)
                 .into(),
-            Some(tasks) => scrollable(column(tasks.iter().map(line)).spacing(gap::XXS))
-                .height(Fill)
-                .into(),
+            Some(tasks) => {
+                scrollable(column(tasks.iter().map(|task| line(task, localizer))).spacing(gap::XXS))
+                    .height(Fill)
+                    .into()
+            }
         };
         container(content.push(list).width(LIST_WIDTH))
             .center_x(Fill)
@@ -200,7 +203,7 @@ impl TaskList {
     }
 }
 
-fn line(task: &ProjectTask) -> Element<'_, Message> {
+fn line<'a>(task: &'a ProjectTask, localizer: &Localizer) -> Element<'a, Message> {
     let id = task.id;
     let mut line = row![
         checkbox(task.state == TaskState::Done)
@@ -209,7 +212,15 @@ fn line(task: &ProjectTask) -> Element<'_, Message> {
             .on_toggle(move |_| Message::Toggle(id)),
         space::horizontal(),
     ]
+    .spacing(gap::M)
     .align_y(Vertical::Center);
+    if task.state == TaskState::InProgress {
+        line = line.push(
+            text(localizer.text("tasks-in-progress"))
+                .size(font_size::SMALL)
+                .style(style::tone(Tone::Info)),
+        );
+    }
     if let Some(due) = task.due_date {
         line = line.push(
             text(due.to_string())
@@ -304,6 +315,23 @@ mod tests {
         ] {
             assert!(shows(&list, words), "{words} is not in the list");
         }
+    }
+
+    #[test]
+    fn a_task_in_progress_shows_its_state() {
+        let mut list = loaded();
+        assert!(!shows(&list, "In progress"));
+
+        let _ = list.update(
+            Message::Loaded(Ok(vec![task(
+                COVER,
+                "Proof the cover",
+                TaskState::InProgress,
+            )])),
+            &connection(),
+        );
+
+        assert!(shows(&list, "In progress"));
     }
 
     #[test]

@@ -37,6 +37,7 @@ tasks-loading = Presswork gets the tasks.
 tasks-empty = This project has no tasks. Add the first task.
 tasks-placeholder = New task
 tasks-add = Add
+tasks-in-progress = In progress
 
 chat-toggle = Chat
 chat-title = Chat · { $organization }
