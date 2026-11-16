@@ -1,16 +1,18 @@
 use std::time::Duration;
 
 use presswork_api::{
-    ApiError, Document, Membership, NewDocument, NewTask, Project, SignIn, SignedIn, Task,
-    TaskChange,
+    ApiError, Document, Membership, NewDocument, NewTask, NewWork, Project, SearchHit, SignIn,
+    SignedIn, Task, TaskChange, Work,
 };
-use reqwest::RequestBuilder;
+use reqwest::header::CONTENT_TYPE;
+use reqwest::{RequestBuilder, Url};
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 use crate::live::{ClientError, server_base};
 
 const USER_AGENT: &str = concat!("Presswork/", env!("CARGO_PKG_VERSION"));
+const PDF: &str = "application/pdf";
 const CONNECT_TIME: Duration = Duration::from_secs(15);
 const READ_TIME: Duration = Duration::from_secs(30);
 
@@ -121,6 +123,50 @@ impl Api {
         .await
     }
 
+    pub async fn works(&self, token: &str, organization: Uuid) -> Result<Vec<Work>, ClientError> {
+        let path = format!("/api/v1/organizations/{organization}/works");
+        answer(self.http.get(self.url(&path)).bearer_auth(token)).await
+    }
+
+    pub async fn create_work(
+        &self,
+        token: &str,
+        organization: Uuid,
+        new: &NewWork,
+    ) -> Result<Work, ClientError> {
+        let path = format!("/api/v1/organizations/{organization}/works");
+        answer(self.http.post(self.url(&path)).bearer_auth(token).json(new)).await
+    }
+
+    pub async fn upload_file(
+        &self,
+        token: &str,
+        work: Uuid,
+        file: Vec<u8>,
+    ) -> Result<Work, ClientError> {
+        let path = format!("/api/v1/works/{work}/file");
+        answer(
+            self.http
+                .put(self.url(&path))
+                .bearer_auth(token)
+                .header(CONTENT_TYPE, PDF)
+                .body(file),
+        )
+        .await
+    }
+
+    pub async fn search(
+        &self,
+        token: &str,
+        organization: Uuid,
+        words: &str,
+    ) -> Result<Vec<SearchHit>, ClientError> {
+        let path = format!("/api/v1/organizations/{organization}/library/search");
+        let mut address = Url::parse(&self.url(&path)).map_err(|_| ClientError::Address)?;
+        address.query_pairs_mut().append_pair("q", words);
+        answer(self.http.get(address).bearer_auth(token)).await
+    }
+
     fn url(&self, path: &str) -> String {
         format!("{}{path}", self.server)
     }
@@ -143,14 +189,17 @@ async fn answer<T: DeserializeOwned>(request: RequestBuilder) -> Result<T, Clien
 
 #[cfg(test)]
 mod tests {
-    use axum::extract::Path;
+    use std::collections::HashMap;
+
+    use axum::body::Bytes;
+    use axum::extract::{Path, Query};
     use axum::http::{HeaderMap, StatusCode};
-    use axum::routing::{get, post};
+    use axum::routing::{get, post, put};
     use axum::{Json, Router};
     use jiff::Timestamp;
     use presswork_api::{
-        ApiError, Document, Membership, NewDocument, NewTask, Project, Role, Session, SignIn,
-        SignedIn, Task, TaskChange, TaskState,
+        ApiError, Document, LibraryFile, Membership, NewDocument, NewTask, NewWork, Project, Role,
+        SearchHit, Session, SignIn, SignedIn, Task, TaskChange, TaskState, Work,
     };
     use tokio::net::TcpListener;
     use uuid::Uuid;
@@ -374,6 +423,128 @@ mod tests {
         assert_eq!(new.title, "Print");
         assert_eq!(done.id, new.id);
         assert_eq!(done.state, TaskState::Done);
+    }
+
+    const FIELD_NOTES: Uuid = Uuid::from_u128(0x0193_0000_0000_7000_8000_0000_0000_0010);
+
+    fn work(id: Uuid, key: &str, title: &str, file: Option<LibraryFile>) -> Work {
+        Work {
+            id,
+            organization_id: PRESS,
+            key: key.to_owned(),
+            title: title.to_owned(),
+            creators: Vec::new(),
+            year: None,
+            file,
+        }
+    }
+
+    fn library_press() -> Router {
+        Router::new()
+            .route(
+                "/api/v1/organizations/{id}/works",
+                get(|headers: HeaderMap, Path(_): Path<Uuid>| async move {
+                    if !signed_in(&headers) {
+                        return Err(refused());
+                    }
+                    Ok(Json(vec![work(
+                        FIELD_NOTES,
+                        "field-notes",
+                        "Field Notes",
+                        None,
+                    )]))
+                })
+                .post(
+                    |headers: HeaderMap, Path(_): Path<Uuid>, Json(new): Json<NewWork>| async move {
+                        if !signed_in(&headers) {
+                            return Err(refused());
+                        }
+                        Ok((
+                            StatusCode::CREATED,
+                            Json(work(Uuid::from_u128(11), &new.key, &new.title, None)),
+                        ))
+                    },
+                ),
+            )
+            .route(
+                "/api/v1/works/{id}/file",
+                put(
+                    |headers: HeaderMap, Path(id): Path<Uuid>, body: Bytes| async move {
+                        if !signed_in(&headers) {
+                            return Err(refused());
+                        }
+                        let pdf = headers
+                            .get("content-type")
+                            .and_then(|value| value.to_str().ok())
+                            == Some("application/pdf");
+                        let file = LibraryFile {
+                            size: u64::try_from(body.len()).unwrap(),
+                            pages: u32::from(pdf),
+                            pages_with_text: 0,
+                        };
+                        Ok(Json(work(id, "atlas", "Atlas", Some(file))))
+                    },
+                ),
+            )
+            .route(
+                "/api/v1/organizations/{id}/library/search",
+                get(
+                    |headers: HeaderMap,
+                     Path(_): Path<Uuid>,
+                     Query(query): Query<HashMap<String, String>>| async move {
+                        if !signed_in(&headers) {
+                            return Err(refused());
+                        }
+                        Ok(Json(vec![SearchHit {
+                            work_id: FIELD_NOTES,
+                            key: "field-notes".to_owned(),
+                            title: "Field Notes".to_owned(),
+                            page: 3,
+                            snippet: query.get("q").cloned().unwrap_or_default(),
+                        }]))
+                    },
+                ),
+            )
+    }
+
+    #[tokio::test]
+    async fn the_library_gives_works_files_and_pages() {
+        let api = Api::new(&serve(library_press()).await).unwrap();
+
+        let works = api.works("pws_ann", PRESS).await.unwrap();
+        let new = api
+            .create_work(
+                "pws_ann",
+                PRESS,
+                &NewWork {
+                    key: "atlas".to_owned(),
+                    title: "Atlas".to_owned(),
+                    ..NewWork::default()
+                },
+            )
+            .await
+            .unwrap();
+        let uploaded = api
+            .upload_file("pws_ann", new.id, b"%PDF-1.7".to_vec())
+            .await
+            .unwrap();
+        let hits = api
+            .search("pws_ann", PRESS, "good paper & ink")
+            .await
+            .unwrap();
+
+        assert_eq!(works[0].key, "field-notes");
+        assert_eq!((new.key.as_str(), new.title.as_str()), ("atlas", "Atlas"));
+        assert_eq!(
+            uploaded.file,
+            Some(LibraryFile {
+                size: 8,
+                pages: 1,
+                pages_with_text: 0,
+            })
+        );
+        assert_eq!(hits[0].page, 3);
+        assert_eq!(hits[0].snippet, "good paper & ink");
     }
 
     #[test]
