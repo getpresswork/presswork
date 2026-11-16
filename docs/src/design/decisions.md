@@ -770,3 +770,31 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** The server connects to PostgreSQL through sqlx with rustls, the ring crypto library, and the certificate store of the operating system.
 - **Reason:** Managed databases often use a certificate authority that the administrator installs on the system. The desktop application also uses the certificate store of the operating system (D94).
 - **Other options:** rustls with aws-lc-rs and the Mozilla root list, which needs the CDLA-Permissive-2.0 license. No TLS in milestone 1.
+
+## D110. clap for the server commands
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** `presswork-server` reads its subcommands and options with clap 4 and its derive macros.
+- **Reason:** clap makes the help text and the error messages from the code. It is the standard parser for Rust programs.
+- **Other options:** lexopt, a very small parser. A parser that we write ourselves.
+
+## D111. UUID version 7 for record IDs
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** Each record has a UUID version 7 as its ID. Presswork makes the IDs with the uuid crate, not the database. PostgreSQL keeps them in `UUID` columns.
+- **Reason:** IDs of version 7 sort by time, so indexes stay compact. Offline clients can make IDs for new records (D2).
+- **Other options:** Random UUIDs of version 4 from PostgreSQL. Numbers from the database.
+
+## D112. jiff for all times
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The workspace uses jiff 1.0 for all times. The server keeps times in PostgreSQL through jiff-sqlx.
+- **Reason:** One time library in the desktop application, the logs, and the server.
+- **Other options:** The time crate for the server. The chrono crate for the server.
+
+## D113. Argon2id with the parameters that OWASP recommends
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Default.
+- **Decision:** The server hashes passwords with the `argon2` crate of the RustCrypto project. It uses Argon2id with 19 MiB of memory, 2 passes, and 1 lane. A password must have 12 characters or more. Server commands never receive a password. They make one-time links, and each person sets the password through the API.
+- **Reason:** These are the parameters that OWASP recommends for Argon2id. Passwords do not go into the history of a shell.
+- **Other options:** bcrypt. Commands that read a password from the terminal.
