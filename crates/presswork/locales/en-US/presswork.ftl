@@ -39,6 +39,30 @@ tasks-placeholder = New task
 tasks-add = Add
 tasks-in-progress = In progress
 
+library-title = Library · { $organization }
+library-add = Add PDF…
+library-search-placeholder = Find words in the library
+library-search = Find
+library-loading = Presswork gets the works of the library.
+library-empty = The library has no works. Add the first PDF file.
+library-no-hits = No page has all these words.
+library-hit = { $title } · p. { $page }
+library-cite = Cite
+library-pages = { $pages ->
+    [one] 1 page
+   *[other] { $pages } pages
+}, { $text } with text
+library-no-file = No file
+library-form-title = Title
+library-form-creators = Creators
+library-form-creators-example = Tolstoy, Leo; Maude, Louise
+library-form-year = Year
+library-form-key = Citation key
+library-form-add = Add
+library-form-cancel = Cancel
+library-uploading = Presswork uploads the file and reads its pages.
+library-too-large = The file is larger than 64 MiB. Select a smaller file.
+
 chat-toggle = Chat
 chat-title = Chat · { $organization }
 chat-empty = No messages yet. Write the first message.

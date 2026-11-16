@@ -9,7 +9,7 @@ use presswork_ui::theme::Mode;
 use presswork_ui::{font, font_size};
 
 use presswork_api::live::{ChatMessage, ServerMessage as LiveMessage};
-use presswork_api::{Document, Project, Task, TaskState};
+use presswork_api::{Document, LibraryFile, Project, SearchHit, Task, TaskState, Work};
 use presswork_client::Api;
 use presswork_editor::{Action as EditorAction, Motion};
 use presswork_preview::Action as PreviewAction;
@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use crate::app::{App, Message, send};
 use crate::chat_panel::Message as ChatPanelMessage;
+use crate::library_view::{Message as LibraryMessage, PickedFile};
 use crate::live_session::Event as LiveEvent;
 use crate::server_dialog::{Connection, Message as ServerMessage, Shelf};
 use crate::task_list::Message as TaskListMessage;
@@ -231,6 +232,98 @@ fn render_screens() {
     render_server(&mut app);
     render_chat(&mut app);
     render_tasks(&mut app);
+    render_library(&mut app);
+}
+
+fn render_library(app: &mut App) {
+    send(app, Message::SelectWorkspace(Workspace::Research));
+    let work =
+        |id: u128, key: &str, title: &str, creators: &[&str], year, pages: Option<u32>| Work {
+            id: Uuid::from_u128(id),
+            organization_id: Uuid::from_u128(1),
+            key: key.to_owned(),
+            title: title.to_owned(),
+            creators: creators.iter().map(|name| (*name).to_owned()).collect(),
+            year,
+            file: pages.map(|pages| LibraryFile {
+                size: u64::from(pages) * 40_000,
+                pages,
+                pages_with_text: pages,
+            }),
+        };
+    let works = vec![
+        work(
+            12,
+            "atlas-of-presses",
+            "Atlas of Presses",
+            &["Moxon, Joseph"],
+            Some(1683),
+            Some(212),
+        ),
+        work(
+            11,
+            "field-notes",
+            "Field Notes: A Small Handbook for Printers",
+            &["Gutenberg, Johannes"],
+            Some(1455),
+            Some(2),
+        ),
+        work(
+            13,
+            "paper-and-ink",
+            "Paper and Ink",
+            &["Hunter, Dard"],
+            Some(1947),
+            None,
+        ),
+    ];
+    send(app, Message::Library(LibraryMessage::Loaded(Ok(works))));
+    send(
+        app,
+        Message::Library(LibraryMessage::Query("fine grain".to_owned())),
+    );
+    let hit = |id: u128, key: &str, title: &str, page, snippet: &str| SearchHit {
+        work_id: Uuid::from_u128(id),
+        key: key.to_owned(),
+        title: title.to_owned(),
+        page,
+        snippet: snippet.to_owned(),
+    };
+    let hits = vec![
+        hit(
+            11,
+            "field-notes",
+            "Field Notes: A Small Handbook for Printers",
+            1,
+            "The fine grain of the paper gives the page its color.",
+        ),
+        hit(
+            12,
+            "atlas-of-presses",
+            "Atlas of Presses",
+            87,
+            "A paper with a fine grain takes the ink of the press evenly.",
+        ),
+    ];
+    send(app, Message::Library(LibraryMessage::Found(Ok(hits))));
+    render(app, "server-library");
+
+    send(
+        app,
+        Message::Library(LibraryMessage::Picked(Some(PickedFile::new(
+            "mechanick-exercises.pdf",
+            vec![0; 10],
+        )))),
+    );
+    send(
+        app,
+        Message::Library(LibraryMessage::Creators("Moxon, Joseph".to_owned())),
+    );
+    send(
+        app,
+        Message::Library(LibraryMessage::Year("1683".to_owned())),
+    );
+    render(app, "server-library-add");
 }
 
 fn render_server(app: &mut App) {

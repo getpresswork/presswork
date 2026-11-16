@@ -5277,6 +5277,7 @@ dependencies = [
  "presswork-api",
  "presswork-client",
  "presswork-editor",
+ "presswork-library",
  "presswork-log",
  "presswork-preview",
  "presswork-project",

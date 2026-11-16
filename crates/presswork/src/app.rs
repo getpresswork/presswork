@@ -10,8 +10,8 @@ use iced::{
     Element, Fill, FillPortion, Size, Subscription, Task, Theme, event, keyboard, padding, system,
     window,
 };
-use presswork_api::Document;
-use presswork_editor::{Editor, Mark, MarkKind};
+use presswork_api::{Document, SearchHit};
+use presswork_editor::{Editor, Mark, MarkKind, Motion};
 use presswork_log::{Level, LogStore};
 use presswork_preview::Preview;
 use presswork_project::Project;
@@ -28,6 +28,7 @@ use crate::chrome::{self, Controls, Frame};
 use crate::compiler::{self, Backend, Compiler};
 use crate::files;
 use crate::i18n::{FluentArgs, Localizer};
+use crate::library_view::{self, LibraryView};
 use crate::live_session::{self, LiveSession};
 use crate::log_panel::{self, LogPanel};
 use crate::menu;
@@ -45,6 +46,7 @@ const DESCRIPTION_WIDTH: f32 = 380.0;
 const MAIN_WINDOW: Size = Size::new(1280.0, 800.0);
 const PREVIEW_WINDOW: Size = Size::new(720.0, 900.0);
 const SCRATCH: &str = include_str!("../samples/scratch.typ");
+const BIBLIOGRAPHY_FILE: &str = "library.yml";
 
 pub(crate) struct App {
     localizer: Localizer,
@@ -69,6 +71,7 @@ pub(crate) struct App {
     live: Option<LiveSession>,
     chat: ChatPanel,
     tasks: Option<TaskList>,
+    library: Option<LibraryView>,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +105,7 @@ pub(crate) enum Message {
     Live(live_session::Event),
     Chat(chat_panel::Message),
     Tasks(task_list::Message),
+    Library(library_view::Message),
     Window(window::Id, chrome::Action),
     WindowResized(window::Id),
     Maximized(window::Id, bool),
@@ -140,6 +144,7 @@ impl App {
             live: None,
             chat: ChatPanel::default(),
             tasks: None,
+            library: None,
         }
     }
 
@@ -287,6 +292,7 @@ impl App {
                     live.close_document();
                 }
                 self.tasks = None;
+                self.library = None;
                 self.editor = Editor::new(&opened.text);
                 self.saved = self.editor.revision();
                 let root = opened.project.root().to_path_buf();
@@ -316,6 +322,9 @@ impl App {
             return Task::none();
         };
         self.tasks = Some(TaskList::new(project, project_name));
+        self.library = organization
+            .as_ref()
+            .map(|(id, name)| LibraryView::new(*id, name.clone()));
         tracing::info!(path = %document.path, "Server document opened");
         live.open_document(document);
         if let Some((organization, name)) = organization {
@@ -330,7 +339,81 @@ impl App {
         self.compiled_revision = None;
         self.notice = None;
         self.workspace = Workspace::Write;
-        self.request_compile()
+        Task::batch([self.request_compile(), self.load_library()])
+    }
+
+    fn load_library(&self) -> Task<Message> {
+        match (&self.library, &self.live) {
+            (Some(library), Some(live)) => library.load(live.connection()).map(Message::Library),
+            _ => Task::none(),
+        }
+    }
+
+    fn library_message(&mut self, message: library_view::Message) -> Task<Message> {
+        if let library_view::Message::Cite(hit) = &message {
+            return self.cite(hit);
+        }
+        let works_changed = matches!(
+            message,
+            library_view::Message::Loaded(Ok(_)) | library_view::Message::Uploaded(Ok(_))
+        );
+        let task = match (&mut self.library, &self.live) {
+            (Some(library), Some(live)) => library
+                .update(message, live.connection())
+                .map(Message::Library),
+            _ => return Task::none(),
+        };
+        if works_changed {
+            return Task::batch([task, self.give_bibliography()]);
+        }
+        task
+    }
+
+    fn give_bibliography(&mut self) -> Task<Message> {
+        let Some(works) = self.library.as_ref().and_then(LibraryView::works) else {
+            return Task::none();
+        };
+        match presswork_library::bibliography(works) {
+            Ok(yaml) => {
+                self.compiler.set_file(Path::new(BIBLIOGRAPHY_FILE), &yaml);
+                self.request_compile()
+            }
+            Err(error) => {
+                tracing::warn!(%error, "The bibliography of the library was not made");
+                Task::none()
+            }
+        }
+    }
+
+    fn cite(&mut self, hit: &SearchHit) -> Task<Message> {
+        self.workspace = Workspace::Write;
+        let mut tasks = Vec::new();
+        if !self
+            .editor
+            .document()
+            .buffer()
+            .to_string()
+            .contains("#bibliography(")
+        {
+            let cursor = self.editor.document().selection().primary().head;
+            tasks.push(self.edit(presswork_editor::Action::Move {
+                motion: Motion::DocumentEnd,
+                extend: false,
+            }));
+            tasks.push(self.edit(presswork_editor::Action::Insert(format!(
+                "\n#bibliography(\"{BIBLIOGRAPHY_FILE}\")\n"
+            ))));
+            tasks.push(self.edit(presswork_editor::Action::MoveTo {
+                position: cursor,
+                extend: false,
+                goal: None,
+            }));
+        }
+        tasks.push(self.edit(presswork_editor::Action::Insert(format!(
+            "@{}[p. {}]",
+            hit.key, hit.page
+        ))));
+        Task::batch(tasks)
     }
 
     fn edit(&mut self, action: presswork_editor::Action) -> Task<Message> {
@@ -380,10 +463,11 @@ impl App {
     fn select_workspace(&mut self, workspace: Workspace) -> Task<Message> {
         tracing::debug!(?workspace, "Workspace selected");
         self.workspace = workspace;
-        match (&self.tasks, &self.live) {
-            (Some(tasks), Some(live)) if workspace == Workspace::Plan => {
+        match (workspace, &self.tasks, &self.live) {
+            (Workspace::Plan, Some(tasks), Some(live)) => {
                 tasks.load(live.connection()).map(Message::Tasks)
             }
+            (Workspace::Research, _, _) => self.load_library(),
             _ => Task::none(),
         }
     }
@@ -659,6 +743,7 @@ impl App {
             Message::Live(event) => return self.live_event(event),
             Message::Chat(message) => self.chat_message(message),
             Message::Tasks(message) => return self.task_message(message),
+            Message::Library(message) => return self.library_message(message),
             Message::Compiled {
                 generation,
                 revision,
@@ -957,6 +1042,11 @@ impl App {
             && let Some(tasks) = &self.tasks
         {
             return tasks.view(&self.localizer).map(Message::Tasks);
+        }
+        if workspace == Workspace::Research
+            && let Some(library) = &self.library
+        {
+            return library.view(&self.localizer).map(Message::Library);
         }
         if workspace == Workspace::Write {
             let colors = ui_theme::colors(&self.theme());
@@ -2255,6 +2345,116 @@ mod tests {
         assert!(simulator(app.view()).find("Ready.").is_err());
     }
 
+    fn field_notes_hit() -> presswork_api::SearchHit {
+        presswork_api::SearchHit {
+            work_id: uuid::Uuid::from_u128(10),
+            key: "field-notes".to_owned(),
+            title: "Field Notes".to_owned(),
+            page: 3,
+            snippet: "The fine grain of the paper".to_owned(),
+        }
+    }
+
+    fn field_notes_work() -> presswork_api::Work {
+        presswork_api::Work {
+            id: uuid::Uuid::from_u128(10),
+            organization_id: PRESS_ORGANIZATION,
+            key: "field-notes".to_owned(),
+            title: "Field Notes".to_owned(),
+            creators: vec!["Gutenberg, Johannes".to_owned()],
+            year: Some(1455),
+            file: None,
+        }
+    }
+
+    #[test]
+    fn the_research_workspace_shows_the_library_of_the_organization() {
+        let mut app = app();
+        let _receiver = open_with_chat(&mut app);
+
+        send(&mut app, Message::SelectWorkspace(Workspace::Research));
+
+        assert!(simulator(app.view()).find("Library · Field Press").is_ok());
+    }
+
+    #[test]
+    fn cite_puts_the_citation_and_the_bibliography_into_the_document() {
+        let mut app = app();
+        let mut receiver = open_with_chat(&mut app);
+        subscribed(&mut app, &server_with("Paper matters."));
+        send(
+            &mut app,
+            Message::Editor(presswork_editor::Action::Move {
+                motion: presswork_editor::Motion::DocumentEnd,
+                extend: false,
+            }),
+        );
+        send(&mut app, Message::SelectWorkspace(Workspace::Research));
+        let _ = drained(&mut receiver);
+
+        send(
+            &mut app,
+            Message::Library(library_view::Message::Cite(field_notes_hit())),
+        );
+
+        assert_eq!(app.workspace, Workspace::Write);
+        assert_eq!(
+            app.editor.document().buffer().to_string(),
+            "Paper matters.@field-notes[p. 3]\n#bibliography(\"library.yml\")\n"
+        );
+        assert!(
+            drained(&mut receiver)
+                .iter()
+                .any(|message| matches!(message, ClientMessage::Updates { .. }))
+        );
+
+        send(
+            &mut app,
+            Message::Library(library_view::Message::Cite(field_notes_hit())),
+        );
+        assert_eq!(
+            app.editor
+                .document()
+                .buffer()
+                .to_string()
+                .matches("#bibliography")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn the_works_of_the_library_become_the_bibliography_of_the_document() {
+        let mut app = app();
+        let _receiver = open_with_chat(&mut app);
+        subscribed(
+            &mut app,
+            &server_with(
+                "#set page(width: 200pt, height: auto)\n\
+                 See @field-notes[p. 3].\n\
+                 #bibliography(\"library.yml\")\n",
+            ),
+        );
+
+        send(
+            &mut app,
+            Message::Library(library_view::Message::Loaded(Ok(vec![field_notes_work()]))),
+        );
+        app.compile_now();
+
+        let errors: Vec<&str> = app
+            .compiled
+            .as_ref()
+            .unwrap()
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert_eq!(errors, Vec::<&str>::new());
+        assert_eq!(app.preview.page_count(), 1);
+    }
+
     #[test]
     fn the_plan_workspace_shows_the_tasks_of_the_server_project() {
         let mut app = app();
@@ -2299,6 +2499,7 @@ mod tests {
         assert!(live.document().is_none());
         assert!(live.chat().is_some());
         assert!(app.tasks.is_none());
+        assert!(app.library.is_none());
         assert!(simulator(app.view()).find("The Book · main.typ").is_ok());
     }
 

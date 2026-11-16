@@ -4,6 +4,7 @@ mod chrome;
 mod compiler;
 mod files;
 mod i18n;
+mod library_view;
 mod live_session;
 mod log_panel;
 mod logging;

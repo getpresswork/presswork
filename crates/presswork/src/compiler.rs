@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
 use futures::channel::oneshot;
@@ -55,6 +55,13 @@ impl Compiler {
 
     pub(crate) fn backend(&self) -> &Backend {
         &self.backend
+    }
+
+    pub(crate) fn set_file(&mut self, path: &Path, text: &str) {
+        self.engine
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .set_text(path, text);
     }
 
     pub(crate) fn set_backend(&mut self, backend: Backend) -> bool {
