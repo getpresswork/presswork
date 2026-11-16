@@ -27,6 +27,38 @@ You can deploy the server as a container image, or as one executable with system
 - A later release adds sign-in through OpenID Connect providers.
 - The server keeps only the hashes of tokens.
 
+### Accounts in milestone 1
+
+- Each account comes from an invite link (D102). A command on the server makes an organization and the invite link of its first administrator. After that, administrators make invite links through the API or with a command.
+- An invite link is for one email address and one role: `administrator` or `member`. It is valid for 7 days and for one use. If the email address has an account, the person must give the password of that account.
+- A password must have 12 characters or more (D113). A reset link is valid for 24 hours and for one use. A new password ends all sessions of the user.
+- A session lasts 30 days after its last use (D104).
+- Each token has a prefix that tells its type: `pws_` for a session, `pwi_` for an invite, and `pwr_` for a password reset. Thus secret scanners can find tokens in text.
+- The server does not send email in milestone 1 (D103). The administrator sends each link.
+
+These commands make links. They print the link and write nothing else to the standard output:
+
+| Command | Result |
+| --- | --- |
+| `presswork-server create-organization --name "Field Press" --administrator ann@example.com` | A new organization, and an invite link for its first administrator. |
+| `presswork-server invite --organization <ID> --email bob@example.com --role member` | An invite link. The default role is `member`. |
+| `presswork-server reset-password --email ann@example.com` | A password reset link. |
+
+The API has these operations for accounts:
+
+| Operation | Use | Authentication |
+| --- | --- | --- |
+| `POST /api/v1/sessions` | Sign in, and get a session for this device. | None |
+| `GET /api/v1/sessions` | List the sessions of the user. | Session |
+| `DELETE /api/v1/sessions/{id}` | End a session. | Session |
+| `POST /api/v1/invites/{token}/accept` | Accept an invite, and get a session. | None |
+| `POST /api/v1/password-resets/{token}` | Set a new password. | None |
+| `POST /api/v1/organizations/{id}/invites` | Make an invite link. | Session of an administrator |
+
+A request gives its session token in the `Authorization: Bearer` header. An error answer is JSON with a `code` and a `message`. The codes are `unauthenticated`, `wrong_credentials`, `invalid_request`, `conflict`, `forbidden`, `not_found`, `link_not_valid`, and `internal`. The desktop application shows a translated text for each code.
+
+In milestone 1, the server does not limit the number of sign-in attempts. Personal access tokens are also not available yet.
+
 ## Permissions
 
 - To do an API operation, a user must have its permission, for example `ticket.create` or `document.write`.
