@@ -66,6 +66,7 @@ The window of the detached preview has its own top bar. It shows the title of th
 | --- | --- | --- |
 | Open folder… | Ctrl+O | Opens a project folder. |
 | Save | Ctrl+S | Saves the main file. This item is not available when no project is open. |
+| Connect to a server… | | Opens the server dialog. Refer to [Server documents](#server-documents). |
 | Typst versions | | Opens or closes the Toolchains panel. |
 | Logs | | Opens or closes the log panel. |
 | Quit | Ctrl+Q | Closes Presswork. |
@@ -143,7 +144,7 @@ The status bar shows the workflow stage, the open tasks and queries, the diagnos
 
 In milestone 1, the status bar shows these items:
 
-- The project name and the open file, or "No project open".
+- The project name and the open file, or "No project open". For a server document, the path of the document and the state of the connection.
 - "Not saved" if the open file has changes that are not saved. Click it to save the file.
 - The duration of the last compilation and the position of the cursor, in the Write workspace.
 - The Typst version that the project uses. If no installed version agrees with the pin of the project, the item shows a warning. Click it to open the Toolchains panel.
@@ -167,6 +168,26 @@ Presswork ignores the keys that it does not know. Thus an older Presswork releas
 - The Write workspace shows the main file in the editor and its pages in the preview.
 - To save the main file, push Ctrl+S.
 - If the folder is not a project, a notice tells the problem.
+
+## Server documents
+
+In milestone 1, you can edit one text document of a server project with other persons at the same time (D130, D132).
+
+1. In the Presswork menu, select **Connect to a server…**.
+2. Type the server address, your email address, and your password. Then select **Sign in**.
+3. The dialog shows the projects of your organizations and their documents. Select a document. If a project has no documents, select **Make main.typ**.
+
+The document opens in the Write workspace instead of the local project. The preview compiles it as one file. Each change goes to the server at once, and the changes of the other persons appear in the editor. Your cursor stays at its place in the text.
+
+The status bar shows the path of the document and the state of the connection:
+
+| State | Meaning |
+| --- | --- |
+| Connecting | Presswork connects to the server and gets the document. |
+| Live | Your changes go to the server, and the changes of the other persons come from the server. |
+| Offline | The connection stopped. Presswork tries again every 3 seconds. Your changes stay in the document. They go to the server when the connection is live again. |
+
+Presswork keeps the session in memory only (D131). After a restart, sign in again.
 
 ## Home dashboard
 
