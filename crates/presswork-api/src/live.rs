@@ -54,11 +54,14 @@ pub enum ServerMessage {
     },
 }
 
-pub fn encode<T: Serialize>(message: &T) -> Result<Vec<u8>, rmp_serde::encode::Error> {
+pub type EncodeError = rmp_serde::encode::Error;
+pub type DecodeError = rmp_serde::decode::Error;
+
+pub fn encode<T: Serialize>(message: &T) -> Result<Vec<u8>, EncodeError> {
     rmp_serde::to_vec_named(message)
 }
 
-pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, rmp_serde::decode::Error> {
+pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, DecodeError> {
     rmp_serde::from_slice(bytes)
 }
 
