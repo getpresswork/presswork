@@ -21,6 +21,7 @@ use crate::{log_panel, menu, unsaved};
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 800.0;
 const PREVIEW: (f32, f32) = (720.0, 900.0);
+const NARROW: (f32, f32) = (760.0, 560.0);
 const IMAGE_UPLOAD: Duration = Duration::from_millis(300);
 
 fn directory() -> PathBuf {
@@ -132,6 +133,8 @@ fn render_screens() {
     send(&mut app, Message::ToggleMenu);
     render(&mut app, "menu");
     send(&mut app, Message::CloseMenu);
+
+    render_window(&mut app, "narrow", None, NARROW);
 
     send(
         &mut app,

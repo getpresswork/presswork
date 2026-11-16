@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{button, column, container, row, rule, space, stack, text};
+use iced::widget::{button, column, container, responsive, row, rule, space, stack, text, tooltip};
 use iced::{
     Element, Fill, FillPortion, Size, Subscription, Task, Theme, event, keyboard, padding, system,
     window,
@@ -34,6 +34,8 @@ use crate::workspace::Workspace;
 
 const MARK_SIZE: f32 = 10.0;
 const BRAND: &str = "presswork-menu";
+const LABEL_ADVANCE: f32 = 0.58;
+const DRAG_SPACE: f32 = 48.0;
 const DESCRIPTION_WIDTH: f32 = 380.0;
 const MAIN_WINDOW: Size = Size::new(1280.0, 800.0);
 const PREVIEW_WINDOW: Size = Size::new(720.0, 900.0);
@@ -674,6 +676,36 @@ impl App {
     }
 
     fn top_bar(&self) -> Element<'_, Message> {
+        let content =
+            responsive(move |available| self.bar_content(available.width < self.full_bar_width()))
+                .height(size::TOP_BAR);
+        chrome::bar(self.frame(self.main_window), &self.localizer, content)
+    }
+
+    fn full_bar_width(&self) -> f32 {
+        let brand = 2.0 * gap::S
+            + MARK_SIZE
+            + label_width(&self.title(), font_size::BODY)
+            + size::ICON_SMALL
+            + 2.0 * (gap::XS + gap::XXS);
+        let tabs: f32 = Workspace::ALL
+            .into_iter()
+            .map(|workspace| {
+                2.0 * (gap::S + gap::XXS)
+                    + size::ICON
+                    + gap::XS
+                    + 2.0 * gap::XXS
+                    + label_width(&self.localizer.text(workspace.text_id()), font_size::BODY)
+            })
+            .sum();
+        let open = 2.0 * gap::S
+            + size::ICON_SMALL
+            + gap::XS
+            + label_width(&self.localizer.text("open-folder"), font_size::SMALL);
+        brand + tabs + open + 4.0 * gap::S + gap::XS + DRAG_SPACE
+    }
+
+    fn bar_content(&self, compact: bool) -> Element<'_, Message> {
         let mark = container(space().width(MARK_SIZE).height(MARK_SIZE)).style(style::mark);
         let brand = button(
             row![
@@ -692,20 +724,25 @@ impl App {
         let brand = container(brand).id(BRAND);
         let tabs = row(Workspace::ALL
             .into_iter()
-            .map(|workspace| self.workspace_tab(workspace)))
+            .map(|workspace| self.workspace_tab(workspace, compact)))
         .spacing(gap::XXS);
-        let open = button(
-            row![
-                icon(Icon::FolderOpen).size(size::ICON_SMALL),
-                text(self.localizer.text("open-folder")).size(font_size::SMALL)
-            ]
+        let words = self.localizer.text("open-folder");
+        let mut label = row![icon(Icon::FolderOpen).size(size::ICON_SMALL)]
             .spacing(gap::XS)
-            .align_y(Vertical::Center),
-        )
-        .padding([gap::XS, gap::S])
-        .style(style::ghost)
-        .on_press(Message::OpenFolder);
-        let content = row![
+            .align_y(Vertical::Center);
+        if !compact {
+            label = label.push(text(words.clone()).size(font_size::SMALL));
+        }
+        let open = button(label)
+            .padding([gap::XS, gap::S])
+            .style(style::ghost)
+            .on_press(Message::OpenFolder);
+        let open = if compact {
+            chrome::tip(open, words, tooltip::Position::Bottom)
+        } else {
+            open.into()
+        };
+        row![
             brand,
             space().width(gap::XS),
             tabs,
@@ -713,22 +750,27 @@ impl App {
             open
         ]
         .spacing(gap::S)
-        .align_y(Vertical::Center);
-        chrome::bar(self.frame(self.main_window), &self.localizer, content)
+        .align_y(Vertical::Center)
+        .into()
     }
 
-    fn workspace_tab(&self, workspace: Workspace) -> Element<'_, Message> {
-        let content = row![
-            icon(workspace.icon()),
-            text(self.localizer.text(workspace.text_id())).font(font::UI_MEDIUM)
-        ]
-        .spacing(gap::XS + gap::XXS)
-        .align_y(Vertical::Center);
-        button(content)
+    fn workspace_tab(&self, workspace: Workspace, compact: bool) -> Element<'_, Message> {
+        let name = self.localizer.text(workspace.text_id());
+        let mut content = row![icon(workspace.icon())]
+            .spacing(gap::XS + gap::XXS)
+            .align_y(Vertical::Center);
+        if !compact {
+            content = content.push(text(name.clone()).font(font::UI_MEDIUM));
+        }
+        let tab = button(content)
             .padding([gap::XS, gap::S + gap::XXS])
             .style(style::tab(workspace == self.workspace))
-            .on_press(Message::SelectWorkspace(workspace))
-            .into()
+            .on_press(Message::SelectWorkspace(workspace));
+        if compact {
+            chrome::tip(tab, name, tooltip::Position::Bottom)
+        } else {
+            tab.into()
+        }
     }
 
     fn main_area(&self) -> Element<'_, Message> {
@@ -904,6 +946,11 @@ fn compiled(generation: u64, revision: u64, result: Result<Output, String>) -> M
 
 fn hairline<'a>() -> Element<'a, Message> {
     rule::horizontal(1).style(style::hairline).into()
+}
+
+fn label_width(words: &str, size: f32) -> f32 {
+    let characters = u16::try_from(words.chars().count()).unwrap_or(u16::MAX);
+    f32::from(characters) * LABEL_ADVANCE * size
 }
 
 fn window_event((id, event): (window::Id, window::Event)) -> Option<Message> {
@@ -1641,7 +1688,7 @@ mod tests {
     #[test]
     fn workspace_bar_shows_each_workspace() {
         let app = app();
-        let mut ui = simulator(app.view());
+        let mut ui = sized(app.view(), 1280.0);
 
         for label in [
             "Plan",
@@ -1659,7 +1706,7 @@ mod tests {
     #[test]
     fn click_on_a_workspace_selects_it() {
         let mut app = app();
-        let mut ui = simulator(app.view());
+        let mut ui = sized(app.view(), 1280.0);
 
         ui.click("Plan").expect("Plan is in the view");
         for message in ui.into_messages() {
@@ -1752,6 +1799,39 @@ mod tests {
         send(&mut app, Message::MenuItem(menu::Item::Save));
 
         assert!(app.is_saved());
+    }
+
+    fn sized(element: Element<'_, Message>, width: f32) -> iced_test::Simulator<'_, Message> {
+        iced_test::Simulator::with_size(iced::Settings::default(), (width, 800.0), element)
+    }
+
+    #[test]
+    fn a_narrow_window_shows_only_the_icons_of_the_tabs() {
+        let app = app();
+        let research = Workspace::Research.icon().unicode().to_string();
+
+        let mut wide = sized(app.view(), 1280.0);
+        assert!(wide.find("Research").is_ok());
+        assert!(wide.find("Open folder").is_ok());
+
+        let mut narrow = sized(app.view(), 760.0);
+        assert!(narrow.find("Research").is_err());
+        assert!(narrow.find("Open folder").is_err());
+        assert!(narrow.find(research).is_ok());
+    }
+
+    #[test]
+    fn a_tab_without_its_label_still_selects_its_workspace() {
+        let mut app = app();
+        let mut ui = sized(app.view(), 760.0);
+
+        ui.click(Workspace::Plan.icon().unicode().to_string())
+            .expect("the icon of the Plan tab is in the top bar");
+        for message in ui.into_messages() {
+            send(&mut app, message);
+        }
+
+        assert_eq!(app.workspace, Workspace::Plan);
     }
 
     const UNSAVED_QUESTION: &str = "Save the changes to main.typ?";
