@@ -279,7 +279,9 @@ impl App {
         match files::open(root) {
             Ok(opened) => {
                 tracing::info!(root = %root.display(), "Project opened");
-                self.live = None;
+                if let Some(live) = &mut self.live {
+                    live.close_document();
+                }
                 self.editor = Editor::new(&opened.text);
                 self.saved = self.editor.revision();
                 let root = opened.project.root().to_path_buf();
@@ -2220,6 +2222,20 @@ mod tests {
             }]
         );
         assert!(simulator(app.view()).find("Ready.").is_err());
+    }
+
+    #[test]
+    fn a_local_project_takes_the_place_of_the_server_document_but_keeps_the_chat() {
+        let mut app = app();
+        let _receiver = open_with_chat(&mut app);
+        let folder = book();
+
+        open(&mut app, &folder);
+
+        let live = app.live.as_ref().unwrap();
+        assert!(live.document().is_none());
+        assert!(live.chat().is_some());
+        assert!(simulator(app.view()).find("The Book · main.typ").is_ok());
     }
 
     #[test]

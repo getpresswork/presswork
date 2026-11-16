@@ -112,6 +112,10 @@ impl LiveSession {
         }
     }
 
+    pub(crate) fn close_document(&mut self) {
+        self.document = None;
+    }
+
     pub(crate) fn join_chat(&mut self, organization: Uuid, name: String) {
         if self
             .chat
