@@ -6,12 +6,31 @@ window-restore = Restore
 window-close = Close
 
 menu-open-folder = Open folder…
+menu-connect = Connect to a server…
 menu-save = Save
 menu-typst = Typst versions
 menu-logs = Logs
 menu-quit = Quit
 shortcut = Ctrl+{ $key }
 shortcut-mac = Cmd+{ $key }
+
+server-title = Connect to a server
+server-address = Server address
+server-address-placeholder = https://press.example.com
+server-email = Email address
+server-password = Password
+server-sign-in = Sign in
+server-signing-in = Signing in…
+server-cancel = Cancel
+server-close = Close
+server-browse-title = Open a server document
+server-loading = Presswork gets the projects.
+server-no-projects = Your organizations have no projects. An administrator makes the projects.
+server-project = { $organization } · { $project }
+server-make-main = Make main.typ
+server-problem-address = The server address must start with http:// or https://.
+server-problem-unreachable = Presswork cannot connect to the server. Make sure that the address is correct.
+server-problem-status = The server answered with the status { $status }.
 
 unsaved-title = Save the changes to { $file }?
 unsaved-body = If you do not save, the changes are lost.
@@ -38,6 +57,9 @@ workspace-publish-description = This workspace shows the export profiles, the va
 status-no-project = No project open
 status-project = { $name } · { $file }
 status-not-saved = Not saved
+status-live-connecting = { $path } · Connecting
+status-live = { $path } · Live
+status-live-offline = { $path } · Offline
 
 open-folder = Open folder
 open-folder-title = Open a project folder

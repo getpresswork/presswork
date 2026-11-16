@@ -17,6 +17,7 @@ const MENU: &str = "presswork-menu-items";
 pub(crate) enum Item {
     OpenFolder,
     Save,
+    Connect,
     Typst,
     Logs,
     Quit,
@@ -27,6 +28,7 @@ impl Item {
         match self {
             Self::OpenFolder => "menu-open-folder",
             Self::Save => "menu-save",
+            Self::Connect => "menu-connect",
             Self::Typst => "menu-typst",
             Self::Logs => "menu-logs",
             Self::Quit => "menu-quit",
@@ -37,6 +39,7 @@ impl Item {
         match self {
             Self::OpenFolder => Icon::FolderOpen,
             Self::Save => Icon::Save,
+            Self::Connect => Icon::Server,
             Self::Typst => Icon::Package,
             Self::Logs => Icon::ScrollText,
             Self::Quit => Icon::Power,
@@ -48,7 +51,7 @@ impl Item {
             Self::OpenFolder => Some('O'),
             Self::Save => Some('S'),
             Self::Quit => Some('Q'),
-            Self::Typst | Self::Logs => None,
+            Self::Connect | Self::Typst | Self::Logs => None,
         }
     }
 }
@@ -61,6 +64,8 @@ pub(crate) fn view<'a>(
     let items = column![
         entry(localizer, Item::OpenFolder, true),
         entry(localizer, Item::Save, can_save),
+        separator(),
+        entry(localizer, Item::Connect, true),
         separator(),
         entry(localizer, Item::Typst, true),
         entry(localizer, Item::Logs, true),
@@ -138,9 +143,10 @@ mod tests {
     use crate::i18n::Localizer;
     use crate::testing::key_press;
 
-    const LABELS: [(&str, Item); 5] = [
+    const LABELS: [(&str, Item); 6] = [
         ("Open folder…", Item::OpenFolder),
         ("Save", Item::Save),
+        ("Connect to a server…", Item::Connect),
         ("Typst versions", Item::Typst),
         ("Logs", Item::Logs),
         ("Quit", Item::Quit),

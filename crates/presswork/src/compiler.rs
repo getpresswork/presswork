@@ -46,6 +46,13 @@ impl Compiler {
         self.restart();
     }
 
+    pub(crate) fn scratch(&mut self) {
+        self.engine = Arc::new(Mutex::new(World::new(Arc::clone(&FONTS), today())));
+        self.root = None;
+        self.backend = Backend::Embedded;
+        self.restart();
+    }
+
     pub(crate) fn backend(&self) -> &Backend {
         &self.backend
     }
@@ -174,6 +181,22 @@ mod tests {
         let folder = std::env::temp_dir();
         compiler.open(&folder, Path::new("main.typ"), Backend::Embedded);
         assert!(second.is_cancelled());
+    }
+
+    #[test]
+    fn scratch_forgets_the_project_and_uses_the_built_in_engine() {
+        let mut compiler = Compiler::new();
+        let folder = tempfile::tempdir().unwrap();
+        compiler.open(folder.path(), Path::new("main.typ"), Backend::Unavailable);
+        let generation = compiler.generation();
+
+        compiler.scratch();
+
+        assert_eq!(compiler.backend(), &Backend::Embedded);
+        assert_eq!(compiler.root, None);
+        assert!(compiler.generation() > generation);
+        let output = compiler.run_now("Hello.").unwrap();
+        assert_eq!(output.pages.map(|pages| pages.len()), Some(1));
     }
 
     #[test]

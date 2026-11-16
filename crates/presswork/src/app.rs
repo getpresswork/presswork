@@ -10,11 +10,12 @@ use iced::{
     Element, Fill, FillPortion, Size, Subscription, Task, Theme, event, keyboard, padding, system,
     window,
 };
+use presswork_api::Document;
 use presswork_editor::{Editor, Mark, MarkKind};
 use presswork_log::{Level, LogStore};
 use presswork_preview::Preview;
 use presswork_project::Project;
-use presswork_text::{Position, Unit};
+use presswork_text::{ChangeSet, Position, Unit};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{Diagnostic, Output, Program, Severity};
 use presswork_ui::icon::{Icon, icon};
@@ -26,8 +27,10 @@ use crate::chrome::{self, Controls, Frame};
 use crate::compiler::{self, Backend, Compiler};
 use crate::files;
 use crate::i18n::{FluentArgs, Localizer};
+use crate::live_document::{self, LiveDocument};
 use crate::log_panel::{self, LogPanel};
 use crate::menu;
+use crate::server_dialog::{self, ServerDialog};
 use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
 use crate::unsaved;
 use crate::workspace::Workspace;
@@ -60,6 +63,8 @@ pub(crate) struct App {
     maximized: HashSet<window::Id>,
     menu_open: bool,
     quitting: bool,
+    server_dialog: ServerDialog,
+    live: Option<LiveDocument>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +94,8 @@ pub(crate) enum Message {
     CloseMenu,
     MenuItem(menu::Item),
     Unsaved(unsaved::Answer),
+    Server(server_dialog::Message),
+    Live(live_document::Event),
     Window(window::Id, chrome::Action),
     WindowResized(window::Id),
     Maximized(window::Id, bool),
@@ -123,6 +130,8 @@ impl App {
             maximized: HashSet::new(),
             menu_open: false,
             quitting: false,
+            server_dialog: ServerDialog::default(),
+            live: None,
         }
     }
 
@@ -266,6 +275,7 @@ impl App {
         match files::open(root) {
             Ok(opened) => {
                 tracing::info!(root = %root.display(), "Project opened");
+                self.live = None;
                 self.editor = Editor::new(&opened.text);
                 self.saved = self.editor.revision();
                 let root = opened.project.root().to_path_buf();
@@ -285,6 +295,74 @@ impl App {
                 Task::none()
             }
         }
+    }
+
+    fn open_server_document(&mut self, document: Document) -> Task<Message> {
+        let Some(connection) = self.server_dialog.connection().cloned() else {
+            return Task::none();
+        };
+        tracing::info!(path = %document.path, "Server document opened");
+        self.live = Some(LiveDocument::new(connection, document));
+        self.editor = Editor::new("");
+        self.saved = self.editor.revision();
+        self.project = None;
+        self.compiler.scratch();
+        self.preview = Preview::default();
+        self.compiled = None;
+        self.compiled_revision = None;
+        self.notice = None;
+        self.workspace = Workspace::Write;
+        self.request_compile()
+    }
+
+    fn edit(&mut self, action: presswork_editor::Action) -> Task<Message> {
+        let revision = self.editor.revision();
+        match self.editor.perform(action, Instant::now()) {
+            Ok(Some(changes)) => self.share(&changes),
+            Ok(None) => {}
+            Err(error) => tracing::warn!(%error, "Editor action failed"),
+        }
+        if self.editor.revision() == revision {
+            return Task::none();
+        }
+        self.request_compile()
+    }
+
+    fn server(&mut self, message: server_dialog::Message) -> Task<Message> {
+        let opened = match &message {
+            server_dialog::Message::Open(document) => Some(document.clone()),
+            _ => None,
+        };
+        let dialog = self.server_dialog.update(message).map(Message::Server);
+        match opened {
+            Some(document) => Task::batch([dialog, self.open_server_document(document)]),
+            None => dialog,
+        }
+    }
+
+    fn share(&mut self, changes: &ChangeSet) {
+        if let Some(live) = &mut self.live
+            && let Err(error) = live.local(changes)
+        {
+            tracing::warn!(%error, "A local change did not go into the live document");
+        }
+    }
+
+    fn live_event(&mut self, event: live_document::Event) -> Task<Message> {
+        let Some(live) = &mut self.live else {
+            return Task::none();
+        };
+        match live.event(event) {
+            Ok(Some(changes)) if !changes.is_empty() => {
+                if let Err(error) = self.editor.apply_remote(&changes) {
+                    tracing::error!(%error, "A remote change does not agree with the editor");
+                }
+                return self.request_compile();
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!(%error, "A live change was not applied"),
+        }
+        Task::none()
     }
 
     fn save(&mut self) {
@@ -505,15 +583,9 @@ impl App {
                 self.mode = mode;
             }
             Message::Editor(_) if self.quitting => {}
-            Message::Editor(action) => {
-                let revision = self.editor.revision();
-                if let Err(error) = self.editor.perform(action, Instant::now()) {
-                    tracing::warn!(%error, "Editor action failed");
-                }
-                if self.editor.revision() != revision {
-                    return self.request_compile();
-                }
-            }
+            Message::Editor(action) => return self.edit(action),
+            Message::Server(message) => return self.server(message),
+            Message::Live(event) => return self.live_event(event),
             Message::Compiled {
                 generation,
                 revision,
@@ -586,9 +658,14 @@ impl App {
         };
         let dialog = if self.quitting {
             event::listen_with(unsaved::dialog_key)
+        } else if self.server_dialog.is_open() {
+            event::listen_with(server_key)
         } else {
             Subscription::none()
         };
+        let live = self.live.as_ref().map_or_else(Subscription::none, |live| {
+            live.subscription().map(Message::Live)
+        });
         Subscription::batch([
             self.logs.subscription().map(Message::Logs),
             system::theme_changes().map(Message::SystemTheme),
@@ -596,6 +673,7 @@ impl App {
             window::events().filter_map(window_event),
             menu,
             dialog,
+            live,
         ])
     }
 
@@ -638,6 +716,10 @@ impl App {
                 self.save();
                 Task::none()
             }
+            menu::Item::Connect => {
+                self.server_dialog.open();
+                Task::none()
+            }
             menu::Item::Typst => self.update(Message::Toolchains(toolchain_panel::Message::Toggle)),
             menu::Item::Logs => self.update(Message::Logs(log_panel::Message::Toggle)),
             menu::Item::Quit => self.quit(),
@@ -667,6 +749,13 @@ impl App {
                 self.project.is_some(),
                 Controls::CURRENT,
             ));
+        }
+        if self.server_dialog.is_open() {
+            layers = layers.push(
+                self.server_dialog
+                    .view(&self.localizer)
+                    .map(Message::Server),
+            );
         }
         if let Some(project) = self.project.as_ref().filter(|_| self.quitting) {
             let file = project.manifest().main.display().to_string();
@@ -816,6 +905,16 @@ impl App {
     }
 
     fn location(&self) -> String {
+        if let Some(live) = &self.live {
+            let mut args = FluentArgs::new();
+            args.set("path", live.document().path.clone());
+            let id = match live.state() {
+                live_document::State::Connecting => "status-live-connecting",
+                live_document::State::Live => "status-live",
+                live_document::State::Offline => "status-live-offline",
+            };
+            return self.localizer.format(id, &args);
+        }
         let Some(project) = &self.project else {
             return self.localizer.text("status-no-project");
         };
@@ -953,6 +1052,14 @@ fn label_width(words: &str, size: f32) -> f32 {
     f32::from(characters) * LABEL_ADVANCE * size
 }
 
+fn server_key(event: iced::Event, _status: event::Status, _window: window::Id) -> Option<Message> {
+    let iced::Event::Keyboard(keyboard::Event::KeyPressed { key: pressed, .. }) = event else {
+        return None;
+    };
+    (pressed == keyboard::Key::Named(keyboard::key::Named::Escape))
+        .then_some(Message::Server(server_dialog::Message::Close))
+}
+
 fn window_event((id, event): (window::Id, window::Event)) -> Option<Message> {
     match event {
         window::Event::Closed => Some(Message::WindowClosed(id)),
@@ -1020,7 +1127,10 @@ mod tests {
 
     use super::*;
     use iced_test::simulator;
+    use presswork_api::live::{ClientMessage, ServerMessage};
     use presswork_log::LogEntry;
+    use presswork_sync::TextDocument;
+    use presswork_text::{ChangeSet, Edit};
     use presswork_typst::Diagnostic;
 
     fn insert(text: &str) -> Message {
@@ -1832,6 +1942,149 @@ mod tests {
         }
 
         assert_eq!(app.workspace, Workspace::Plan);
+    }
+
+    const SERVER_DOCUMENT: uuid::Uuid = uuid::Uuid::from_u128(4);
+
+    fn signed_in(app: &mut App) {
+        send(app, Message::MenuItem(menu::Item::Connect));
+        let connection = server_dialog::Connection {
+            api: presswork_client::Api::new("https://press.example.com").unwrap(),
+            token: "pws_ann".to_owned(),
+        };
+        send(
+            app,
+            Message::Server(server_dialog::Message::SignedIn(Ok(connection))),
+        );
+    }
+
+    fn open_server_document(
+        app: &mut App,
+    ) -> futures::channel::mpsc::UnboundedReceiver<ClientMessage> {
+        signed_in(app);
+        let document = presswork_api::Document {
+            id: SERVER_DOCUMENT,
+            project_id: uuid::Uuid::from_u128(2),
+            path: "main.typ".to_owned(),
+        };
+        send(app, Message::Server(server_dialog::Message::Open(document)));
+        let (sender, receiver) = futures::channel::mpsc::unbounded();
+        send(app, Message::Live(live_document::Event::Ready(sender)));
+        send(app, Message::Live(live_document::Event::Connected));
+        receiver
+    }
+
+    fn server_with(text: &str) -> TextDocument {
+        let mut server = TextDocument::new();
+        server
+            .apply(&ChangeSet::new(0, [Edit::insert(Position::new(0), text)]).unwrap())
+            .unwrap();
+        server
+    }
+
+    fn subscribed(app: &mut App, server: &TextDocument) {
+        send(
+            app,
+            Message::Live(live_document::Event::Received(ServerMessage::Subscribed {
+                document: SERVER_DOCUMENT,
+                version: server.version(),
+                data: server
+                    .updates_since(&TextDocument::new().version())
+                    .unwrap(),
+            })),
+        );
+    }
+
+    fn drained(
+        receiver: &mut futures::channel::mpsc::UnboundedReceiver<ClientMessage>,
+    ) -> Vec<ClientMessage> {
+        let mut messages = Vec::new();
+        while let Ok(message) = receiver.try_recv() {
+            messages.push(message);
+        }
+        messages
+    }
+
+    #[test]
+    fn connect_in_the_menu_opens_the_server_dialog() {
+        let mut app = app();
+
+        send(&mut app, Message::MenuItem(menu::Item::Connect));
+
+        assert!(simulator(app.view()).find("Connect to a server").is_ok());
+    }
+
+    #[test]
+    fn a_server_document_opens_live_in_the_editor() {
+        let mut app = app();
+        let mut receiver = open_server_document(&mut app);
+        assert!(simulator(app.view()).find("main.typ · Connecting").is_ok());
+        assert!(matches!(
+            drained(&mut receiver).as_slice(),
+            [ClientMessage::Subscribe {
+                document: SERVER_DOCUMENT,
+                ..
+            }]
+        ));
+
+        let mut server = server_with("The press stopped.");
+        subscribed(&mut app, &server);
+        assert_eq!(
+            app.editor.document().buffer().to_string(),
+            "The press stopped."
+        );
+        assert!(simulator(app.view()).find("main.typ · Live").is_ok());
+
+        send(&mut app, insert("Late: "));
+        let sent = drained(&mut receiver);
+        let [ClientMessage::Updates { data, .. }] = sent.as_slice() else {
+            panic!("the edit did not go to the server: {sent:?}");
+        };
+        server.merge(data).unwrap();
+        assert_eq!(server.text(), "Late: The press stopped.");
+    }
+
+    #[test]
+    fn remote_changes_appear_in_the_editor_and_keep_the_cursor() {
+        let mut app = app();
+        let _receiver = open_server_document(&mut app);
+        let mut server = server_with("Proof");
+        subscribed(&mut app, &server);
+        send(
+            &mut app,
+            Message::Editor(presswork_editor::Action::MoveTo {
+                position: Position::new(5),
+                extend: false,
+                goal: None,
+            }),
+        );
+
+        let data = server
+            .apply(&ChangeSet::new(5, [Edit::insert(Position::new(0), "The ")]).unwrap())
+            .unwrap();
+        send(
+            &mut app,
+            Message::Live(live_document::Event::Received(ServerMessage::Updates {
+                document: SERVER_DOCUMENT,
+                data,
+            })),
+        );
+
+        assert_eq!(app.editor.document().buffer().to_string(), "The Proof");
+        assert_eq!(
+            app.editor.document().selection().primary().head,
+            Position::new(9)
+        );
+    }
+
+    #[test]
+    fn a_lost_connection_shows_offline() {
+        let mut app = app();
+        let _receiver = open_server_document(&mut app);
+
+        send(&mut app, Message::Live(live_document::Event::Disconnected));
+
+        assert!(simulator(app.view()).find("main.typ · Offline").is_ok());
     }
 
     const UNSAVED_QUESTION: &str = "Save the changes to main.typ?";

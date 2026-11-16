@@ -3,11 +3,13 @@ mod chrome;
 mod compiler;
 mod files;
 mod i18n;
+mod live_document;
 mod log_panel;
 mod logging;
 mod menu;
 #[cfg(test)]
 mod screens;
+mod server_dialog;
 #[cfg(test)]
 mod testing;
 mod toolchain_panel;

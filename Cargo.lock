@@ -4933,18 +4933,23 @@ dependencies = [
  "iced",
  "iced_test",
  "jiff",
+ "presswork-api",
+ "presswork-client",
  "presswork-editor",
  "presswork-log",
  "presswork-preview",
  "presswork-project",
+ "presswork-sync",
  "presswork-text",
  "presswork-toolchain",
  "presswork-typst",
  "presswork-ui",
  "rfd",
  "tempfile",
+ "tokio",
  "tracing",
  "unic-langid",
+ "uuid",
 ]
 
 [[package]]

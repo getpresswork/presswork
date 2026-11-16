@@ -8,12 +8,19 @@ use presswork_log::{Level, LogEntry, LogStore};
 use presswork_ui::theme::Mode;
 use presswork_ui::{font, font_size};
 
+use presswork_api::live::ServerMessage as LiveMessage;
+use presswork_api::{Document, Project};
+use presswork_client::Api;
 use presswork_editor::{Action as EditorAction, Motion};
 use presswork_preview::Action as PreviewAction;
-use presswork_text::Position;
+use presswork_sync::TextDocument;
+use presswork_text::{ChangeSet, Edit, Position};
 use presswork_toolchain::{Digest, Platform, Release, ReleaseFile, Version};
+use uuid::Uuid;
 
 use crate::app::{App, Message, send};
+use crate::live_document::Event as LiveEvent;
+use crate::server_dialog::{Connection, Message as ServerMessage, Shelf};
 use crate::toolchain_panel::Message as ToolchainMessage;
 use crate::workspace::Workspace;
 use crate::{log_panel, menu, unsaved};
@@ -217,6 +224,79 @@ fn render_screens() {
         Message::Toolchains(ToolchainMessage::Progress(Version::new(0, 14, 1), 45)),
     );
     render(&mut app, "toolchains");
+    send(&mut app, Message::Toolchains(ToolchainMessage::Toggle));
+
+    render_server(&mut app);
+}
+
+fn render_server(app: &mut App) {
+    send(app, Message::MenuItem(menu::Item::Connect));
+    for message in [
+        ServerMessage::Address("https://press.example.com".to_owned()),
+        ServerMessage::Email("ann@example.com".to_owned()),
+        ServerMessage::Password("correct horse battery".to_owned()),
+    ] {
+        send(app, Message::Server(message));
+    }
+    render(app, "server-sign-in");
+
+    let connection = Connection {
+        api: Api::new("https://press.example.com").unwrap(),
+        token: "pws_ann".to_owned(),
+    };
+    send(
+        app,
+        Message::Server(ServerMessage::SignedIn(Ok(connection))),
+    );
+    let shelf = |project: u128, name: &str, paths: &[&str]| Shelf {
+        organization: "Field Press".to_owned(),
+        project: Project {
+            id: Uuid::from_u128(project),
+            organization_id: Uuid::from_u128(1),
+            name: name.to_owned(),
+        },
+        documents: paths
+            .iter()
+            .enumerate()
+            .map(|(index, path)| Document {
+                id: Uuid::from_u128(project * 100 + index as u128),
+                project_id: Uuid::from_u128(project),
+                path: (*path).to_owned(),
+            })
+            .collect(),
+    };
+    let shelves = vec![
+        shelf(2, "Field Notes", &["chapters/paper.typ", "main.typ"]),
+        shelf(3, "Atlas of Presses", &[]),
+    ];
+    send(app, Message::Server(ServerMessage::Loaded(Ok(shelves))));
+    render(app, "server-documents");
+
+    let document = Document {
+        id: Uuid::from_u128(201),
+        project_id: Uuid::from_u128(2),
+        path: "main.typ".to_owned(),
+    };
+    send(app, Message::Server(ServerMessage::Open(document)));
+    let (sender, _receiver) = futures::channel::mpsc::unbounded();
+    send(app, Message::Live(LiveEvent::Ready(sender)));
+    send(app, Message::Live(LiveEvent::Connected));
+    let mut server = TextDocument::new();
+    server
+        .apply(&ChangeSet::new(0, [Edit::insert(Position::new(0), BOOK)]).unwrap())
+        .unwrap();
+    send(
+        app,
+        Message::Live(LiveEvent::Received(LiveMessage::Subscribed {
+            document: Uuid::from_u128(201),
+            version: server.version(),
+            data: server
+                .updates_since(&TextDocument::new().version())
+                .unwrap(),
+        })),
+    );
+    app.compile_now();
+    render(app, "server-live");
 }
 
 fn sample_releases() -> Vec<Release> {
