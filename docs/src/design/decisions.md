@@ -910,3 +910,24 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** The `presswork-client` crate uses tokio-tungstenite 0.29, the version that axum uses. TLS uses rustls with the aws-lc-rs provider and the certificate verifier of the operating system, as reqwest does in the toolchain manager.
 - **Reason:** The dependency tree has one WebSocket implementation. All connections of the desktop application use the same TLS behavior.
 - **Other options:** tokio-websockets. fastwebsockets.
+
+## D130. Connect to a server from the Presswork menu
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** The Presswork menu has the item **Connect to a server…**. A dialog asks for the server address, the email address, and the password. After the sign-in, the dialog shows the projects of the organizations of the user, with their documents. Select a document to edit it live in the Write workspace.
+- **Reason:** This is the shortest path for the thin slice (roadmap step 14). The home dashboard of milestone 2 will give the main entry point.
+- **Other options:** A server panel at the side of the window. The home dashboard now.
+
+## D131. The session token stays in memory until a credential store is selected
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** The desktop application keeps the session token in memory only. After a restart, the user signs in again. The token goes into the credential store of the operating system when the project owner selects a crate for the credential store.
+- **Reason:** The crate for the credential store is a supply chain decision for the project owner. A token in a normal file is not safe.
+- **Other options:** The `keyring` crate now. A file in the data folder.
+
+## D132. A server document takes the place of the local text in the editor
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** When the user opens a server document, the editor and the preview show it instead of the local project or the scratch text. The preview compiles the document as one file. Each change set of the editor goes to the server at once. The status bar shows the path of the document and the state of the connection: connecting, live, or offline.
+- **Reason:** Milestone 1 has one editor. Panes with many files, and server projects with many files, come in milestone 2.
+- **Other options:** A second window for server documents.
