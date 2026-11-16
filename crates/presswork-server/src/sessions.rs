@@ -28,17 +28,19 @@ pub struct Signed {
 }
 
 pub fn new_token() -> Result<String, SessionError> {
-    let mut bytes = [0; TOKEN_BYTES];
-    getrandom::fill(&mut bytes).map_err(|error| SessionError::Random(error.to_string()))?;
-    Ok(bytes
-        .iter()
-        .fold(String::from(TOKEN_PREFIX), |mut token, byte| {
-            let _ = write!(token, "{byte:02x}");
-            token
-        }))
+    random_token(TOKEN_PREFIX)
 }
 
-fn token_hash(token: &str) -> Vec<u8> {
+pub(crate) fn random_token(prefix: &str) -> Result<String, SessionError> {
+    let mut bytes = [0; TOKEN_BYTES];
+    getrandom::fill(&mut bytes).map_err(|error| SessionError::Random(error.to_string()))?;
+    Ok(bytes.iter().fold(String::from(prefix), |mut token, byte| {
+        let _ = write!(token, "{byte:02x}");
+        token
+    }))
+}
+
+pub(crate) fn token_hash(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
 }
 

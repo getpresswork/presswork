@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
-use sqlx::PgPool;
+use sqlx::{PgExecutor, PgPool};
 use uuid::Uuid;
 
 const MIN_PASSWORD_CHARACTERS: usize = 12;
@@ -91,7 +91,7 @@ fn parse_name(name: &str) -> Result<&str, AccountError> {
     }
 }
 
-async fn hash_in_background(password: &str) -> Result<String, AccountError> {
+pub(crate) async fn hash_in_background(password: &str) -> Result<String, AccountError> {
     let password = password.to_owned();
     tokio::task::spawn_blocking(move || hash_password(&password))
         .await
@@ -105,8 +105,8 @@ async fn verify_in_background(password: &str, hash: String) -> bool {
         .unwrap_or(false)
 }
 
-pub async fn create_user(
-    pool: &PgPool,
+pub async fn create_user<'e>(
+    executor: impl PgExecutor<'e>,
     email: &str,
     name: &str,
     password: &str,
@@ -125,7 +125,7 @@ pub async fn create_user(
         .bind(&user.email)
         .bind(&user.name)
         .bind(&hash)
-        .execute(pool)
+        .execute(executor)
         .await
         .map_err(|error| match &error {
             sqlx::Error::Database(database)

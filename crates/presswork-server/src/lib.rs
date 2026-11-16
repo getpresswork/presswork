@@ -2,6 +2,7 @@ pub mod accounts;
 mod config;
 mod database;
 mod http;
+pub mod links;
 mod routes;
 pub mod sessions;
 #[cfg(test)]
