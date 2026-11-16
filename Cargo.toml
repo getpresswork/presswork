@@ -13,11 +13,13 @@ publish = false
 
 [workspace.dependencies]
 presswork-api = { path = "crates/presswork-api" }
+presswork-client = { path = "crates/presswork-client" }
 presswork-domain = { path = "crates/presswork-domain" }
 presswork-editor = { path = "crates/presswork-editor" }
 presswork-log = { path = "crates/presswork-log" }
 presswork-preview = { path = "crates/presswork-preview" }
 presswork-project = { path = "crates/presswork-project" }
+presswork-sync = { path = "crates/presswork-sync" }
 presswork-text = { path = "crates/presswork-text" }
 presswork-toolchain = { path = "crates/presswork-toolchain" }
 presswork-typst = { path = "crates/presswork-typst" }

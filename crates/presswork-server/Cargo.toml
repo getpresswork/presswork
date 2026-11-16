@@ -14,18 +14,19 @@ workspace = true
 
 [dependencies]
 argon2.workspace = true
-axum.workspace = true
+axum = { workspace = true, features = ["ws"] }
 clap.workspace = true
 getrandom.workspace = true
 jiff.workspace = true
 jiff-sqlx.workspace = true
 presswork-api.workspace = true
 presswork-domain.workspace = true
+presswork-sync.workspace = true
 serde.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["fmt", "json"] }
@@ -34,5 +35,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 http-body-util.workspace = true
+presswork-client.workspace = true
+presswork-text.workspace = true
 serde_json.workspace = true
 tower = { workspace = true, features = ["util"] }

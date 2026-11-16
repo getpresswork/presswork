@@ -4,7 +4,9 @@ mod config;
 mod database;
 pub mod documents;
 mod http;
+mod hub;
 pub mod links;
+mod live;
 mod routes;
 pub mod sessions;
 #[cfg(test)]
@@ -55,7 +57,7 @@ pub async fn run(config: Config) -> Result<(), ServerError> {
         .await
         .map_err(ServerError::Listen)?;
     tracing::info!(address = %config.listen, "Presswork server started");
-    axum::serve(listener, router(AppState { database: pool }))
+    axum::serve(listener, router(AppState::new(pool)))
         .with_graceful_shutdown(shutdown())
         .await
         .map_err(ServerError::Listen)

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post};
@@ -15,6 +17,7 @@ use uuid::Uuid;
 use presswork_domain::{Action, allowed};
 
 use crate::http::{Caller, HttpError};
+use crate::hub::Hub;
 use crate::{accounts, database, documents, links, sessions, work};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -88,6 +91,17 @@ impl Modify for Bearer {
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub database: PgPool,
+    pub(crate) hub: Arc<Hub>,
+}
+
+impl AppState {
+    #[must_use]
+    pub fn new(database: PgPool) -> Self {
+        Self {
+            database,
+            hub: Arc::default(),
+        }
+    }
 }
 
 pub fn router(state: AppState) -> Router {
@@ -115,6 +129,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/projects/{id}/documents",
             get(list_documents).post(create_document),
         )
+        .route("/api/v1/live", get(crate::live::upgrade))
         .with_state(state)
 }
 
@@ -590,13 +605,7 @@ mod tests {
     use crate::testing::test_database;
 
     async fn get(path: &str) -> (StatusCode, Value) {
-        get_from(
-            router(AppState {
-                database: unreachable(),
-            }),
-            path,
-        )
-        .await
+        get_from(router(AppState::new(unreachable())), path).await
     }
 
     async fn get_from(router: Router, path: &str) -> (StatusCode, Value) {
@@ -646,13 +655,8 @@ mod tests {
             return;
         };
 
-        let (status, body) = get_from(
-            router(AppState {
-                database: database.pool,
-            }),
-            "/api/v1/health/ready",
-        )
-        .await;
+        let (status, body) =
+            get_from(router(AppState::new(database.pool)), "/api/v1/health/ready").await;
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["status"], "ok");
@@ -695,9 +699,7 @@ mod tests {
     }
 
     fn app(pool: &PgPool) -> Router {
-        router(AppState {
-            database: pool.clone(),
-        })
+        router(AppState::new(pool.clone()))
     }
 
     async fn sign_in_ann(pool: &PgPool) -> Value {
@@ -719,9 +721,7 @@ mod tests {
     #[tokio::test]
     async fn a_request_without_a_token_is_unauthenticated() {
         let (status, body) = send(
-            router(AppState {
-                database: unreachable(),
-            }),
+            router(AppState::new(unreachable())),
             "GET",
             "/api/v1/sessions",
             None,
