@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use presswork_api::{ApiError, Document, Membership, NewDocument, Project, SignIn, SignedIn};
+use presswork_api::{
+    ApiError, Document, Membership, NewDocument, NewTask, Project, SignIn, SignedIn, Task,
+    TaskChange,
+};
 use reqwest::RequestBuilder;
 use serde::de::DeserializeOwned;
 use uuid::Uuid;
@@ -87,6 +90,37 @@ impl Api {
         answer(self.http.post(address).bearer_auth(token).json(&request)).await
     }
 
+    pub async fn tasks(&self, token: &str, project: Uuid) -> Result<Vec<Task>, ClientError> {
+        let path = format!("/api/v1/projects/{project}/tasks");
+        answer(self.http.get(self.url(&path)).bearer_auth(token)).await
+    }
+
+    pub async fn create_task(
+        &self,
+        token: &str,
+        project: Uuid,
+        new: &NewTask,
+    ) -> Result<Task, ClientError> {
+        let path = format!("/api/v1/projects/{project}/tasks");
+        answer(self.http.post(self.url(&path)).bearer_auth(token).json(new)).await
+    }
+
+    pub async fn update_task(
+        &self,
+        token: &str,
+        task: Uuid,
+        change: &TaskChange,
+    ) -> Result<Task, ClientError> {
+        let path = format!("/api/v1/tasks/{task}");
+        answer(
+            self.http
+                .patch(self.url(&path))
+                .bearer_auth(token)
+                .json(change),
+        )
+        .await
+    }
+
     fn url(&self, path: &str) -> String {
         format!("{}{path}", self.server)
     }
@@ -115,7 +149,8 @@ mod tests {
     use axum::{Json, Router};
     use jiff::Timestamp;
     use presswork_api::{
-        ApiError, Document, Membership, NewDocument, Project, Role, Session, SignIn, SignedIn,
+        ApiError, Document, Membership, NewDocument, NewTask, Project, Role, Session, SignIn,
+        SignedIn, Task, TaskChange, TaskState,
     };
     use tokio::net::TcpListener;
     use uuid::Uuid;
@@ -240,6 +275,105 @@ mod tests {
                     },
                 ),
             )
+    }
+
+    fn task(id: Uuid, project: Uuid, title: &str, state: TaskState) -> Task {
+        Task {
+            id,
+            project_id: project,
+            title: title.to_owned(),
+            description: String::new(),
+            state,
+            assignee_id: None,
+            due_date: None,
+            created_by: None,
+            created_at: Timestamp::UNIX_EPOCH,
+            updated_at: Timestamp::UNIX_EPOCH,
+        }
+    }
+
+    fn tasks_press() -> Router {
+        Router::new()
+            .route(
+                "/api/v1/projects/{id}/tasks",
+                get(|headers: HeaderMap, Path(project): Path<Uuid>| async move {
+                    if !signed_in(&headers) {
+                        return Err(refused());
+                    }
+                    Ok(Json(vec![task(
+                        Uuid::from_u128(5),
+                        project,
+                        "Proof the cover",
+                        TaskState::ToDo,
+                    )]))
+                })
+                .post(
+                    |headers: HeaderMap, Path(project): Path<Uuid>, Json(new): Json<NewTask>| async move {
+                        if !signed_in(&headers) {
+                            return Err(refused());
+                        }
+                        Ok((
+                            StatusCode::CREATED,
+                            Json(task(Uuid::from_u128(6), project, &new.title, TaskState::ToDo)),
+                        ))
+                    },
+                ),
+            )
+            .route(
+                "/api/v1/tasks/{id}",
+                axum::routing::patch(
+                    |headers: HeaderMap, Path(id): Path<Uuid>, Json(change): Json<TaskChange>| async move {
+                        if !signed_in(&headers) {
+                            return Err(refused());
+                        }
+                        let state = change.state.unwrap_or(TaskState::ToDo);
+                        Ok(Json(task(id, NOTES, "Print", state)))
+                    },
+                ),
+            )
+    }
+
+    #[tokio::test]
+    async fn tasks_come_from_their_project() {
+        let api = Api::new(&serve(tasks_press()).await).unwrap();
+
+        let tasks = api.tasks("pws_ann", NOTES).await.unwrap();
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "Proof the cover");
+        assert_eq!(tasks[0].project_id, NOTES);
+    }
+
+    #[tokio::test]
+    async fn a_new_task_can_be_done() {
+        let api = Api::new(&serve(tasks_press()).await).unwrap();
+
+        let new = api
+            .create_task(
+                "pws_ann",
+                NOTES,
+                &NewTask {
+                    title: "Print".to_owned(),
+                    ..NewTask::default()
+                },
+            )
+            .await
+            .unwrap();
+        let done = api
+            .update_task(
+                "pws_ann",
+                new.id,
+                &TaskChange {
+                    state: Some(TaskState::Done),
+                    ..TaskChange::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(new.title, "Print");
+        assert_eq!(done.id, new.id);
+        assert_eq!(done.state, TaskState::Done);
     }
 
     #[test]
