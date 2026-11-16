@@ -2,6 +2,7 @@ pub mod accounts;
 pub mod cli;
 mod config;
 mod database;
+pub mod documents;
 mod http;
 pub mod links;
 mod routes;

@@ -1,3 +1,4 @@
+mod document;
 mod error;
 mod health;
 pub mod live;
@@ -5,6 +6,7 @@ mod organization;
 mod session;
 mod work;
 
+pub use document::{Document, NewDocument};
 pub use error::ApiError;
 pub use health::{Health, Status};
 pub use organization::{AcceptInvite, CreatedInvite, Joined, NewInvite, NewPassword, Role};
