@@ -133,14 +133,16 @@ impl App {
         if let Some(id) = self.preview_window {
             return window::gain_focus(id);
         }
-        let (id, opened) = window::open(window::Settings {
-            size: PREVIEW_WINDOW,
-            ..window::Settings::default()
-        });
+        let (id, opened) = window::open(chrome::settings(PREVIEW_WINDOW, Controls::CURRENT));
         self.preview_window = Some(id);
         self.preview.set_detached(true);
         tracing::debug!("Preview window opened");
         opened.discard()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn preview_window(&self) -> Option<window::Id> {
+        self.preview_window
     }
 
     pub(crate) fn window_closed(&mut self, id: window::Id) -> bool {
@@ -155,7 +157,17 @@ impl App {
 
     pub(crate) fn view_window(&self, id: window::Id) -> Element<'_, Message> {
         if self.preview_window == Some(id) {
-            return self.preview.view(self.preview_text(), Message::Preview);
+            let frame = self.frame(id);
+            let title = row![
+                space().width(gap::S),
+                text(self.window_title(id)).font(font::UI_MEDIUM)
+            ];
+            let content = column![
+                chrome::bar(frame, &self.localizer, title),
+                hairline(),
+                self.preview.view(self.preview_text(), Message::Preview)
+            ];
+            return chrome::window(frame, content);
         }
         self.view()
     }
@@ -1418,6 +1430,20 @@ mod tests {
 
         assert_eq!(app.window_title(preview), "Preview · The Book");
         assert_eq!(app.window_title(app.main_window), "Presswork");
+    }
+
+    #[test]
+    fn the_preview_window_has_its_own_top_bar() {
+        let folder = book();
+        let mut app = app();
+        open(&mut app, &folder);
+        let preview = detach(&mut app);
+
+        let mut ui = simulator(app.view_window(preview));
+
+        assert!(ui.find("Preview · The Book").is_ok());
+        let buttons = ui.find(iced_test::selector::id("window-close")).is_ok();
+        assert_eq!(buttons, Controls::CURRENT == Controls::Custom);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use iced::Settings;
+use iced::{Settings, window};
 use iced_test::Simulator;
 use jiff::Timestamp;
 use presswork_log::{Level, LogEntry, LogStore};
@@ -20,6 +20,7 @@ use crate::workspace::Workspace;
 
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 800.0;
+const PREVIEW: (f32, f32) = (720.0, 900.0);
 const IMAGE_UPLOAD: Duration = Duration::from_millis(300);
 
 fn directory() -> PathBuf {
@@ -40,6 +41,10 @@ fn settings() -> Settings {
 }
 
 fn render(app: &mut App, name: &str) {
+    render_window(app, name, None, (WIDTH, HEIGHT));
+}
+
+fn render_window(app: &mut App, name: &str, window: Option<window::Id>, size: (f32, f32)) {
     let directory = directory();
     std::fs::create_dir_all(&directory).unwrap();
     for (label, mode) in [("light", Mode::Light), ("dark", Mode::Dark)] {
@@ -51,7 +56,8 @@ fn render(app: &mut App, name: &str) {
                 std::fs::remove_file(old.path()).unwrap();
             }
         }
-        let mut ui = Simulator::with_size(settings(), (WIDTH, HEIGHT), app.view());
+        let view = window.map_or_else(|| app.view(), |id| app.view_window(id));
+        let mut ui = Simulator::with_size(settings(), size, view);
         let _ = ui.snapshot(&theme).unwrap();
         std::thread::sleep(IMAGE_UPLOAD);
         ui.snapshot(&theme)
@@ -172,6 +178,11 @@ fn render_screens() {
     send(&mut app, Message::Preview(PreviewAction::ZoomIn));
     render(&mut app, "preview-zoom");
     send(&mut app, Message::Preview(PreviewAction::FitWidth));
+
+    send(&mut app, Message::Preview(PreviewAction::Detach));
+    let preview = app.preview_window().unwrap();
+    render_window(&mut app, "preview-window", Some(preview), PREVIEW);
+    send(&mut app, Message::WindowClosed(preview));
 
     let notes = folder(&[("notes.txt", "")]);
     send(
