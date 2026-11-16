@@ -213,16 +213,19 @@ pub fn menu_item(theme: &Theme, status: button::Status) -> button::Style {
 #[must_use]
 pub fn primary(theme: &Theme, status: button::Status) -> button::Style {
     let colors = colors(theme);
-    let background = match status {
-        button::Status::Hovered | button::Status::Pressed => colors.accent_strong,
-        button::Status::Active | button::Status::Disabled => colors.accent,
+    let (background, text_color) = match status {
+        button::Status::Hovered | button::Status::Pressed => {
+            (colors.accent_strong, colors.on_accent)
+        }
+        button::Status::Active => (colors.accent, colors.on_accent),
+        button::Status::Disabled => (colors.hover, colors.ink_faint),
     };
     button::Style {
         border: Border {
             radius: radius::MEDIUM.into(),
             ..Border::default()
         },
-        ..flat(Some(background), colors.on_accent)
+        ..flat(Some(background), text_color)
     }
 }
 
@@ -443,6 +446,14 @@ mod tests {
             hovered.background,
             Some(Background::Color(LIGHT.accent_strong))
         );
+    }
+
+    #[test]
+    fn a_disabled_primary_button_is_quiet() {
+        let style = primary(&light(), button::Status::Disabled);
+
+        assert_eq!(style.background, Some(Background::Color(LIGHT.hover)));
+        assert_eq!(style.text_color, LIGHT.ink_faint);
     }
 
     #[test]
