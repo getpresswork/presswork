@@ -117,6 +117,14 @@ impl<T> Patch<T> {
     pub fn is_keep(&self) -> bool {
         matches!(self, Self::Keep)
     }
+
+    pub fn map<U>(self, change: impl FnOnce(T) -> U) -> Patch<U> {
+        match self {
+            Self::Keep => Patch::Keep,
+            Self::Clear => Patch::Clear,
+            Self::Set(value) => Patch::Set(change(value)),
+        }
+    }
 }
 
 impl<'de, T: Deserialize<'de>> Deserialize<'de> for Patch<T> {
@@ -173,6 +181,13 @@ mod tests {
         assert_eq!(cleared.due_date, Patch::Clear);
         assert_eq!(set.assignee_id, Patch::Set(id));
         assert_eq!(set.due_date, Patch::Set(jiff::civil::date(2026, 11, 23)));
+    }
+
+    #[test]
+    fn a_patch_changes_only_a_set_value() {
+        assert_eq!(Patch::Set(2).map(|value| value * 10), Patch::Set(20));
+        assert_eq!(Patch::<i32>::Clear.map(|value| value * 10), Patch::Clear);
+        assert_eq!(Patch::<i32>::Keep.map(|value| value * 10), Patch::Keep);
     }
 
     #[test]

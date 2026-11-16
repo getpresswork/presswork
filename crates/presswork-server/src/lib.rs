@@ -8,6 +8,7 @@ mod routes;
 pub mod sessions;
 #[cfg(test)]
 mod testing;
+pub mod work;
 
 pub use config::{Config, ConfigError};
 pub use routes::{AppState, router};
