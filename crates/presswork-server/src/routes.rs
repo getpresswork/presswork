@@ -1,14 +1,16 @@
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use presswork_api::{
-    AcceptInvite, ApiError, CreatedInvite, Document, Health, Joined, Membership, NewDocument,
-    NewInvite, NewPassword, NewProject, NewTask, Project, ProjectChange, Role, Session, SignIn,
-    SignedIn, Status, Task, TaskChange, TaskState,
+    AcceptInvite, ApiError, CreatedInvite, Document, Health, Joined, LibraryFile, Membership,
+    NewDocument, NewInvite, NewPassword, NewProject, NewTask, NewWork, Project, ProjectChange,
+    Role, SearchHit, Session, SignIn, SignedIn, Status, Task, TaskChange, TaskState, Work,
 };
+use serde::Deserialize;
 use sqlx::PgPool;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
@@ -18,6 +20,7 @@ use presswork_domain::{Action, allowed};
 
 use crate::http::{Caller, HttpError};
 use crate::hub::Hub;
+use crate::library::{self, Library};
 use crate::{accounts, database, documents, links, sessions, work};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -46,7 +49,11 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         update_task,
         delete_task,
         list_documents,
-        create_document
+        create_document,
+        list_works,
+        create_work,
+        upload_file,
+        search_library
     ),
     components(schemas(
         Health,
@@ -70,7 +77,11 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         NewTask,
         TaskChange,
         Document,
-        NewDocument
+        NewDocument,
+        Work,
+        NewWork,
+        LibraryFile,
+        SearchHit
     )),
     modifiers(&Bearer)
 )]
@@ -92,14 +103,16 @@ impl Modify for Bearer {
 pub struct AppState {
     pub database: PgPool,
     pub(crate) hub: Arc<Hub>,
+    pub(crate) library: Library,
 }
 
 impl AppState {
     #[must_use]
-    pub fn new(database: PgPool) -> Self {
+    pub fn new(database: PgPool, library: Library) -> Self {
         Self {
             database,
             hub: Arc::default(),
+            library,
         }
     }
 }
@@ -128,6 +141,18 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v1/projects/{id}/documents",
             get(list_documents).post(create_document),
+        )
+        .route(
+            "/api/v1/organizations/{id}/works",
+            get(list_works).post(create_work),
+        )
+        .route(
+            "/api/v1/works/{id}/file",
+            put(upload_file).layer(DefaultBodyLimit::max(library::MAX_FILE_BYTES)),
+        )
+        .route(
+            "/api/v1/organizations/{id}/library/search",
+            get(search_library),
         )
         .route("/api/v1/live", get(crate::live::upgrade))
         .with_state(state)
@@ -290,6 +315,117 @@ async fn create_document(
     let document =
         documents::create_document(&state.database, id, signed.user_id, &request.path).await?;
     Ok((StatusCode::CREATED, Json(document)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/organizations/{id}/works",
+    tag = "library",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the organization.")),
+    responses(
+        (status = 200, description = "The works of the library of the organization, in the sequence of their titles.", body = [Work]),
+        (status = 401, description = "The request has no valid session.", body = ApiError),
+        (status = 404, description = "The user is not a member of the organization.", body = ApiError)
+    )
+)]
+async fn list_works(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<Work>>, HttpError> {
+    authorize(&state, id, signed.user_id, Action::ReadLibrary).await?;
+    Ok(Json(library::works(&state.database, id).await?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/organizations/{id}/works",
+    tag = "library",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the organization.")),
+    request_body = NewWork,
+    responses(
+        (status = 201, description = "The new work. It has no file.", body = Work),
+        (status = 400, description = "A value is not valid.", body = ApiError),
+        (status = 404, description = "The user is not a member of the organization.", body = ApiError),
+        (status = 409, description = "The organization has a work with this citation key.", body = ApiError)
+    )
+)]
+async fn create_work(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+    Json(request): Json<NewWork>,
+) -> Result<(StatusCode, Json<Work>), HttpError> {
+    authorize(&state, id, signed.user_id, Action::AddToLibrary).await?;
+    let work = library::create_work(&state.database, id, signed.user_id, &request).await?;
+    Ok((StatusCode::CREATED, Json(work)))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/works/{id}/file",
+    tag = "library",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the work.")),
+    request_body(
+        description = "The PDF file of the work. The limit is 64 MiB. A new file takes the place of the old file.",
+        content(("application/pdf"))
+    ),
+    responses(
+        (status = 200, description = "The work with its file. The server has read the text of all pages.", body = Work),
+        (status = 400, description = "The file is not a PDF file that the server can read, or it is encrypted.", body = ApiError),
+        (status = 404, description = "The work does not exist for this user.", body = ApiError),
+        (status = 413, description = "The file is larger than 64 MiB.")
+    )
+)]
+async fn upload_file(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+    file: Bytes,
+) -> Result<Json<Work>, HttpError> {
+    let organization = library::work_organization(&state.database, id)
+        .await?
+        .ok_or(HttpError::NotFound)?;
+    authorize(&state, organization, signed.user_id, Action::AddToLibrary).await?;
+    let work = state
+        .library
+        .add_file(&state.database, organization, id, signed.user_id, file)
+        .await?;
+    Ok(Json(work))
+}
+
+#[derive(Debug, Deserialize)]
+struct LibraryQuery {
+    q: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/organizations/{id}/library/search",
+    tag = "library",
+    security(("bearer" = [])),
+    params(
+        ("id" = Uuid, Path, description = "The ID of the organization."),
+        ("q" = String, Query, description = "The words to find. Each page in the result has all the words.")
+    ),
+    responses(
+        (status = 200, description = "The pages with the words. The best matches come first.", body = [SearchHit]),
+        (status = 404, description = "The user is not a member of the organization.", body = ApiError)
+    )
+)]
+async fn search_library(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+    Query(query): Query<LibraryQuery>,
+) -> Result<Json<Vec<SearchHit>>, HttpError> {
+    authorize(&state, id, signed.user_id, Action::ReadLibrary).await?;
+    Ok(Json(
+        state.library.search(&state.database, id, &query.q).await?,
+    ))
 }
 
 #[utoipa::path(
@@ -605,7 +741,7 @@ mod tests {
     use crate::testing::test_database;
 
     async fn get(path: &str) -> (StatusCode, Value) {
-        get_from(router(AppState::new(unreachable())), path).await
+        get_from(router(state(unreachable())), path).await
     }
 
     async fn get_from(router: Router, path: &str) -> (StatusCode, Value) {
@@ -655,8 +791,7 @@ mod tests {
             return;
         };
 
-        let (status, body) =
-            get_from(router(AppState::new(database.pool)), "/api/v1/health/ready").await;
+        let (status, body) = get_from(router(state(database.pool)), "/api/v1/health/ready").await;
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["status"], "ok");
@@ -698,8 +833,12 @@ mod tests {
         )
     }
 
+    fn state(pool: PgPool) -> AppState {
+        AppState::new(pool, Library::in_memory().unwrap())
+    }
+
     fn app(pool: &PgPool) -> Router {
-        router(AppState::new(pool.clone()))
+        router(state(pool.clone()))
     }
 
     async fn sign_in_ann(pool: &PgPool) -> Value {
@@ -721,7 +860,7 @@ mod tests {
     #[tokio::test]
     async fn a_request_without_a_token_is_unauthenticated() {
         let (status, body) = send(
-            router(AppState::new(unreachable())),
+            router(state(unreachable())),
             "GET",
             "/api/v1/sessions",
             None,
@@ -1286,6 +1425,127 @@ mod tests {
                 body["paths"]["/api/v1/projects/{id}/documents"][method].is_object(),
                 "{method}"
             );
+        }
+    }
+
+    const PDF: &[u8] = include_bytes!("../../presswork-ocr/fixtures/typst.pdf");
+
+    async fn upload(router: Router, work: &str, token: &str, file: &'static [u8]) -> StatusCode {
+        let request = Request::put(format!("/api/v1/works/{work}/file"))
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/pdf")
+            .body(Body::from(file))
+            .unwrap();
+        router.oneshot(request).await.unwrap().status()
+    }
+
+    #[tokio::test]
+    async fn members_add_works_and_find_the_pages_of_their_files() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let team = team(pool).await;
+        let library = Library::in_memory().unwrap();
+        let app = || router(AppState::new(pool.clone(), library.clone()));
+        let works = format!("/api/v1/organizations/{}/works", team.organization);
+
+        let (status, work) = send(
+            app(),
+            "POST",
+            &works,
+            Some(&team.member),
+            Some(json!({
+                "key": "field-notes",
+                "title": "Field Notes",
+                "creators": ["Gutenberg, Johannes"],
+                "year": 1455
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(work["file"], Value::Null);
+        let id = work["id"].as_str().unwrap();
+        assert_eq!(upload(app(), id, &team.member, PDF).await, StatusCode::OK);
+
+        let (status, listed) = send(app(), "GET", &works, Some(&team.administrator), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listed[0]["key"], "field-notes");
+        assert_eq!(listed[0]["file"]["pages"], 2);
+        let (status, hits) = send(
+            app(),
+            "GET",
+            &format!(
+                "/api/v1/organizations/{}/library/search?q=fine%20grain",
+                team.organization
+            ),
+            Some(&team.member),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(hits[0]["key"], "field-notes");
+        assert_eq!(hits[0]["page"], 1);
+    }
+
+    #[tokio::test]
+    async fn the_library_refuses_wrong_works_files_and_persons() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let team = team(pool).await;
+        let works = format!("/api/v1/organizations/{}/works", team.organization);
+        let new = json!({ "key": "field-notes", "title": "Field Notes" });
+
+        let (status, _) = send(
+            app(pool),
+            "POST",
+            &works,
+            Some(&team.member),
+            Some(json!({ "key": "Field Notes", "title": "Field Notes" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, work) = send(
+            app(pool),
+            "POST",
+            &works,
+            Some(&team.member),
+            Some(new.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let (status, _) = send(app(pool), "POST", &works, Some(&team.member), Some(new)).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        let id = work["id"].as_str().unwrap();
+        assert_eq!(
+            upload(app(pool), id, &team.member, b"Good paper").await,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            upload(app(pool), &Uuid::nil().to_string(), &team.member, PDF).await,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            upload(app(pool), id, &team.outsider, PDF).await,
+            StatusCode::NOT_FOUND
+        );
+        let (status, _) = send(app(pool), "GET", &works, Some(&team.outsider), None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn the_openapi_description_contains_the_library_routes() {
+        let (_, body) = get("/api/v1/openapi.json").await;
+
+        for (path, method) in [
+            ("/api/v1/organizations/{id}/works", "get"),
+            ("/api/v1/organizations/{id}/works", "post"),
+            ("/api/v1/works/{id}/file", "put"),
+            ("/api/v1/organizations/{id}/library/search", "get"),
+        ] {
+            assert!(body["paths"][path][method].is_object(), "{path} {method}");
         }
     }
 

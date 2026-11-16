@@ -1,10 +1,13 @@
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 
 use serde::Deserialize;
 
 const LISTEN_VARIABLE: &str = "PRESSWORK_LISTEN";
 const DATABASE_VARIABLE: &str = "PRESSWORK_DATABASE_URL";
+const DATA_VARIABLE: &str = "PRESSWORK_DATA";
 const DEFAULT_PORT: u16 = 8080;
+const DEFAULT_DATA: &str = "data";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -19,6 +22,7 @@ pub enum ConfigError {
 pub struct Config {
     pub listen: SocketAddr,
     pub database_url: Option<String>,
+    pub data: PathBuf,
 }
 
 impl Default for Config {
@@ -26,6 +30,7 @@ impl Default for Config {
         Self {
             listen: SocketAddr::from((Ipv4Addr::LOCALHOST, DEFAULT_PORT)),
             database_url: None,
+            data: PathBuf::from(DEFAULT_DATA),
         }
     }
 }
@@ -46,6 +51,9 @@ impl Config {
         if let Some(url) = variable(DATABASE_VARIABLE) {
             config.database_url = Some(url);
         }
+        if let Some(data) = variable(DATA_VARIABLE) {
+            config.data = PathBuf::from(data);
+        }
         Ok(config)
     }
 }
@@ -64,6 +72,19 @@ mod tests {
 
         assert_eq!(config.listen, "127.0.0.1:8080".parse().unwrap());
         assert_eq!(config.database_url, None);
+        assert_eq!(config.data, PathBuf::from("data"));
+    }
+
+    #[test]
+    fn the_file_and_the_environment_set_the_data_folder() {
+        let config = Config::parse("data = \"/srv/presswork\"\n", none).unwrap();
+        assert_eq!(config.data, PathBuf::from("/srv/presswork"));
+
+        let config = Config::parse("data = \"/srv/presswork\"\n", |name| {
+            (name == "PRESSWORK_DATA").then(|| "/var/lib/presswork".to_owned())
+        })
+        .unwrap();
+        assert_eq!(config.data, PathBuf::from("/var/lib/presswork"));
     }
 
     #[test]

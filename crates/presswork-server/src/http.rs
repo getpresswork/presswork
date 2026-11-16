@@ -8,6 +8,7 @@ use presswork_api::ApiError;
 
 use crate::accounts::AccountError;
 use crate::documents::DocumentError;
+use crate::library::LibraryError;
 use crate::links::LinkError;
 use crate::routes::AppState;
 use crate::sessions::{self, SessionError, Signed};
@@ -130,6 +131,26 @@ impl From<WorkError> for HttpError {
             | WorkError::AssigneeNotMember => Self::Invalid(sentence(&error.to_string())),
             WorkError::NotFound => Self::NotFound,
             WorkError::Database(_) => Self::Internal(error.to_string()),
+        }
+    }
+}
+
+impl From<LibraryError> for HttpError {
+    fn from(error: LibraryError) -> Self {
+        match error {
+            LibraryError::InvalidKey(_)
+            | LibraryError::InvalidTitle
+            | LibraryError::InvalidCreators
+            | LibraryError::InvalidYear
+            | LibraryError::NotPdf
+            | LibraryError::Encrypted => Self::Invalid(sentence(&error.to_string())),
+            LibraryError::KeyTaken => Self::Conflict(sentence(&error.to_string())),
+            LibraryError::NotFound => Self::NotFound,
+            LibraryError::Blobs(_)
+            | LibraryError::Search(_)
+            | LibraryError::Folder(_)
+            | LibraryError::Job(_)
+            | LibraryError::Database(_) => Self::Internal(error.to_string()),
         }
     }
 }

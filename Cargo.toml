@@ -16,9 +16,12 @@ presswork-api = { path = "crates/presswork-api" }
 presswork-client = { path = "crates/presswork-client" }
 presswork-domain = { path = "crates/presswork-domain" }
 presswork-editor = { path = "crates/presswork-editor" }
+presswork-library = { path = "crates/presswork-library" }
 presswork-log = { path = "crates/presswork-log" }
+presswork-ocr = { path = "crates/presswork-ocr" }
 presswork-preview = { path = "crates/presswork-preview" }
 presswork-project = { path = "crates/presswork-project" }
+presswork-search = { path = "crates/presswork-search" }
 presswork-sync = { path = "crates/presswork-sync" }
 presswork-text = { path = "crates/presswork-text" }
 presswork-toolchain = { path = "crates/presswork-toolchain" }
@@ -43,6 +46,7 @@ kurbo = "0.13.1"
 loro = { version = "1.18.0", default-features = false }
 lzma-rust2 = { version = "0.25.0", default-features = false, features = ["std", "xz"] }
 lucide-icons = { version = "1.73.0", default-features = false }
+object_store = { version = "0.14.2", default-features = false, features = ["fs"] }
 png = "0.18.1"
 proptest = "1.12.0"
 reqwest = "0.13.5"

@@ -377,7 +377,10 @@ mod tests {
             .unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let app = router(AppState::new(pool.clone()));
+        let app = router(AppState::new(
+            pool.clone(),
+            crate::library::Library::in_memory().unwrap(),
+        ));
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let [ann, bob, eve] = <[String; 3]>::try_from(tokens).unwrap();
         Press {

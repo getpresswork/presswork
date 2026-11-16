@@ -6,6 +6,7 @@ mod database;
 pub mod documents;
 mod http;
 mod hub;
+pub mod library;
 pub mod links;
 mod live;
 mod routes;
@@ -29,6 +30,8 @@ pub enum ServerError {
     Listen(#[source] std::io::Error),
     #[error("the command failed: {0}")]
     Command(#[source] links::LinkError),
+    #[error("the library cannot start: {0}")]
+    Library(#[source] library::LibraryError),
 }
 
 async fn prepare(config: &Config) -> Result<sqlx::PgPool, ServerError> {
@@ -54,11 +57,19 @@ pub async fn administer(config: &Config, command: cli::Command) -> Result<String
 
 pub async fn run(config: Config) -> Result<(), ServerError> {
     let pool = prepare(&config).await?;
+    let library = library::Library::open(&config.data).map_err(ServerError::Library)?;
+    let rebuilt = library
+        .rebuild_if_empty(&pool)
+        .await
+        .map_err(ServerError::Library)?;
+    if rebuilt > 0 {
+        tracing::info!(works = rebuilt, "The search index was made again");
+    }
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
         .map_err(ServerError::Listen)?;
     tracing::info!(address = %config.listen, "Presswork server started");
-    axum::serve(listener, router(AppState::new(pool)))
+    axum::serve(listener, router(AppState::new(pool, library)))
         .with_graceful_shutdown(shutdown())
         .await
         .map_err(ServerError::Listen)

@@ -92,6 +92,22 @@ A project has text documents (D126). Each document has a path in the project, fo
 - A WebSocket message can have 16 MiB or less.
 - In milestone 1, live sync operates in one server process (D127).
 
+### Library in milestone 1
+
+The library of an organization keeps works (D136). A work has a citation key, a title, a list of creators, and a year. A citation key is unique in its organization. It has 1 to 64 lowercase letters, digits, and single hyphens, and starts with a letter, for example `war-and-peace`. The `presswork-library` crate contains this rule, so that the desktop application can propose a valid key.
+
+| Operation | Use | Permission |
+| --- | --- | --- |
+| `GET /api/v1/organizations/{id}/works` | List the works, in the sequence of their titles. | Member |
+| `POST /api/v1/organizations/{id}/works` | Add a work without a file. | Member |
+| `PUT /api/v1/works/{id}/file` | Upload the PDF file of a work, 64 MiB or less (D140). A new file takes the place of the old file. | Member |
+| `GET /api/v1/organizations/{id}/library/search?q=…` | Find the pages that have all the words. | Member |
+
+- The server reads the text layer of each page with the `presswork-ocr` crate (D138). It refuses a file that is not a PDF file or that is encrypted.
+- The server keeps each file in the `blobs` folder of its `data` folder (D137), and the text of each page in the `library_pages` table.
+- The `presswork-search` crate keeps a Tantivy index of the pages in the `index` folder (D139). If the index is empty when the server starts, the server makes it again from the database.
+- A search gives 20 pages or fewer, with the text around the words.
+
 ## Permissions
 
 - To do an API operation, a user must have its permission, for example `ticket.create` or `document.write`.
@@ -138,6 +154,7 @@ The environment variable `PRESSWORK_CONFIG` gives the path of the settings file.
 | --- | --- | --- | --- |
 | `listen` | `PRESSWORK_LISTEN` | `127.0.0.1:8080` | The address and the port of the API. |
 | `database_url` | `PRESSWORK_DATABASE_URL` | None. The setting is necessary. | The PostgreSQL connection URL. |
+| `data` | `PRESSWORK_DATA` | `data` in the working folder | The folder for the library files (`blobs`) and the search index (`index`). |
 
 The server refuses a settings file with an unknown key. Thus a key with a spelling error gives an error and is not ignored.
 
