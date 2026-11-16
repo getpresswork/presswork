@@ -952,3 +952,45 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** When a server document is open, the Plan workspace shows the tasks of its project as a list: the title, the state, and the due date. A check box sets a task to done, or back to to do. A field at the top adds a task with a title. The list loads again each time the user selects the Plan workspace.
 - **Reason:** Roadmap step 14 asks to complete tasks in the desktop application. The board, the timeline, and the calendar come in milestone 5.
 - **Other options:** A Tasks panel at the bottom of the window. Live task events through the WebSocket now.
+
+## D136. A small library in milestone 1
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** In milestone 1, the library of an organization keeps works. Each work has one edition and one PDF file. To add a work, a member types the title, the creators, the year, and the citation key. Then the member uploads the PDF file. The edition is the standard edition of the work for all purposes. Page maps, more editions, purposes, scopes, annotations, and research notes come in milestone 4.
+- **Reason:** This is the thin slice of roadmap step 12. The tables follow D27 from the start. Thus milestone 4 adds editions and does not change the data.
+- **Other options:** A flat list of references in milestone 1. All forms for works and editions now.
+
+## D137. Library files in a local folder in milestone 1
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** The setting `data` gives a folder for the server. The server keeps the library files as blobs in its `blobs` folder, through the `object_store` crate (D23). The name of a blob is `library/<file ID>.pdf`. The database keeps the size and the SHA-256 digest of each file. The limit for one file is 64 MiB.
+- **Reason:** A local folder is sufficient for small servers. S3-compatible services come with the operations work of milestone 3.
+- **Other options:** S3 now. Blobs in PostgreSQL.
+
+## D138. The text of library files from the text layer
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** After an upload, the server reads the text layer of each page with hayro, the PDF library that Typst uses. The server keeps the text of each page in PostgreSQL and adds it to the search index. A page without a text layer has no text until OCR is available. The OCR engine (D29) comes after the project owner approves the installation of OCRmyPDF and Tesseract.
+- **Reason:** Many PDF files already have a text layer. hayro is already in the dependency tree. OCRmyPDF and Tesseract are downloads outside crates.io.
+- **Other options:** OCR on all pages. A different PDF crate, for example `lopdf`.
+
+## D139. A search index that the server can make again
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** The server keeps a Tantivy index (D31) of the library pages in the `index` folder of its `data` folder. Each entry has the organization, the work, the page number, and the text. If the index is empty when the server starts, the server makes the index again from PostgreSQL. A search returns the work, the page number, and the text around each match. The Tantivy build has no zstd compression and no stemmer.
+- **Reason:** PostgreSQL is the only source of the data. Thus a lost index is not a loss of data. zstd adds C code to the build.
+- **Other options:** The full-text search of PostgreSQL in milestone 1. An index that is the only copy of the text.
+
+## D140. Upload in two requests
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** The client sends the data of a new work as JSON: `POST /api/v1/organizations/{id}/works`. Then it sends the PDF file as the body of a second request: `PUT /api/v1/works/{id}/file`. The second request returns when the server has read the text of all pages.
+- **Reason:** The API stays JSON for data, and the server needs no multipart parser. The text is ready for search when the upload is complete.
+- **Other options:** One multipart request. A background job for the text, with a state that the client gets at intervals.
+
+## D141. Citations from the Research workspace
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Decision:** When a server document is open, the Research workspace shows the library of its organization: the works, an **Add PDF…** button, and a search field. Each search result has a **Cite** button. **Cite** opens the Write workspace and puts `@key[p. N]` at the cursor. N is the page in the PDF file, because page maps come in milestone 4. If the document has no `#bibliography`, Presswork adds `#bibliography("library.yml")` at the end. The desktop application makes `library.yml` in the Hayagriva format from the works of the library, and gives it to the Typst engine as a file next to the document.
+- **Reason:** A citation compiles at once after one click. The format follows "Citations in Typst" in [Library](library.md).
+- **Other options:** The user types the bibliography call. A `library.yml` document on the server.

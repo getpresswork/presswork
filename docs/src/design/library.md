@@ -6,6 +6,17 @@ This chapter tells how the team library keeps texts, and how the library connect
 
 The library keeps the texts that a team reads, quotes, and cites. All members use the same files and the same editions. Thus all quotations and page numbers agree.
 
+## Library in milestone 1
+
+Milestone 1 has a small library of the organization (D136 to D141):
+
+- Each work has one edition and one PDF file. The edition is the standard edition for all purposes.
+- To add a work, type the title, the creators, the year, and the citation key. Then upload the PDF file.
+- The server reads the text layer of each page. A page without a text layer has no text until OCR is available.
+- The search finds the pages of all works of the organization.
+- **Cite** puts `@key[p. N]` in the document. N is the page in the PDF file.
+- The desktop application makes the bibliography file `library.yml` from the works.
+
 ## Records
 
 The library follows the FRBR model of libraries, in a simpler form.
