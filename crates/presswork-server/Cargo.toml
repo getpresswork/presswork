@@ -15,6 +15,7 @@ workspace = true
 [dependencies]
 argon2.workspace = true
 axum.workspace = true
+clap.workspace = true
 getrandom.workspace = true
 jiff.workspace = true
 jiff-sqlx.workspace = true

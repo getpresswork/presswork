@@ -24,6 +24,7 @@ presswork-ui = { path = "crates/presswork-ui" }
 
 argon2 = "0.6.0"
 axum = "0.8.9"
+clap = { version = "4.6.7", features = ["derive"] }
 comemo = "0.5.1"
 directories = "6.0.0"
 fluent-bundle = "0.16.0"

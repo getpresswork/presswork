@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod cli;
 mod config;
 mod database;
 mod http;
@@ -21,16 +22,33 @@ pub enum ServerError {
     Migration(#[source] sqlx::migrate::MigrateError),
     #[error("the server cannot listen on its address: {0}")]
     Listen(#[source] std::io::Error),
+    #[error("the command failed: {0}")]
+    Command(#[source] links::LinkError),
 }
 
-pub async fn run(config: Config) -> Result<(), ServerError> {
-    let url = config.database_url.ok_or(ServerError::NoDatabase)?;
-    let pool = database::connect(&url)
+async fn prepare(config: &Config) -> Result<sqlx::PgPool, ServerError> {
+    let url = config
+        .database_url
+        .as_deref()
+        .ok_or(ServerError::NoDatabase)?;
+    let pool = database::connect(url)
         .await
         .map_err(ServerError::Database)?;
     database::migrate(&pool)
         .await
         .map_err(ServerError::Migration)?;
+    Ok(pool)
+}
+
+pub async fn administer(config: &Config, command: cli::Command) -> Result<String, ServerError> {
+    let pool = prepare(config).await?;
+    cli::execute(&pool, command)
+        .await
+        .map_err(ServerError::Command)
+}
+
+pub async fn run(config: Config) -> Result<(), ServerError> {
+    let pool = prepare(&config).await?;
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
         .map_err(ServerError::Listen)?;
