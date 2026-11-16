@@ -35,15 +35,18 @@ The `.presswork` folder contains local data. Do not add it to version control.
 
 ## Sync protocol
 
-The client and the server send messages through one WebSocket. Each message is MessagePack data.
+The client and the server send messages through one WebSocket at `/api/v1/live`. Each message is a MessagePack map with field names (D124). The `presswork-api` crate defines the messages.
 
-1. The client sends `Hello` with the protocol version and an access token.
+1. The client sends `Hello` with the protocol version and its session token (D128). The server answers `Welcome` with the ID of the user. If the first message is not a valid `Hello` in 10 seconds, the server sends `Error` and closes the connection.
 2. For each document, the client sends `Subscribe` with its version vector.
-3. The server sends `Updates` with all changes that the client does not have.
-4. After this, each side sends `Updates` for its new local changes.
-5. The server sends `Ack` when it has stored a change. The client keeps each change until it gets the `Ack` for it.
+3. The server answers `Subscribed`. It contains all changes that the client does not have, and the version vector of the server. The client then sends `Updates` with the changes that the server does not have, for example the changes that it made offline.
+4. After this, each side sends `Updates` for its new changes. The server sends each update to the other subscribers of the document.
+5. The server sends `Ack` with the ID of an update when it has stored the update. The client keeps each change until it gets the `Ack` for it.
+6. If the server cannot do a request, it sends `Error` with a code and a message. The codes are the codes of the HTTP API, and `unsupported_protocol`.
 
 A version vector tells which changes a peer has. Thus the protocol sends each change only one time. This is also true after a long time offline.
+
+The `presswork-sync` crate keeps the text model and the Loro document of a file together (D123). It turns each local change set into a Loro update. It turns each remote update into a change set with one edit for each changed area. Thus the cursors and the undo history of the user stay correct.
 
 ## Presence
 

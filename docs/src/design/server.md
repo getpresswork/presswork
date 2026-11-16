@@ -76,6 +76,22 @@ The `presswork-domain` crate contains the permission check (D114). Administrator
 | `PATCH /api/v1/tasks/{id}` | Change a task. Absent fields stay the same. `null` removes the assignee or the due date. | Member |
 | `DELETE /api/v1/tasks/{id}` | Delete a task. | Administrator, or the member who made the task |
 
+### Documents and live sync in milestone 1
+
+A project has text documents (D126). Each document has a path in the project, for example `main.typ`. A path is unique in its project. It has 1 to 500 characters and uses `/` between its parts. It cannot start with `/`. It cannot contain an empty part, `.`, `..`, a control character, or the characters `\ : * ? " < > |`. Thus each path is also a valid file path on Windows, Linux, and macOS.
+
+| Operation | Use | Permission |
+| --- | --- | --- |
+| `GET /api/v1/projects/{id}/documents` | List the documents of a project, in the sequence of their paths. | Member |
+| `POST /api/v1/projects/{id}/documents` | Make an empty document. | Member |
+| `GET /api/v1/live` | Open the WebSocket for live sync. Refer to [Collaboration](collaboration.md). | Session, in the `Hello` message |
+
+- The server stores each accepted Loro update as one row of the `document_updates` table, with its author and its time (D125).
+- For each document that has subscribers, the server keeps a Loro document in memory. When the last subscriber leaves, the server removes the document from memory.
+- If the server cannot store an update, it ends all subscriptions of the document and loads the document from the database again. The clients subscribe again, and the version vectors bring back each change that the server did not store.
+- A WebSocket message can have 16 MiB or less.
+- In milestone 1, live sync operates in one server process (D127).
+
 ## Permissions
 
 - To do an API operation, a user must have its permission, for example `ticket.create` or `document.write`.
