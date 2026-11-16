@@ -4434,6 +4434,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "presswork-domain"
+version = "0.1.0"
+dependencies = [
+ "presswork-api",
+]
+
+[[package]]
 name = "presswork-editor"
 version = "0.1.0"
 dependencies = [
@@ -4493,6 +4500,7 @@ dependencies = [
  "jiff",
  "jiff-sqlx",
  "presswork-api",
+ "presswork-domain",
  "serde",
  "serde_json",
  "sha2 0.10.9",

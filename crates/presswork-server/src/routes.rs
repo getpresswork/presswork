@@ -11,6 +11,8 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use uuid::Uuid;
 
+use presswork_domain::{Action, allowed};
+
 use crate::http::{Caller, HttpError};
 use crate::{accounts, database, links, sessions};
 
@@ -160,7 +162,8 @@ async fn create_invite(
     Path(id): Path<Uuid>,
     Json(request): Json<NewInvite>,
 ) -> Result<(StatusCode, Json<CreatedInvite>), HttpError> {
-    if links::role(&state.database, id, signed.user_id).await? != Some(Role::Administrator) {
+    let role = links::role(&state.database, id, signed.user_id).await?;
+    if !role.is_some_and(|role| allowed(role, Action::InvitePeople)) {
         return Err(HttpError::Forbidden);
     }
     let (token, invite) = links::invite(&state.database, id, &request.email, request.role).await?;

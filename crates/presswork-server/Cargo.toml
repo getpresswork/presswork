@@ -20,6 +20,7 @@ getrandom.workspace = true
 jiff.workspace = true
 jiff-sqlx.workspace = true
 presswork-api.workspace = true
+presswork-domain.workspace = true
 serde.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
