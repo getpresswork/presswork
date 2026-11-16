@@ -763,3 +763,10 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** The server makes its OpenAPI description from the code with utoipa. A test makes sure that the description is valid.
 - **Reason:** The description always agrees with the code. utoipa has the most users of the crates for this.
 - **Other options:** A file that a person writes, with a test that compares it with the routes. aide, which uses schemars.
+
+## D109. TLS to PostgreSQL with the certificates of the operating system
+
+- **Status:** Accepted, 2026-11-15. **Origin:** Project owner.
+- **Decision:** The server connects to PostgreSQL through sqlx with rustls, the ring crypto library, and the certificate store of the operating system.
+- **Reason:** Managed databases often use a certificate authority that the administrator installs on the system. The desktop application also uses the certificate store of the operating system (D94).
+- **Other options:** rustls with aws-lc-rs and the Mozilla root list, which needs the CDLA-Permissive-2.0 license. No TLS in milestone 1.
