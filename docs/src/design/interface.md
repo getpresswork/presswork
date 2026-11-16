@@ -150,7 +150,7 @@ In milestone 1, the status bar shows these items:
 - The Typst version that the project uses. If no installed version agrees with the pin of the project, the item shows a warning. Click it to open the Toolchains panel.
 - The number of log errors and warnings, and the Logs button.
 
-The Toolchains panel and the log panel open at the bottom of the window. Only one of them is open at a time.
+The Toolchains panel, the log panel, and the chat panel open at the bottom of the window. Only one of them is open at a time.
 
 ## Projects
 
@@ -188,6 +188,8 @@ The status bar shows the path of the document and the state of the connection:
 | Offline | The connection stopped. Presswork tries again every 3 seconds. Your changes stay in the document. They go to the server when the connection is live again. |
 
 Presswork keeps the session in memory only (D131). After a restart, sign in again.
+
+When a server document is open, the **Chat** button in the status bar opens the chat of its organization. Refer to [Communication](communication.md).
 
 ## Home dashboard
 

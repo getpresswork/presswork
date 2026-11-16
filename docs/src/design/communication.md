@@ -13,6 +13,20 @@ This chapter tells how team members and outside contributors communicate in Pres
 - The chat and the inbox can open in their own window.
 - In an encrypted project, the channels of the project are encrypted. Refer to [Security](security.md).
 
+### Chat in milestone 1
+
+Milestone 1 has one channel for each organization (D133). All members of the organization can read and write it. A message has plain text of 1 to 4000 characters. The server stores the messages in the `chat_messages` table, with the author and the time.
+
+The chat uses the live WebSocket (D134):
+
+1. The client sends `Join` with the ID of the organization. The server answers `Joined` with the last 100 messages, oldest first.
+2. The client sends `Say` with the text. The server stores the message, and then sends `Said` with the stored message to each client that joined, also to the author.
+3. If a client is not a member of the organization, the server answers `Error` with the code `not_found`. If a client sends `Say` before `Join`, or the text is empty or too long, the code is `invalid_request`.
+
+A message can arrive in `Joined` and in `Said`. The client keeps each message one time, by its ID.
+
+In the desktop application, the **Chat** button in the status bar opens the chat of the organization of the open server document. The chat panel opens at the bottom of the window. Only one of the log panel, the Toolchains panel, and the chat panel is open at a time.
+
 ## Inbox and notifications
 
 - The inbox of each person contains mentions, assignments, replies, approvals, and the events of watched objects.
