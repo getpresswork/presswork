@@ -52,6 +52,58 @@ impl FileState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LabelStyle {
+    Arabic,
+    UpperRoman,
+    LowerRoman,
+    UpperLetters,
+    LowerLetters,
+    None,
+}
+
+impl LabelStyle {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Arabic => "arabic",
+            Self::UpperRoman => "upper_roman",
+            Self::LowerRoman => "lower_roman",
+            Self::UpperLetters => "upper_letters",
+            Self::LowerLetters => "lower_letters",
+            Self::None => "none",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "arabic" => Some(Self::Arabic),
+            "upper_roman" => Some(Self::UpperRoman),
+            "lower_roman" => Some(Self::LowerRoman),
+            "upper_letters" => Some(Self::UpperLetters),
+            "lower_letters" => Some(Self::LowerLetters),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PageRange {
+    pub first_page: u32,
+    pub style: LabelStyle,
+    #[serde(default)]
+    pub prefix: String,
+    #[serde(default = "first_number")]
+    pub start: u32,
+}
+
+fn first_number() -> u32 {
+    1
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct NewWork {
     pub key: String,
@@ -120,6 +172,39 @@ mod tests {
             json!({ "size": 2048, "pages": 12, "pages_with_text": 11, "state": "ready" })
         );
         assert_eq!(serde_json::from_value::<Work>(value).unwrap(), work);
+    }
+
+    #[test]
+    fn label_styles_have_snake_case_names() {
+        for (style, name) in [
+            (LabelStyle::Arabic, "arabic"),
+            (LabelStyle::UpperRoman, "upper_roman"),
+            (LabelStyle::LowerRoman, "lower_roman"),
+            (LabelStyle::UpperLetters, "upper_letters"),
+            (LabelStyle::LowerLetters, "lower_letters"),
+            (LabelStyle::None, "none"),
+        ] {
+            assert_eq!(serde_json::to_value(style).unwrap(), name);
+            assert_eq!(style.as_str(), name);
+            assert_eq!(LabelStyle::parse(name), Some(style));
+        }
+        assert_eq!(LabelStyle::parse("greek"), None);
+    }
+
+    #[test]
+    fn a_page_range_starts_at_one_without_a_prefix() {
+        let range: PageRange =
+            serde_json::from_value(json!({ "first_page": 15, "style": "arabic" })).unwrap();
+
+        assert_eq!(
+            range,
+            PageRange {
+                first_page: 15,
+                style: LabelStyle::Arabic,
+                prefix: String::new(),
+                start: 1,
+            }
+        );
     }
 
     #[test]
