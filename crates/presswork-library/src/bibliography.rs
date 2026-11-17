@@ -1,4 +1,4 @@
-use hayagriva::types::{Date, EntryType, FormatString, Person};
+use hayagriva::types::{Date, EntryType, FormatString, Person, Publisher};
 use hayagriva::{Entry, Library};
 use presswork_api::Work;
 
@@ -19,8 +19,14 @@ pub fn bibliography(works: &[Work]) -> Result<String, BibliographyError> {
         if !authors.is_empty() {
             entry.set_authors(authors);
         }
-        if let Some(year) = work.year {
-            entry.set_date(Date::from_year(year));
+        if let Some(edition) = work.standard_edition() {
+            if let Some(year) = edition.year {
+                entry.set_date(Date::from_year(year));
+            }
+            if !edition.publisher.is_empty() {
+                let name = FormatString::with_value(edition.publisher.as_str());
+                entry.set_publisher(Publisher::new(Some(name), None));
+            }
         }
         library.push(&entry);
     }
@@ -30,9 +36,22 @@ pub fn bibliography(works: &[Work]) -> Result<String, BibliographyError> {
 #[cfg(test)]
 mod tests {
     use hayagriva::io::from_yaml_str;
+    use presswork_api::Edition;
     use uuid::Uuid;
 
     use super::*;
+
+    fn edition(year: Option<i32>, publisher: &str, standard: bool) -> Edition {
+        Edition {
+            id: Uuid::nil(),
+            year,
+            publisher: publisher.to_owned(),
+            language: String::new(),
+            translators: Vec::new(),
+            standard,
+            file: None,
+        }
+    }
 
     fn work(key: &str, title: &str, creators: &[&str], year: Option<i32>) -> Work {
         Work {
@@ -41,9 +60,26 @@ mod tests {
             key: key.to_owned(),
             title: title.to_owned(),
             creators: creators.iter().map(|name| (*name).to_owned()).collect(),
-            year,
-            file: None,
+            editions: vec![edition(year, "", true)],
         }
+    }
+
+    #[test]
+    fn the_standard_edition_gives_the_year_and_the_publisher() {
+        let mut war = work("war-and-peace", "War and Peace", &["Tolstoy, Leo"], None);
+        war.editions = vec![
+            edition(Some(1869), "Russky Vestnik", false),
+            edition(Some(1922), "Oxford University Press", true),
+        ];
+
+        let library = from_yaml_str(&bibliography(&[war]).unwrap()).unwrap();
+
+        let entry = library.get("war-and-peace").unwrap();
+        assert_eq!(entry.date().unwrap().year, 1922);
+        assert_eq!(
+            entry.publisher().unwrap().name().unwrap().to_string(),
+            "Oxford University Press"
+        );
     }
 
     #[test]

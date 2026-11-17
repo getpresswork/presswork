@@ -48,6 +48,11 @@ library-empty = The library has no works. Add the first PDF file.
 library-no-hits = No page has all these words.
 library-hit = { $title } · p. { $page }
 library-cite = Cite
+library-add-edition = Add edition…
+library-other-edition = Not the standard edition
+library-standard = Standard edition
+library-make-standard = Make standard
+library-translators = Translated by { $names }
 library-pages = { $pages ->
     [one] 1 page
    *[other] { $pages } pages
@@ -63,6 +68,11 @@ library-form-title = Title
 library-form-creators = Creators
 library-form-creators-example = Tolstoy, Leo; Maude, Louise
 library-form-year = Year
+library-form-publisher = Publisher
+library-form-language = Language
+library-form-translators = Translators
+library-form-translators-example = Maude, Louise; Maude, Aylmer
+library-form-new-edition = New edition of { $title }: { $file }
 library-form-key = Citation key
 library-form-add = Add
 library-form-cancel = Cancel

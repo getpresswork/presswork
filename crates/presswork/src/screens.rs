@@ -9,7 +9,9 @@ use presswork_ui::theme::Mode;
 use presswork_ui::{font, font_size};
 
 use presswork_api::live::{ChatMessage, ServerMessage as LiveMessage};
-use presswork_api::{Document, FileState, LibraryFile, Project, SearchHit, Task, TaskState, Work};
+use presswork_api::{
+    Document, Edition, FileState, LibraryFile, Project, SearchHit, Task, TaskState, Work,
+};
 use presswork_client::Api;
 use presswork_editor::{Action as EditorAction, Motion};
 use presswork_preview::Action as PreviewAction;
@@ -20,7 +22,7 @@ use uuid::Uuid;
 
 use crate::app::{App, Message, send};
 use crate::chat_panel::Message as ChatPanelMessage;
-use crate::library_view::{Message as LibraryMessage, PickedFile};
+use crate::library_view::{Message as LibraryMessage, PickedFile, Target};
 use crate::live_session::Event as LiveEvent;
 use crate::server_dialog::{Connection, Message as ServerMessage, Shelf};
 use crate::task_list::Message as TaskListMessage;
@@ -237,19 +239,13 @@ fn render_screens() {
 
 fn render_library(app: &mut App) {
     send(app, Message::SelectWorkspace(Workspace::Research));
-    let work = |id: u128,
-                key: &str,
-                title: &str,
-                creators: &[&str],
-                year,
-                pages: u32,
-                state: FileState| Work {
+    let edition = |id: u128, year, publisher: &str, pages: u32, state, standard| Edition {
         id: Uuid::from_u128(id),
-        organization_id: Uuid::from_u128(1),
-        key: key.to_owned(),
-        title: title.to_owned(),
-        creators: creators.iter().map(|name| (*name).to_owned()).collect(),
-        year,
+        year: Some(year),
+        publisher: publisher.to_owned(),
+        language: String::new(),
+        translators: Vec::new(),
+        standard,
         file: Some(LibraryFile {
             size: u64::from(pages) * 40_000,
             pages,
@@ -258,33 +254,37 @@ fn render_library(app: &mut App) {
             problem: None,
         }),
     };
+    let work = |id: u128, key: &str, title: &str, creator: &str, editions| Work {
+        id: Uuid::from_u128(id),
+        organization_id: Uuid::from_u128(1),
+        key: key.to_owned(),
+        title: title.to_owned(),
+        creators: vec![creator.to_owned()],
+        editions,
+    };
+    let mut reprint = edition(22, 1958, "Dover", 230, FileState::Ready, false);
+    reprint.language = "en".to_owned();
+    let mut translation = edition(23, 1962, "Hauswedell", 248, FileState::Reading, false);
+    translation.language = "de".to_owned();
+    translation.translators = vec!["Bauer, Konrad".to_owned()];
     let works = vec![
         work(
             12,
             "atlas-of-presses",
             "Atlas of Presses",
-            &["Moxon, Joseph"],
-            Some(1683),
-            212,
-            FileState::Ready,
+            "Moxon, Joseph",
+            vec![
+                edition(21, 1683, "Moxon", 212, FileState::Ready, true),
+                reprint,
+                translation,
+            ],
         ),
         work(
             11,
             "field-notes",
             "Field Notes: A Small Handbook for Printers",
-            &["Gutenberg, Johannes"],
-            Some(1455),
-            2,
-            FileState::Ready,
-        ),
-        work(
-            13,
-            "paper-and-ink",
-            "Paper and Ink",
-            &["Hunter, Dard"],
-            Some(1947),
-            384,
-            FileState::Reading,
+            "Gutenberg, Johannes",
+            vec![edition(20, 1455, "Field Press", 2, FileState::Ready, true)],
         ),
     ];
     send(app, Message::Library(LibraryMessage::Loaded(Ok(works))));
@@ -292,27 +292,31 @@ fn render_library(app: &mut App) {
         app,
         Message::Library(LibraryMessage::Query("fine grain".to_owned())),
     );
-    let hit = |id: u128, key: &str, title: &str, page, snippet: &str| SearchHit {
-        work_id: Uuid::from_u128(id),
-        key: key.to_owned(),
+    let hit = |work: u128, edition: u128, title: &str, page, snippet: &str, standard| SearchHit {
+        work_id: Uuid::from_u128(work),
+        edition_id: Uuid::from_u128(edition),
+        key: String::new(),
         title: title.to_owned(),
         page,
         snippet: snippet.to_owned(),
+        standard,
     };
     let hits = vec![
         hit(
             11,
-            "field-notes",
+            20,
             "Field Notes: A Small Handbook for Printers",
             1,
             "The fine grain of the paper gives the page its color.",
+            true,
         ),
         hit(
             12,
-            "atlas-of-presses",
+            22,
             "Atlas of Presses",
             87,
             "A paper with a fine grain takes the ink of the press evenly.",
+            false,
         ),
     ];
     send(app, Message::Library(LibraryMessage::Found(Ok(hits))));
@@ -320,10 +324,10 @@ fn render_library(app: &mut App) {
 
     send(
         app,
-        Message::Library(LibraryMessage::Picked(Some(PickedFile::new(
-            "mechanick-exercises.pdf",
-            vec![0; 10],
-        )))),
+        Message::Library(LibraryMessage::Picked(
+            Target::Work,
+            Some(PickedFile::new("mechanick-exercises.pdf", vec![0; 10])),
+        )),
     );
     send(
         app,

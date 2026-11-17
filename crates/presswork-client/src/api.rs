@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use presswork_api::{
-    ApiError, Document, Membership, NewDocument, NewTask, NewWork, Project, SearchHit, SignIn,
-    SignedIn, Task, TaskChange, Work,
+    ApiError, Document, Edition, Membership, NewDocument, NewEdition, NewTask, NewWork, Project,
+    SearchHit, SignIn, SignedIn, Task, TaskChange, Work,
 };
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{RequestBuilder, Url};
@@ -138,13 +138,28 @@ impl Api {
         answer(self.http.post(self.url(&path)).bearer_auth(token).json(new)).await
     }
 
-    pub async fn upload_file(
+    pub async fn add_edition(
         &self,
         token: &str,
         work: Uuid,
+        new: &NewEdition,
+    ) -> Result<Edition, ClientError> {
+        let path = format!("/api/v1/works/{work}/editions");
+        answer(self.http.post(self.url(&path)).bearer_auth(token).json(new)).await
+    }
+
+    pub async fn set_standard(&self, token: &str, edition: Uuid) -> Result<Work, ClientError> {
+        let path = format!("/api/v1/editions/{edition}/standard");
+        answer(self.http.post(self.url(&path)).bearer_auth(token)).await
+    }
+
+    pub async fn upload_file(
+        &self,
+        token: &str,
+        edition: Uuid,
         file: Vec<u8>,
     ) -> Result<Work, ClientError> {
-        let path = format!("/api/v1/works/{work}/file");
+        let path = format!("/api/v1/editions/{edition}/file");
         answer(
             self.http
                 .put(self.url(&path))
@@ -198,8 +213,9 @@ mod tests {
     use axum::{Json, Router};
     use jiff::Timestamp;
     use presswork_api::{
-        ApiError, Document, FileState, LibraryFile, Membership, NewDocument, NewTask, NewWork,
-        Project, Role, SearchHit, Session, SignIn, SignedIn, Task, TaskChange, TaskState, Work,
+        ApiError, Document, Edition, FileState, LibraryFile, Membership, NewDocument, NewEdition,
+        NewTask, NewWork, Project, Role, SearchHit, Session, SignIn, SignedIn, Task, TaskChange,
+        TaskState, Work,
     };
     use tokio::net::TcpListener;
     use uuid::Uuid;
@@ -427,15 +443,26 @@ mod tests {
 
     const FIELD_NOTES: Uuid = Uuid::from_u128(0x0193_0000_0000_7000_8000_0000_0000_0010);
 
-    fn work(id: Uuid, key: &str, title: &str, file: Option<LibraryFile>) -> Work {
+    fn edition(id: Uuid, standard: bool, file: Option<LibraryFile>) -> Edition {
+        Edition {
+            id,
+            year: None,
+            publisher: String::new(),
+            language: String::new(),
+            translators: Vec::new(),
+            standard,
+            file,
+        }
+    }
+
+    fn work(id: Uuid, key: &str, title: &str, editions: Vec<Edition>) -> Work {
         Work {
             id,
             organization_id: PRESS,
             key: key.to_owned(),
             title: title.to_owned(),
             creators: Vec::new(),
-            year: None,
-            file,
+            editions,
         }
     }
 
@@ -451,7 +478,7 @@ mod tests {
                         FIELD_NOTES,
                         "field-notes",
                         "Field Notes",
-                        None,
+                        Vec::new(),
                     )]))
                 })
                 .post(
@@ -459,15 +486,69 @@ mod tests {
                         if !signed_in(&headers) {
                             return Err(refused());
                         }
+                        let first = edition(Uuid::from_u128(21), true, None);
                         Ok((
                             StatusCode::CREATED,
-                            Json(work(Uuid::from_u128(11), &new.key, &new.title, None)),
+                            Json(work(Uuid::from_u128(11), &new.key, &new.title, vec![first])),
                         ))
                     },
                 ),
             )
+            .merge(edition_routes())
             .route(
-                "/api/v1/works/{id}/file",
+                "/api/v1/organizations/{id}/library/search",
+                get(
+                    |headers: HeaderMap,
+                     Path(_): Path<Uuid>,
+                     Query(query): Query<HashMap<String, String>>| async move {
+                        if !signed_in(&headers) {
+                            return Err(refused());
+                        }
+                        Ok(Json(vec![SearchHit {
+                            work_id: FIELD_NOTES,
+                            edition_id: Uuid::from_u128(21),
+                            key: "field-notes".to_owned(),
+                            title: "Field Notes".to_owned(),
+                            page: 3,
+                            snippet: query.get("q").cloned().unwrap_or_default(),
+                            standard: true,
+                        }]))
+                    },
+                ),
+            )
+    }
+
+    fn edition_routes() -> Router {
+        Router::new()
+            .route(
+                "/api/v1/works/{id}/editions",
+                post(
+                    |headers: HeaderMap, Path(_): Path<Uuid>, Json(new): Json<NewEdition>| async move {
+                        if !signed_in(&headers) {
+                            return Err(refused());
+                        }
+                        let mut added = edition(Uuid::from_u128(22), false, None);
+                        added.year = new.year;
+                        Ok((StatusCode::CREATED, Json(added)))
+                    },
+                ),
+            )
+            .route(
+                "/api/v1/editions/{id}/standard",
+                post(|headers: HeaderMap, Path(id): Path<Uuid>| async move {
+                    if !signed_in(&headers) {
+                        return Err(refused());
+                    }
+                    Ok(Json(work(
+                        Uuid::from_u128(11),
+                        "atlas",
+                        "Atlas",
+                        vec![edition(id, true, None)],
+                    )))
+                }),
+            )
+            .route(
+                "/api/v1/editions/{id}/file",
                 put(
                     |headers: HeaderMap, Path(id): Path<Uuid>, body: Bytes| async move {
                         if !signed_in(&headers) {
@@ -486,27 +567,13 @@ mod tests {
                         };
                         Ok((
                             StatusCode::ACCEPTED,
-                            Json(work(id, "atlas", "Atlas", Some(file))),
+                            Json(work(
+                                Uuid::from_u128(11),
+                                "atlas",
+                                "Atlas",
+                                vec![edition(id, true, Some(file))],
+                            )),
                         ))
-                    },
-                ),
-            )
-            .route(
-                "/api/v1/organizations/{id}/library/search",
-                get(
-                    |headers: HeaderMap,
-                     Path(_): Path<Uuid>,
-                     Query(query): Query<HashMap<String, String>>| async move {
-                        if !signed_in(&headers) {
-                            return Err(refused());
-                        }
-                        Ok(Json(vec![SearchHit {
-                            work_id: FIELD_NOTES,
-                            key: "field-notes".to_owned(),
-                            title: "Field Notes".to_owned(),
-                            page: 3,
-                            snippet: query.get("q").cloned().unwrap_or_default(),
-                        }]))
                     },
                 ),
             )
@@ -530,9 +597,21 @@ mod tests {
             .await
             .unwrap();
         let uploaded = api
-            .upload_file("pws_ann", new.id, b"%PDF-1.7".to_vec())
+            .upload_file("pws_ann", new.editions[0].id, b"%PDF-1.7".to_vec())
             .await
             .unwrap();
+        let added = api
+            .add_edition(
+                "pws_ann",
+                new.id,
+                &NewEdition {
+                    year: Some(1922),
+                    ..NewEdition::default()
+                },
+            )
+            .await
+            .unwrap();
+        let changed = api.set_standard("pws_ann", added.id).await.unwrap();
         let hits = api
             .search("pws_ann", PRESS, "good paper & ink")
             .await
@@ -541,7 +620,7 @@ mod tests {
         assert_eq!(works[0].key, "field-notes");
         assert_eq!((new.key.as_str(), new.title.as_str()), ("atlas", "Atlas"));
         assert_eq!(
-            uploaded.file,
+            uploaded.editions[0].file,
             Some(LibraryFile {
                 size: 8,
                 pages: 1,
@@ -550,6 +629,8 @@ mod tests {
                 problem: None,
             })
         );
+        assert_eq!((added.year, added.standard), (Some(1922), false));
+        assert_eq!(changed.standard_edition().unwrap().id, added.id);
         assert_eq!(hits[0].page, 3);
         assert_eq!(hits[0].snippet, "good paper & ink");
     }

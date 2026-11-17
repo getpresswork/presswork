@@ -6,10 +6,10 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use presswork_api::{
-    AcceptInvite, ApiError, CreatedInvite, Document, FileState, Health, Joined, LibraryFile,
-    Membership, NewDocument, NewInvite, NewPassword, NewProject, NewTask, NewWork, Project,
-    ProjectChange, Role, SearchHit, Session, SignIn, SignedIn, Status, Task, TaskChange, TaskState,
-    Work,
+    AcceptInvite, ApiError, CreatedInvite, Document, Edition, FileState, Health, Joined,
+    LibraryFile, Membership, NewDocument, NewEdition, NewInvite, NewPassword, NewProject, NewTask,
+    NewWork, Project, ProjectChange, Role, SearchHit, Session, SignIn, SignedIn, Status, Task,
+    TaskChange, TaskState, Work,
 };
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -54,6 +54,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         create_document,
         list_works,
         create_work,
+        add_edition,
+        set_standard_edition,
         upload_file,
         search_library
     ),
@@ -82,6 +84,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         NewDocument,
         Work,
         NewWork,
+        Edition,
+        NewEdition,
         LibraryFile,
         FileState,
         SearchHit
@@ -155,8 +159,10 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/organizations/{id}/works",
             get(list_works).post(create_work),
         )
+        .route("/api/v1/works/{id}/editions", post(add_edition))
+        .route("/api/v1/editions/{id}/standard", post(set_standard_edition))
         .route(
-            "/api/v1/works/{id}/file",
+            "/api/v1/editions/{id}/file",
             put(upload_file).layer(DefaultBodyLimit::max(library::MAX_FILE_BYTES)),
         )
         .route(
@@ -373,19 +379,78 @@ async fn create_work(
 }
 
 #[utoipa::path(
-    put,
-    path = "/api/v1/works/{id}/file",
+    post,
+    path = "/api/v1/works/{id}/editions",
     tag = "library",
     security(("bearer" = [])),
     params(("id" = Uuid, Path, description = "The ID of the work.")),
+    request_body = NewEdition,
+    responses(
+        (status = 201, description = "The new edition. It has no file, and it is not the standard edition.", body = Edition),
+        (status = 400, description = "A value is not valid.", body = ApiError),
+        (status = 404, description = "The work does not exist for this user.", body = ApiError)
+    )
+)]
+async fn add_edition(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+    Json(request): Json<NewEdition>,
+) -> Result<(StatusCode, Json<Edition>), HttpError> {
+    let organization = library::work_organization(&state.database, id)
+        .await?
+        .ok_or(HttpError::NotFound)?;
+    authorize(&state, organization, signed.user_id, Action::AddToLibrary).await?;
+    let edition = library::add_edition(&state.database, id, &request).await?;
+    Ok((StatusCode::CREATED, Json(edition)))
+}
+
+async fn edition_owner(
+    state: &AppState,
+    edition: Uuid,
+    user: Uuid,
+) -> Result<(Uuid, Uuid, Uuid), HttpError> {
+    let (organization, work) = library::edition_owner(&state.database, edition)
+        .await?
+        .ok_or(HttpError::NotFound)?;
+    authorize(state, organization, user, Action::AddToLibrary).await?;
+    Ok((organization, work, edition))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/editions/{id}/standard",
+    tag = "library",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the edition.")),
+    responses(
+        (status = 200, description = "The work. This edition is now its standard edition.", body = Work),
+        (status = 404, description = "The edition does not exist for this user.", body = ApiError)
+    )
+)]
+async fn set_standard_edition(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Work>, HttpError> {
+    edition_owner(&state, id, signed.user_id).await?;
+    Ok(Json(library::set_standard(&state.database, id).await?))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/editions/{id}/file",
+    tag = "library",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the edition.")),
     request_body(
-        description = "The PDF file of the work. The limit is 64 MiB. A new file takes the place of the old file.",
+        description = "The PDF file of the edition. The limit is 64 MiB. A new file takes the place of the old file.",
         content(("application/pdf"))
     ),
     responses(
-        (status = 202, description = "The work with its file in the state `reading`. A job reads the text of the pages, and the WebSocket tells the members when the file is ready.", body = Work),
+        (status = 202, description = "The work with the file in the state `reading`. A job reads the text of the pages, and the WebSocket tells the members when the file is ready.", body = Work),
         (status = 400, description = "The file is not a PDF file that the server can read, or it is encrypted.", body = ApiError),
-        (status = 404, description = "The work does not exist for this user.", body = ApiError),
+        (status = 404, description = "The edition does not exist for this user.", body = ApiError),
         (status = 413, description = "The file is larger than 64 MiB.")
     )
 )]
@@ -395,13 +460,10 @@ async fn upload_file(
     Path(id): Path<Uuid>,
     file: Bytes,
 ) -> Result<(StatusCode, Json<Work>), HttpError> {
-    let organization = library::work_organization(&state.database, id)
-        .await?
-        .ok_or(HttpError::NotFound)?;
-    authorize(&state, organization, signed.user_id, Action::AddToLibrary).await?;
+    let owner = edition_owner(&state, id, signed.user_id).await?;
     let work = state
         .library
-        .add_file(&state.database, organization, id, signed.user_id, file)
+        .add_file(&state.database, owner, signed.user_id, file)
         .await?;
     state.jobs.wake();
     Ok((StatusCode::ACCEPTED, Json(work)))
@@ -1440,8 +1502,8 @@ mod tests {
 
     const PDF: &[u8] = include_bytes!("../../presswork-ocr/fixtures/typst.pdf");
 
-    async fn upload(router: Router, work: &str, token: &str, file: &'static [u8]) -> StatusCode {
-        let request = Request::put(format!("/api/v1/works/{work}/file"))
+    async fn upload(router: Router, edition: &str, token: &str, file: &'static [u8]) -> StatusCode {
+        let request = Request::put(format!("/api/v1/editions/{edition}/file"))
             .header("authorization", format!("Bearer {token}"))
             .header("content-type", "application/pdf")
             .body(Body::from(file))
@@ -1469,27 +1531,28 @@ mod tests {
                 "key": "field-notes",
                 "title": "Field Notes",
                 "creators": ["Gutenberg, Johannes"],
-                "year": 1455
+                "edition": { "year": 1455 }
             })),
         )
         .await;
         assert_eq!(status, StatusCode::CREATED);
-        assert_eq!(work["file"], Value::Null);
-        let id = work["id"].as_str().unwrap();
+        assert_eq!(work["editions"][0]["file"], Value::Null);
+        assert_eq!(work["editions"][0]["standard"], true);
+        let edition = work["editions"][0]["id"].as_str().unwrap();
         assert_eq!(
-            upload(app(), id, &team.member, PDF).await,
+            upload(app(), edition, &team.member, PDF).await,
             StatusCode::ACCEPTED
         );
         let (_, listed) = send(app(), "GET", &works, Some(&team.member), None).await;
-        assert_eq!(listed[0]["file"]["state"], "reading");
+        assert_eq!(listed[0]["editions"][0]["file"]["state"], "reading");
         let state = AppState::new(pool.clone(), library.clone());
         while crate::jobs::run_one(&state).await.unwrap() {}
 
         let (status, listed) = send(app(), "GET", &works, Some(&team.administrator), None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(listed[0]["key"], "field-notes");
-        assert_eq!(listed[0]["file"]["pages"], 2);
-        assert_eq!(listed[0]["file"]["state"], "ready");
+        assert_eq!(listed[0]["editions"][0]["file"]["pages"], 2);
+        assert_eq!(listed[0]["editions"][0]["file"]["state"], "ready");
         let (status, hits) = send(
             app(),
             "GET",
@@ -1504,6 +1567,69 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(hits[0]["key"], "field-notes");
         assert_eq!(hits[0]["page"], 1);
+        assert_eq!(hits[0]["edition_id"], edition);
+        assert_eq!(hits[0]["standard"], true);
+    }
+
+    #[tokio::test]
+    async fn members_add_editions_and_select_the_standard_edition() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let team = team(pool).await;
+        let (_, work) = send(
+            app(pool),
+            "POST",
+            &format!("/api/v1/organizations/{}/works", team.organization),
+            Some(&team.member),
+            Some(json!({ "key": "war-and-peace", "title": "War and Peace" })),
+        )
+        .await;
+        let id = work["id"].as_str().unwrap();
+
+        let (status, edition) = send(
+            app(pool),
+            "POST",
+            &format!("/api/v1/works/{id}/editions"),
+            Some(&team.member),
+            Some(json!({ "year": 1922, "language": "en", "translators": ["Maude, Louise"] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(edition["standard"], false);
+        let second = edition["id"].as_str().unwrap();
+        let (status, changed) = send(
+            app(pool),
+            "POST",
+            &format!("/api/v1/editions/{second}/standard"),
+            Some(&team.member),
+            None,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(changed["editions"][0]["standard"], false);
+        assert_eq!(changed["editions"][1]["standard"], true);
+        assert_eq!(changed["editions"][1]["translators"][0], "Maude, Louise");
+        let (status, _) = send(
+            app(pool),
+            "POST",
+            &format!("/api/v1/editions/{second}/standard"),
+            Some(&team.outsider),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = send(
+            app(pool),
+            "POST",
+            &format!("/api/v1/works/{id}/editions"),
+            Some(&team.member),
+            Some(json!({ "year": 12_000 })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -1536,7 +1662,7 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
         let (status, _) = send(app(pool), "POST", &works, Some(&team.member), Some(new)).await;
         assert_eq!(status, StatusCode::CONFLICT);
-        let id = work["id"].as_str().unwrap();
+        let id = work["editions"][0]["id"].as_str().unwrap();
         assert_eq!(
             upload(app(pool), id, &team.member, b"Good paper").await,
             StatusCode::BAD_REQUEST
@@ -1560,7 +1686,9 @@ mod tests {
         for (path, method) in [
             ("/api/v1/organizations/{id}/works", "get"),
             ("/api/v1/organizations/{id}/works", "post"),
-            ("/api/v1/works/{id}/file", "put"),
+            ("/api/v1/works/{id}/editions", "post"),
+            ("/api/v1/editions/{id}/standard", "post"),
+            ("/api/v1/editions/{id}/file", "put"),
             ("/api/v1/organizations/{id}/library/search", "get"),
         ] {
             assert!(body["paths"][path][method].is_object(), "{path} {method}");

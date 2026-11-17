@@ -356,7 +356,9 @@ impl App {
         }
         let works_changed = matches!(
             message,
-            library_view::Message::Loaded(Ok(_)) | library_view::Message::Uploaded(Ok(_))
+            library_view::Message::Loaded(Ok(_))
+                | library_view::Message::Uploaded(Ok(_))
+                | library_view::Message::Changed(Ok(_))
         );
         let task = match (&mut self.library, &self.live) {
             (Some(library), Some(live)) => library
@@ -2360,10 +2362,12 @@ mod tests {
     fn field_notes_hit() -> presswork_api::SearchHit {
         presswork_api::SearchHit {
             work_id: uuid::Uuid::from_u128(10),
+            edition_id: uuid::Uuid::from_u128(20),
             key: "field-notes".to_owned(),
             title: "Field Notes".to_owned(),
             page: 3,
             snippet: "The fine grain of the paper".to_owned(),
+            standard: true,
         }
     }
 
@@ -2374,8 +2378,15 @@ mod tests {
             key: "field-notes".to_owned(),
             title: "Field Notes".to_owned(),
             creators: vec!["Gutenberg, Johannes".to_owned()],
-            year: Some(1455),
-            file: None,
+            editions: vec![presswork_api::Edition {
+                id: uuid::Uuid::from_u128(20),
+                year: Some(1455),
+                publisher: String::new(),
+                language: String::new(),
+                translators: Vec::new(),
+                standard: true,
+                file: None,
+            }],
         }
     }
 

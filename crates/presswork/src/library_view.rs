@@ -3,7 +3,7 @@ use std::sync::Arc;
 use iced::alignment::Vertical;
 use iced::widget::{button, column, container, row, scrollable, space, text, text_input};
 use iced::{Element, Fill, Task};
-use presswork_api::{FileState, NewWork, SearchHit, Work};
+use presswork_api::{Edition, FileState, NewEdition, NewWork, SearchHit, Work};
 use presswork_library::{parse_key, propose_key};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::{font, font_size, space as gap};
@@ -15,15 +15,13 @@ use crate::server_dialog::{Connection, Problem, problem, problem_text};
 pub(crate) const MAX_FILE_BYTES: usize = 64 * 1024 * 1024;
 const LIST_WIDTH: f32 = 720.0;
 const YEAR_WIDTH: f32 = 96.0;
+const LANGUAGE_WIDTH: f32 = 120.0;
 
 #[cfg(test)]
-pub(crate) const TEXT_IDS: [&str; 23] = [
-    "library-form-creators-example",
-    "library-page-count",
-    "library-reading",
-    "library-failed",
+pub(crate) const TEXT_IDS: [&str; 33] = [
     "library-title",
     "library-add",
+    "library-add-edition",
     "library-search-placeholder",
     "library-search",
     "library-loading",
@@ -31,12 +29,25 @@ pub(crate) const TEXT_IDS: [&str; 23] = [
     "library-no-hits",
     "library-hit",
     "library-cite",
+    "library-other-edition",
+    "library-standard",
+    "library-make-standard",
+    "library-translators",
     "library-pages",
+    "library-page-count",
+    "library-reading",
+    "library-failed",
     "library-no-file",
     "library-form-title",
     "library-form-creators",
+    "library-form-creators-example",
     "library-form-year",
+    "library-form-publisher",
+    "library-form-language",
+    "library-form-translators",
+    "library-form-translators-example",
     "library-form-key",
+    "library-form-new-edition",
     "library-form-add",
     "library-form-cancel",
     "library-uploading",
@@ -59,21 +70,33 @@ impl PickedFile {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Target {
+    Work,
+    Edition(Uuid),
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
     Loaded(Result<Vec<Work>, Problem>),
     Query(String),
     Search,
     Found(Result<Vec<SearchHit>, Problem>),
-    Pick,
-    Picked(Option<PickedFile>),
+    Pick(Target),
+    Picked(Target, Option<PickedFile>),
     Title(String),
     Creators(String),
-    Year(String),
     Key(String),
+    Year(String),
+    Publisher(String),
+    Language(String),
+    Translators(String),
     Upload,
     Created(Result<Work, Problem>),
+    EditionAdded(Result<Edition, Problem>),
     Uploaded(Result<Work, Problem>),
+    MakeStandard(Uuid),
+    Changed(Result<Work, Problem>),
     Cancel,
     Cite(SearchHit),
 }
@@ -86,29 +109,50 @@ enum Trouble {
 
 #[derive(Debug)]
 struct Draft {
+    target: Target,
     file: PickedFile,
     title: String,
     creators: String,
-    year: String,
     key: String,
     key_changed: bool,
-    work: Option<Uuid>,
+    year: String,
+    publisher: String,
+    language: String,
+    translators: String,
+    edition: Option<Uuid>,
     sending: bool,
 }
 
 impl Draft {
-    fn new(file: PickedFile) -> Self {
+    fn new(target: Target, file: PickedFile) -> Self {
         let title = title_of(&file.name);
         Self {
+            target,
             key: propose_key(&title),
             file,
             title,
             creators: String::new(),
-            year: String::new(),
             key_changed: false,
-            work: None,
+            year: String::new(),
+            publisher: String::new(),
+            language: String::new(),
+            translators: String::new(),
+            edition: None,
             sending: false,
         }
+    }
+
+    fn new_edition(&self) -> Option<NewEdition> {
+        let year = match self.year.trim() {
+            "" => None,
+            year => Some(year.parse().ok()?),
+        };
+        Some(NewEdition {
+            year,
+            publisher: self.publisher.trim().to_owned(),
+            language: self.language.trim().to_owned(),
+            translators: names(&self.translators),
+        })
     }
 
     fn new_work(&self) -> Option<NewWork> {
@@ -116,25 +160,28 @@ impl Draft {
         if title.is_empty() {
             return None;
         }
-        let key = parse_key(&self.key).ok()?.to_owned();
-        let year = match self.year.trim() {
-            "" => None,
-            year => Some(year.parse().ok()?),
-        };
-        let creators = self
-            .creators
-            .split(';')
-            .map(str::trim)
-            .filter(|creator| !creator.is_empty())
-            .map(str::to_owned)
-            .collect();
         Some(NewWork {
-            key,
+            key: parse_key(&self.key).ok()?.to_owned(),
             title: title.to_owned(),
-            creators,
-            year,
+            creators: names(&self.creators),
+            edition: self.new_edition()?,
         })
     }
+
+    fn ready(&self) -> bool {
+        match self.target {
+            Target::Work => self.new_work().is_some(),
+            Target::Edition(_) => self.new_edition().is_some(),
+        }
+    }
+}
+
+fn names(text: &str) -> Vec<String> {
+    text.split(';')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 fn title_of(file_name: &str) -> String {
@@ -181,6 +228,11 @@ impl LibraryView {
         self.draft.as_ref()?.new_work()
     }
 
+    #[cfg(test)]
+    pub(crate) fn edition_proposal(&self) -> Option<NewEdition> {
+        self.draft.as_ref()?.new_edition()
+    }
+
     pub(crate) fn load(&self, connection: &Connection) -> Task<Message> {
         let Connection { api, token } = connection.clone();
         let organization = self.organization;
@@ -188,6 +240,14 @@ impl LibraryView {
             async move { api.works(&token, organization).await.map_err(problem) },
             Message::Loaded,
         )
+    }
+
+    pub(crate) fn changed(&mut self, work: Work) -> bool {
+        if work.organization_id != self.organization {
+            return false;
+        }
+        self.keep(work);
+        true
     }
 
     pub(crate) fn update(&mut self, message: Message, connection: &Connection) -> Task<Message> {
@@ -199,42 +259,30 @@ impl LibraryView {
             Message::Query(query) => self.query = query,
             Message::Search => return self.search(connection),
             Message::Found(Ok(hits)) => self.hits = Some(hits),
-            Message::Pick => return pick(),
-            Message::Picked(Some(file)) => self.take(file),
-            Message::Picked(None) | Message::Cite(_) => {}
-            Message::Title(title) => {
-                if let Some(draft) = &mut self.draft {
-                    if !draft.key_changed {
-                        draft.key = propose_key(&title);
-                    }
-                    draft.title = title;
-                }
-            }
-            Message::Creators(creators) => {
-                if let Some(draft) = &mut self.draft {
-                    draft.creators = creators;
-                }
-            }
-            Message::Year(year) => {
-                if let Some(draft) = &mut self.draft {
-                    draft.year = year;
-                }
-            }
-            Message::Key(key) => {
-                if let Some(draft) = &mut self.draft {
-                    draft.key = key;
-                    draft.key_changed = true;
-                }
-            }
+            Message::Pick(target) => return pick(target),
+            Message::Picked(target, Some(file)) => self.take(target, file),
+            Message::Picked(_, None) | Message::Cite(_) => {}
             Message::Upload => return self.upload(connection),
             Message::Created(Ok(work)) => {
                 if let Some(draft) = &mut self.draft {
-                    draft.work = Some(work.id);
+                    draft.edition = work.editions.first().map(|edition| edition.id);
                 }
                 self.keep(work);
                 return self.send_file(connection);
             }
-            Message::Created(Err(problem)) | Message::Uploaded(Err(problem)) => {
+            Message::EditionAdded(Ok(edition)) => {
+                if let Some(draft) = &mut self.draft {
+                    draft.edition = Some(edition.id);
+                    if let Target::Edition(work) = draft.target {
+                        self.add_edition_to(work, edition);
+                    }
+                }
+                return self.send_file(connection);
+            }
+            Message::Created(Err(problem))
+            | Message::EditionAdded(Err(problem))
+            | Message::Uploaded(Err(problem))
+            | Message::Changed(Err(problem)) => {
                 if let Some(draft) = &mut self.draft {
                     draft.sending = false;
                 }
@@ -244,30 +292,49 @@ impl LibraryView {
                 self.draft = None;
                 self.keep(work);
             }
+            Message::MakeStandard(edition) => return self.make_standard(edition, connection),
+            Message::Changed(Ok(work)) => self.keep(work),
             Message::Cancel => {
                 self.draft = None;
                 self.trouble = None;
             }
+            field => self.edit_draft(field),
         }
         Task::none()
     }
 
-    fn take(&mut self, file: PickedFile) {
+    fn edit_draft(&mut self, message: Message) {
+        let Some(draft) = &mut self.draft else {
+            return;
+        };
+        match message {
+            Message::Title(title) => {
+                if !draft.key_changed {
+                    draft.key = propose_key(&title);
+                }
+                draft.title = title;
+            }
+            Message::Key(key) => {
+                draft.key = key;
+                draft.key_changed = true;
+            }
+            Message::Creators(creators) => draft.creators = creators,
+            Message::Year(year) => draft.year = year,
+            Message::Publisher(publisher) => draft.publisher = publisher,
+            Message::Language(language) => draft.language = language,
+            Message::Translators(translators) => draft.translators = translators,
+            _ => {}
+        }
+    }
+
+    fn take(&mut self, target: Target, file: PickedFile) {
         if file.bytes.len() > MAX_FILE_BYTES {
             self.draft = None;
             self.trouble = Some(Trouble::TooLarge);
         } else {
-            self.draft = Some(Draft::new(file));
+            self.draft = Some(Draft::new(target, file));
             self.trouble = None;
         }
-    }
-
-    pub(crate) fn changed(&mut self, work: Work) -> bool {
-        if work.organization_id != self.organization {
-            return false;
-        }
-        self.keep(work);
-        true
     }
 
     fn keep(&mut self, work: Work) {
@@ -282,6 +349,16 @@ impl LibraryView {
                 .cmp(&right.title.to_lowercase())
                 .then_with(|| left.key.cmp(&right.key))
         });
+    }
+
+    fn add_edition_to(&mut self, work: Uuid, edition: Edition) {
+        if let Some(known) = self
+            .works
+            .as_mut()
+            .and_then(|works| works.iter_mut().find(|known| known.id == work))
+        {
+            known.editions.push(edition);
+        }
     }
 
     fn search(&mut self, connection: &Connection) -> Task<Message> {
@@ -310,31 +387,45 @@ impl LibraryView {
         if draft.sending {
             return Task::none();
         }
-        if draft.work.is_some() {
+        if draft.edition.is_some() {
             return self.send_file(connection);
         }
-        let Some(new) = draft.new_work() else {
-            return Task::none();
+        let Connection { api, token } = connection.clone();
+        let task = match draft.target {
+            Target::Work => {
+                let Some(new) = draft.new_work() else {
+                    return Task::none();
+                };
+                let organization = self.organization;
+                Task::perform(
+                    async move {
+                        api.create_work(&token, organization, &new)
+                            .await
+                            .map_err(problem)
+                    },
+                    Message::Created,
+                )
+            }
+            Target::Edition(work) => {
+                let Some(new) = draft.new_edition() else {
+                    return Task::none();
+                };
+                Task::perform(
+                    async move { api.add_edition(&token, work, &new).await.map_err(problem) },
+                    Message::EditionAdded,
+                )
+            }
         };
         draft.sending = true;
         self.trouble = None;
-        let Connection { api, token } = connection.clone();
-        let organization = self.organization;
-        Task::perform(
-            async move {
-                api.create_work(&token, organization, &new)
-                    .await
-                    .map_err(problem)
-            },
-            Message::Created,
-        )
+        task
     }
 
     fn send_file(&mut self, connection: &Connection) -> Task<Message> {
         let Some(draft) = &mut self.draft else {
             return Task::none();
         };
-        let Some(work) = draft.work else {
+        let Some(edition) = draft.edition else {
             return Task::none();
         };
         draft.sending = true;
@@ -343,11 +434,20 @@ impl LibraryView {
         let bytes = Arc::clone(&draft.file.bytes);
         Task::perform(
             async move {
-                api.upload_file(&token, work, bytes.as_ref().clone())
+                api.upload_file(&token, edition, bytes.as_ref().clone())
                     .await
                     .map_err(problem)
             },
             Message::Uploaded,
+        )
+    }
+
+    fn make_standard(&mut self, edition: Uuid, connection: &Connection) -> Task<Message> {
+        self.trouble = None;
+        let Connection { api, token } = connection.clone();
+        Task::perform(
+            async move { api.set_standard(&token, edition).await.map_err(problem) },
+            Message::Changed,
         )
     }
 
@@ -362,7 +462,7 @@ impl LibraryView {
             button(text(localizer.text("library-add")))
                 .padding([gap::XS + gap::XXS, gap::M])
                 .style(style::secondary)
-                .on_press_maybe(self.draft.is_none().then_some(Message::Pick)),
+                .on_press_maybe(self.draft.is_none().then_some(Message::Pick(Target::Work))),
         ]
         .align_y(Vertical::Center);
         let ready = !self.query.trim().is_empty();
@@ -392,7 +492,7 @@ impl LibraryView {
             );
         }
         if let Some(draft) = &self.draft {
-            content = content.push(draft_form(draft, localizer));
+            content = content.push(self.draft_form(draft, localizer));
         }
         let mut lists = column![].spacing(gap::L);
         if let Some(hits) = &self.hits {
@@ -419,14 +519,117 @@ impl LibraryView {
             Some(works) if works.is_empty() => text(localizer.text("library-empty"))
                 .style(style::muted)
                 .into(),
-            Some(works) => column(works.iter().map(|work| work_line(work, localizer)))
-                .spacing(gap::S)
-                .into(),
+            Some(works) => column(
+                works
+                    .iter()
+                    .map(|work| work_entry(work, self.draft.is_none(), localizer)),
+            )
+            .spacing(gap::M)
+            .into(),
         }
+    }
+
+    fn draft_form<'a>(&'a self, draft: &'a Draft, localizer: &Localizer) -> Element<'a, Message> {
+        let field =
+            |label: &str, placeholder: &str, value: &'a str, on_input: fn(String) -> Message| {
+                column![
+                    text(localizer.text(label))
+                        .size(font_size::SMALL)
+                        .style(style::muted),
+                    text_input(placeholder, value)
+                        .on_input(on_input)
+                        .padding([gap::XS + gap::XXS, gap::S])
+                        .style(style::field),
+                ]
+                .spacing(gap::XXS)
+            };
+        let creators_example = localizer.text("library-form-creators-example");
+        let translators_example = localizer.text("library-form-translators-example");
+        let heading = match draft.target {
+            Target::Work => draft.file.name.clone(),
+            Target::Edition(work) => {
+                let mut args = FluentArgs::new();
+                let title = self
+                    .works
+                    .as_ref()
+                    .and_then(|works| works.iter().find(|known| known.id == work))
+                    .map_or_else(String::new, |known| known.title.clone());
+                args.set("title", title);
+                args.set("file", draft.file.name.clone());
+                localizer.format("library-form-new-edition", &args)
+            }
+        };
+        let mut form = column![text(heading).font(font::UI_SEMIBOLD)].spacing(gap::S);
+        if draft.target == Target::Work {
+            form = form
+                .push(field(
+                    "library-form-title",
+                    "",
+                    &draft.title,
+                    Message::Title,
+                ))
+                .push(field(
+                    "library-form-creators",
+                    &creators_example,
+                    &draft.creators,
+                    Message::Creators,
+                ));
+        }
+        form = form
+            .push(
+                row![
+                    field("library-form-year", "", &draft.year, Message::Year).width(YEAR_WIDTH),
+                    field(
+                        "library-form-publisher",
+                        "",
+                        &draft.publisher,
+                        Message::Publisher
+                    ),
+                    field(
+                        "library-form-language",
+                        "",
+                        &draft.language,
+                        Message::Language
+                    )
+                    .width(LANGUAGE_WIDTH),
+                ]
+                .spacing(gap::S),
+            )
+            .push(field(
+                "library-form-translators",
+                &translators_example,
+                &draft.translators,
+                Message::Translators,
+            ));
+        if draft.target == Target::Work {
+            form = form.push(field("library-form-key", "", &draft.key, Message::Key));
+        }
+        let actions: Element<'a, Message> = if draft.sending {
+            text(localizer.text("library-uploading"))
+                .style(style::muted)
+                .into()
+        } else {
+            row![
+                button(text(localizer.text("library-form-add")))
+                    .padding([gap::XS + gap::XXS, gap::M])
+                    .style(style::primary)
+                    .on_press_maybe(draft.ready().then_some(Message::Upload)),
+                button(text(localizer.text("library-form-cancel")))
+                    .padding([gap::XS + gap::XXS, gap::M])
+                    .style(style::secondary)
+                    .on_press(Message::Cancel),
+            ]
+            .spacing(gap::S)
+            .into()
+        };
+        container(form.push(actions))
+            .padding(gap::M)
+            .style(style::outline)
+            .into()
     }
 }
 
-fn pick() -> Task<Message> {
+fn pick(target: Target) -> Task<Message> {
     Task::perform(
         async {
             let file = rfd::AsyncFileDialog::new()
@@ -439,65 +642,8 @@ fn pick() -> Task<Message> {
                 bytes: Arc::new(bytes),
             })
         },
-        Message::Picked,
+        move |file| Message::Picked(target, file),
     )
-}
-
-fn draft_form<'a>(draft: &'a Draft, localizer: &Localizer) -> Element<'a, Message> {
-    let field =
-        |label: &str, placeholder: &str, value: &'a str, on_input: fn(String) -> Message| {
-            column![
-                text(localizer.text(label))
-                    .size(font_size::SMALL)
-                    .style(style::muted),
-                text_input(placeholder, value)
-                    .on_input(on_input)
-                    .padding([gap::XS + gap::XXS, gap::S])
-                    .style(style::field),
-            ]
-            .spacing(gap::XXS)
-        };
-    let example = localizer.text("library-form-creators-example");
-    let actions: Element<'a, Message> = if draft.sending {
-        text(localizer.text("library-uploading"))
-            .style(style::muted)
-            .into()
-    } else {
-        row![
-            button(text(localizer.text("library-form-add")))
-                .padding([gap::XS + gap::XXS, gap::M])
-                .style(style::primary)
-                .on_press_maybe(draft.new_work().map(|_| Message::Upload)),
-            button(text(localizer.text("library-form-cancel")))
-                .padding([gap::XS + gap::XXS, gap::M])
-                .style(style::secondary)
-                .on_press(Message::Cancel),
-        ]
-        .spacing(gap::S)
-        .into()
-    };
-    container(
-        column![
-            text(draft.file.name.as_str()).font(font::UI_SEMIBOLD),
-            field("library-form-title", "", &draft.title, Message::Title),
-            row![
-                field(
-                    "library-form-creators",
-                    &example,
-                    &draft.creators,
-                    Message::Creators
-                ),
-                field("library-form-year", "", &draft.year, Message::Year).width(YEAR_WIDTH),
-            ]
-            .spacing(gap::S),
-            field("library-form-key", "", &draft.key, Message::Key),
-            actions,
-        ]
-        .spacing(gap::S),
-    )
-    .padding(gap::M)
-    .style(style::outline)
-    .into()
 }
 
 fn hit_list<'a>(hits: &'a [SearchHit], localizer: &Localizer) -> Element<'a, Message> {
@@ -510,6 +656,18 @@ fn hit_list<'a>(hits: &'a [SearchHit], localizer: &Localizer) -> Element<'a, Mes
         let mut args = FluentArgs::new();
         args.set("title", hit.title.clone());
         args.set("page", hit.page);
+        let action: Element<'a, Message> = if hit.standard {
+            button(text(localizer.text("library-cite")))
+                .padding([gap::XS, gap::M])
+                .style(style::secondary)
+                .on_press(Message::Cite(hit.clone()))
+                .into()
+        } else {
+            text(localizer.text("library-other-edition"))
+                .size(font_size::SMALL)
+                .style(style::muted)
+                .into()
+        };
         row![
             column![
                 text(localizer.format("library-hit", &args)).font(font::UI_SEMIBOLD),
@@ -519,10 +677,7 @@ fn hit_list<'a>(hits: &'a [SearchHit], localizer: &Localizer) -> Element<'a, Mes
             ]
             .spacing(gap::XXS)
             .width(Fill),
-            button(text(localizer.text("library-cite")))
-                .padding([gap::XS, gap::M])
-                .style(style::secondary)
-                .on_press(Message::Cite(hit.clone())),
+            action,
         ]
         .spacing(gap::M)
         .align_y(Vertical::Center)
@@ -532,17 +687,52 @@ fn hit_list<'a>(hits: &'a [SearchHit], localizer: &Localizer) -> Element<'a, Mes
     .into()
 }
 
-fn work_line<'a>(work: &'a Work, localizer: &Localizer) -> Element<'a, Message> {
+fn work_entry<'a>(work: &'a Work, free: bool, localizer: &Localizer) -> Element<'a, Message> {
+    let mut about = work.creators.clone();
+    about.push(format!("@{}", work.key));
+    let header = row![
+        text(work.title.as_str()).font(font::UI_SEMIBOLD),
+        space::horizontal(),
+        button(text(localizer.text("library-add-edition")).size(font_size::SMALL))
+            .padding([gap::XXS, gap::S])
+            .style(style::ghost)
+            .on_press_maybe(free.then_some(Message::Pick(Target::Edition(work.id)))),
+    ]
+    .align_y(Vertical::Center);
+    column![
+        header,
+        text(about.join(" · "))
+            .size(font_size::SMALL)
+            .style(style::muted),
+        column(
+            work.editions
+                .iter()
+                .map(|edition| edition_line(edition, localizer))
+        )
+        .spacing(gap::XXS),
+    ]
+    .spacing(gap::XXS)
+    .into()
+}
+
+fn edition_line<'a>(edition: &'a Edition, localizer: &Localizer) -> Element<'a, Message> {
     let mut parts = Vec::new();
-    if !work.creators.is_empty() {
-        parts.push(work.creators.join("; "));
-    }
-    if let Some(year) = work.year {
+    if let Some(year) = edition.year {
         parts.push(year.to_string());
     }
-    parts.push(format!("@{}", work.key));
+    if !edition.publisher.is_empty() {
+        parts.push(edition.publisher.clone());
+    }
+    if !edition.language.is_empty() {
+        parts.push(edition.language.clone());
+    }
+    if !edition.translators.is_empty() {
+        let mut args = FluentArgs::new();
+        args.set("names", edition.translators.join("; "));
+        parts.push(localizer.format("library-translators", &args));
+    }
     let mut state = None;
-    match &work.file {
+    match &edition.file {
         Some(file) => {
             let mut args = FluentArgs::new();
             args.set("pages", file.pages);
@@ -573,34 +763,68 @@ fn work_line<'a>(work: &'a Work, localizer: &Localizer) -> Element<'a, Message> 
         }
         None => parts.push(localizer.text("library-no-file")),
     }
-    let mut line = column![
-        text(work.title.as_str()).font(font::UI_SEMIBOLD),
-        text(parts.join(" · "))
-            .size(font_size::SMALL)
-            .style(style::muted),
-    ]
-    .spacing(gap::XXS);
+    let mut details = column![text(parts.join(" · ")).size(font_size::SMALL)].spacing(gap::XXS);
     if let Some(state) = state {
-        line = line.push(state);
+        details = details.push(state);
     }
-    line.into()
+    let mark: Element<'a, Message> = if edition.standard {
+        text(localizer.text("library-standard"))
+            .size(font_size::SMALL)
+            .style(style::tone(Tone::Accent))
+            .into()
+    } else {
+        button(text(localizer.text("library-make-standard")).size(font_size::SMALL))
+            .padding([gap::XXS, gap::S])
+            .style(style::secondary)
+            .on_press(Message::MakeStandard(edition.id))
+            .into()
+    };
+    row![details.width(Fill), mark]
+        .spacing(gap::M)
+        .align_y(Vertical::Center)
+        .padding([0.0, gap::M])
+        .into()
 }
 
 #[cfg(test)]
 mod tests {
     use iced_test::simulator;
-    use presswork_api::{FileState, LibraryFile};
+    use presswork_api::LibraryFile;
     use presswork_client::Api;
 
     use super::*;
 
     const PRESS: Uuid = Uuid::from_u128(1);
     const NOTES: Uuid = Uuid::from_u128(10);
+    const NOTES_1455: Uuid = Uuid::from_u128(20);
+    const NOTES_1922: Uuid = Uuid::from_u128(21);
 
     fn connection() -> Connection {
         Connection {
             api: Api::new("https://press.example.com").unwrap(),
             token: "pws_ann".to_owned(),
+        }
+    }
+
+    fn ready_file() -> LibraryFile {
+        LibraryFile {
+            size: 12_470,
+            pages: 2,
+            pages_with_text: 2,
+            state: FileState::Ready,
+            problem: None,
+        }
+    }
+
+    fn edition(id: Uuid, year: i32, standard: bool, file: Option<LibraryFile>) -> Edition {
+        Edition {
+            id,
+            year: Some(year),
+            publisher: String::new(),
+            language: String::new(),
+            translators: Vec::new(),
+            standard,
+            file,
         }
     }
 
@@ -611,25 +835,308 @@ mod tests {
             key: key.to_owned(),
             title: title.to_owned(),
             creators: vec!["Gutenberg, Johannes".to_owned()],
-            year: Some(1455),
-            file: Some(LibraryFile {
-                size: 12_470,
-                pages: 2,
-                pages_with_text: 2,
-                state: FileState::Ready,
-                problem: None,
-            }),
+            editions: vec![edition(NOTES_1455, 1455, true, Some(ready_file()))],
         }
     }
 
     fn in_state(state: FileState, problem: Option<&str>) -> Work {
         let mut work = work(NOTES, "field-notes", "Field Notes");
-        if let Some(file) = &mut work.file {
+        if let Some(file) = &mut work.editions[0].file {
             file.state = state;
             file.pages_with_text = 0;
             file.problem = problem.map(str::to_owned);
         }
         work
+    }
+
+    fn loaded() -> LibraryView {
+        let mut view = LibraryView::new(PRESS, "Field Press".to_owned());
+        let _ = view.update(
+            Message::Loaded(Ok(vec![work(NOTES, "field-notes", "Field Notes")])),
+            &connection(),
+        );
+        view
+    }
+
+    fn picked(target: Target, name: &str, size: usize) -> Message {
+        Message::Picked(
+            target,
+            Some(PickedFile {
+                name: name.to_owned(),
+                bytes: Arc::new(vec![0; size]),
+            }),
+        )
+    }
+
+    fn shows(view: &LibraryView, words: &str) -> bool {
+        let localizer = Localizer::english();
+        simulator(view.view(&localizer)).find(words).is_ok()
+    }
+
+    fn clicks(view: &LibraryView, label: &str) -> Vec<Message> {
+        let localizer = Localizer::english();
+        let mut ui = simulator(view.view(&localizer));
+        ui.click(label).unwrap();
+        ui.into_messages().collect()
+    }
+
+    fn hit(standard: bool) -> SearchHit {
+        SearchHit {
+            work_id: NOTES,
+            edition_id: if standard { NOTES_1455 } else { NOTES_1922 },
+            key: "field-notes".to_owned(),
+            title: "Field Notes".to_owned(),
+            page: 3,
+            snippet: "The fine grain of the paper".to_owned(),
+            standard,
+        }
+    }
+
+    #[test]
+    fn each_text_of_the_view_is_in_the_english_messages() {
+        let localizer = Localizer::english();
+
+        for id in TEXT_IDS {
+            assert_ne!(localizer.text(id), id, "{id} has no English text");
+        }
+    }
+
+    #[test]
+    fn the_view_shows_the_works_and_their_editions() {
+        let mut view = LibraryView::new(PRESS, "Field Press".to_owned());
+        assert!(shows(&view, "Presswork gets the works of the library."));
+        let _ = view.update(Message::Loaded(Ok(Vec::new())), &connection());
+        assert!(shows(
+            &view,
+            "The library has no works. Add the first PDF file."
+        ));
+        let mut notes = work(NOTES, "field-notes", "Field Notes");
+        notes.editions[0].publisher = "Field Press".to_owned();
+        let mut translation = edition(NOTES_1922, 1922, false, None);
+        translation.language = "de".to_owned();
+        translation.translators = vec!["Mann, Erika".to_owned()];
+        notes.editions.push(translation);
+
+        let _ = view.update(Message::Loaded(Ok(vec![notes])), &connection());
+
+        for words in [
+            "Library · Field Press",
+            "Field Notes",
+            "Gutenberg, Johannes · @field-notes",
+            "1455 · Field Press · 2 pages, 2 with text",
+            "Standard edition",
+            "1922 · de · Translated by Mann, Erika · No file",
+        ] {
+            assert!(shows(&view, words), "{words} is not in the view");
+        }
+        assert!(matches!(
+            clicks(&view, "Make standard").as_slice(),
+            [Message::MakeStandard(NOTES_1922)]
+        ));
+    }
+
+    #[test]
+    fn a_picked_file_gives_a_form_with_a_title_and_a_key() {
+        let mut view = loaded();
+        assert!(matches!(
+            clicks(&view, "Add PDF…").as_slice(),
+            [Message::Pick(Target::Work)]
+        ));
+
+        let _ = view.update(
+            picked(Target::Work, "field_notes-2019.pdf", 10),
+            &connection(),
+        );
+
+        assert!(shows(&view, "field_notes-2019.pdf"));
+        assert_eq!(
+            view.proposal(),
+            Some(NewWork {
+                key: "field-notes-2019".to_owned(),
+                title: "field notes 2019".to_owned(),
+                creators: Vec::new(),
+                edition: NewEdition::default(),
+            })
+        );
+    }
+
+    #[test]
+    fn the_key_follows_the_title_until_the_key_changes() {
+        let mut view = loaded();
+        let _ = view.update(picked(Target::Work, "scan.pdf", 10), &connection());
+
+        let _ = view.update(Message::Title("War and Peace".to_owned()), &connection());
+        assert_eq!(view.proposal().unwrap().key, "war-and-peace");
+
+        let _ = view.update(Message::Key("tolstoy".to_owned()), &connection());
+        let _ = view.update(
+            Message::Title("War and Peace, Volume 1".to_owned()),
+            &connection(),
+        );
+        assert_eq!(view.proposal().unwrap().key, "tolstoy");
+    }
+
+    #[test]
+    fn the_form_reads_the_creators_and_the_edition() {
+        let mut view = loaded();
+        let _ = view.update(picked(Target::Work, "scan.pdf", 10), &connection());
+
+        for message in [
+            Message::Creators(" Tolstoy, Leo; Maude, Louise ;".to_owned()),
+            Message::Year(" 1869 ".to_owned()),
+            Message::Publisher(" Russky Vestnik ".to_owned()),
+            Message::Language(" ru ".to_owned()),
+            Message::Translators("Maude, Louise;".to_owned()),
+        ] {
+            let _ = view.update(message, &connection());
+        }
+
+        let proposal = view.proposal().unwrap();
+        assert_eq!(proposal.creators, ["Tolstoy, Leo", "Maude, Louise"]);
+        assert_eq!(
+            proposal.edition,
+            NewEdition {
+                year: Some(1869),
+                publisher: "Russky Vestnik".to_owned(),
+                language: "ru".to_owned(),
+                translators: vec!["Maude, Louise".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn add_waits_for_a_valid_form() {
+        for message in [
+            Message::Year("soon".to_owned()),
+            Message::Key("War".to_owned()),
+            Message::Title("  ".to_owned()),
+        ] {
+            let mut view = loaded();
+            let _ = view.update(picked(Target::Work, "scan.pdf", 10), &connection());
+            let _ = view.update(message, &connection());
+            assert_eq!(view.proposal(), None);
+            assert!(clicks(&view, "Add").is_empty());
+        }
+        let mut view = loaded();
+        let _ = view.update(picked(Target::Work, "scan.pdf", 10), &connection());
+        assert!(matches!(clicks(&view, "Add").as_slice(), [Message::Upload]));
+    }
+
+    #[test]
+    fn a_file_larger_than_the_limit_is_refused_at_once() {
+        let mut view = loaded();
+
+        let _ = view.update(
+            picked(Target::Work, "big.pdf", MAX_FILE_BYTES + 1),
+            &connection(),
+        );
+
+        assert_eq!(view.proposal(), None);
+        assert!(shows(
+            &view,
+            "The file is larger than 64 MiB. Select a smaller file."
+        ));
+    }
+
+    #[test]
+    fn an_added_work_joins_the_list_and_closes_the_form() {
+        let mut view = loaded();
+        let _ = view.update(picked(Target::Work, "atlas.pdf", 10), &connection());
+
+        let _ = view.update(Message::Upload, &connection());
+        assert!(shows(
+            &view,
+            "Presswork uploads the file and reads its pages."
+        ));
+        let atlas = work(Uuid::from_u128(11), "atlas", "Atlas");
+        let _ = view.update(Message::Created(Ok(atlas.clone())), &connection());
+        let _ = view.update(Message::Uploaded(Ok(atlas)), &connection());
+
+        assert_eq!(view.proposal(), None);
+        assert!(shows(&view, "Atlas"));
+        assert_eq!(view.works().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_failed_upload_keeps_the_form_and_shows_the_problem() {
+        let mut view = loaded();
+        let _ = view.update(picked(Target::Work, "atlas.pdf", 10), &connection());
+        let _ = view.update(Message::Upload, &connection());
+        let atlas = work(Uuid::from_u128(11), "atlas", "Atlas");
+        let _ = view.update(Message::Created(Ok(atlas)), &connection());
+
+        let _ = view.update(
+            Message::Uploaded(Err(Problem::Refused(
+                "The file is not a PDF file that Presswork can read.".to_owned(),
+            ))),
+            &connection(),
+        );
+
+        assert!(shows(
+            &view,
+            "The file is not a PDF file that Presswork can read."
+        ));
+        assert!(view.proposal().is_some());
+        assert!(matches!(clicks(&view, "Add").as_slice(), [Message::Upload]));
+    }
+
+    #[test]
+    fn a_new_edition_gets_its_own_form_and_joins_its_work() {
+        let mut view = loaded();
+        assert!(matches!(
+            clicks(&view, "Add edition…").as_slice(),
+            [Message::Pick(Target::Edition(NOTES))]
+        ));
+
+        let _ = view.update(
+            picked(Target::Edition(NOTES), "notes-1922.pdf", 10),
+            &connection(),
+        );
+        assert!(shows(&view, "New edition of Field Notes: notes-1922.pdf"));
+        let _ = view.update(Message::Year("1922".to_owned()), &connection());
+        assert_eq!(
+            view.edition_proposal(),
+            Some(NewEdition {
+                year: Some(1922),
+                ..NewEdition::default()
+            })
+        );
+        let _ = view.update(Message::Upload, &connection());
+        let _ = view.update(
+            Message::EditionAdded(Ok(edition(NOTES_1922, 1922, false, None))),
+            &connection(),
+        );
+
+        assert_eq!(view.works().unwrap()[0].editions.len(), 2);
+        assert!(shows(
+            &view,
+            "Presswork uploads the file and reads its pages."
+        ));
+    }
+
+    #[test]
+    fn a_search_cites_only_pages_of_the_standard_edition() {
+        let mut view = loaded();
+        let _ = view.update(Message::Query("fine grain".to_owned()), &connection());
+        assert!(matches!(
+            clicks(&view, "Find").as_slice(),
+            [Message::Search]
+        ));
+
+        let _ = view.update(Message::Found(Ok(vec![hit(true)])), &connection());
+
+        assert!(shows(&view, "Field Notes · p. 3"));
+        assert!(shows(&view, "The fine grain of the paper"));
+        let messages = clicks(&view, "Cite");
+        assert!(
+            matches!(messages.as_slice(), [Message::Cite(cited)] if *cited == hit(true)),
+            "{messages:?}"
+        );
+        let _ = view.update(Message::Found(Ok(vec![hit(false)])), &connection());
+        assert!(shows(&view, "Not the standard edition"));
+        assert!(!shows(&view, "Cite"));
+        let _ = view.update(Message::Found(Ok(Vec::new())), &connection());
+        assert!(shows(&view, "No page has all these words."));
     }
 
     #[test]
@@ -641,10 +1148,7 @@ mod tests {
             &connection(),
         );
 
-        assert!(shows(
-            &view,
-            "Gutenberg, Johannes · 1455 · @field-notes · 2 pages"
-        ));
+        assert!(shows(&view, "1455 · 2 pages"));
         assert!(shows(&view, "The server reads the text of the pages."));
     }
 
@@ -679,10 +1183,7 @@ mod tests {
         );
 
         assert!(view.changed(work(NOTES, "field-notes", "Field Notes")));
-        assert!(shows(
-            &view,
-            "Gutenberg, Johannes · 1455 · @field-notes · 2 pages, 2 with text"
-        ));
+        assert!(shows(&view, "1455 · 2 pages, 2 with text"));
         assert!(!shows(&view, "The server reads the text of the pages."));
         let elsewhere = Work {
             organization_id: Uuid::from_u128(99),
@@ -690,223 +1191,5 @@ mod tests {
         };
         assert!(!view.changed(elsewhere));
         assert_eq!(view.works().unwrap().len(), 1);
-    }
-
-    fn loaded() -> LibraryView {
-        let mut view = LibraryView::new(PRESS, "Field Press".to_owned());
-        let _ = view.update(
-            Message::Loaded(Ok(vec![work(NOTES, "field-notes", "Field Notes")])),
-            &connection(),
-        );
-        view
-    }
-
-    fn picked(name: &str, size: usize) -> Message {
-        Message::Picked(Some(PickedFile {
-            name: name.to_owned(),
-            bytes: Arc::new(vec![0; size]),
-        }))
-    }
-
-    fn shows(view: &LibraryView, words: &str) -> bool {
-        let localizer = Localizer::english();
-        simulator(view.view(&localizer)).find(words).is_ok()
-    }
-
-    fn clicks(view: &LibraryView, label: &str) -> Vec<Message> {
-        let localizer = Localizer::english();
-        let mut ui = simulator(view.view(&localizer));
-        ui.click(label).unwrap();
-        ui.into_messages().collect()
-    }
-
-    fn hit() -> SearchHit {
-        SearchHit {
-            work_id: NOTES,
-            key: "field-notes".to_owned(),
-            title: "Field Notes".to_owned(),
-            page: 3,
-            snippet: "The fine grain of the paper".to_owned(),
-        }
-    }
-
-    #[test]
-    fn each_text_of_the_view_is_in_the_english_messages() {
-        let localizer = Localizer::english();
-
-        for id in TEXT_IDS {
-            assert_ne!(localizer.text(id), id, "{id} has no English text");
-        }
-    }
-
-    #[test]
-    fn the_view_shows_the_works_of_the_library() {
-        let mut view = LibraryView::new(PRESS, "Field Press".to_owned());
-        assert!(shows(&view, "Presswork gets the works of the library."));
-        let _ = view.update(Message::Loaded(Ok(Vec::new())), &connection());
-        assert!(shows(
-            &view,
-            "The library has no works. Add the first PDF file."
-        ));
-
-        let view = loaded();
-
-        for words in [
-            "Library · Field Press",
-            "Field Notes",
-            "Gutenberg, Johannes · 1455 · @field-notes · 2 pages, 2 with text",
-        ] {
-            assert!(shows(&view, words), "{words} is not in the view");
-        }
-    }
-
-    #[test]
-    fn a_picked_file_gives_a_form_with_a_title_and_a_key() {
-        let mut view = loaded();
-        assert!(matches!(
-            clicks(&view, "Add PDF…").as_slice(),
-            [Message::Pick]
-        ));
-
-        let _ = view.update(picked("field_notes-2019.pdf", 10), &connection());
-
-        assert!(shows(&view, "field_notes-2019.pdf"));
-        assert_eq!(
-            view.proposal(),
-            Some(NewWork {
-                key: "field-notes-2019".to_owned(),
-                title: "field notes 2019".to_owned(),
-                creators: Vec::new(),
-                year: None,
-            })
-        );
-    }
-
-    #[test]
-    fn the_key_follows_the_title_until_the_key_changes() {
-        let mut view = loaded();
-        let _ = view.update(picked("scan.pdf", 10), &connection());
-
-        let _ = view.update(Message::Title("War and Peace".to_owned()), &connection());
-        assert_eq!(view.proposal().unwrap().key, "war-and-peace");
-
-        let _ = view.update(Message::Key("tolstoy".to_owned()), &connection());
-        let _ = view.update(
-            Message::Title("War and Peace, Volume 1".to_owned()),
-            &connection(),
-        );
-        assert_eq!(view.proposal().unwrap().key, "tolstoy");
-    }
-
-    #[test]
-    fn the_form_reads_the_creators_and_the_year() {
-        let mut view = loaded();
-        let _ = view.update(picked("scan.pdf", 10), &connection());
-
-        let _ = view.update(
-            Message::Creators(" Tolstoy, Leo; Maude, Louise ;".to_owned()),
-            &connection(),
-        );
-        let _ = view.update(Message::Year(" 1869 ".to_owned()), &connection());
-
-        let proposal = view.proposal().unwrap();
-        assert_eq!(proposal.creators, ["Tolstoy, Leo", "Maude, Louise"]);
-        assert_eq!(proposal.year, Some(1869));
-    }
-
-    #[test]
-    fn add_waits_for_a_valid_form() {
-        let mut view = loaded();
-        let _ = view.update(picked("scan.pdf", 10), &connection());
-
-        for message in [
-            Message::Year("soon".to_owned()),
-            Message::Key("War".to_owned()),
-            Message::Title("  ".to_owned()),
-        ] {
-            let mut copy = loaded();
-            let _ = copy.update(picked("scan.pdf", 10), &connection());
-            let _ = copy.update(message, &connection());
-            assert_eq!(copy.proposal(), None);
-            assert!(clicks(&copy, "Add").is_empty());
-        }
-        assert!(matches!(clicks(&view, "Add").as_slice(), [Message::Upload]));
-    }
-
-    #[test]
-    fn a_file_larger_than_the_limit_is_refused_at_once() {
-        let mut view = loaded();
-
-        let _ = view.update(picked("big.pdf", MAX_FILE_BYTES + 1), &connection());
-
-        assert_eq!(view.proposal(), None);
-        assert!(shows(
-            &view,
-            "The file is larger than 64 MiB. Select a smaller file."
-        ));
-    }
-
-    #[test]
-    fn an_added_work_joins_the_list_and_closes_the_form() {
-        let mut view = loaded();
-        let _ = view.update(picked("atlas.pdf", 10), &connection());
-
-        let _ = view.update(Message::Upload, &connection());
-        assert!(shows(
-            &view,
-            "Presswork uploads the file and reads its pages."
-        ));
-        let atlas = work(Uuid::from_u128(11), "atlas", "Atlas");
-        let _ = view.update(Message::Created(Ok(atlas.clone())), &connection());
-        let _ = view.update(Message::Uploaded(Ok(atlas)), &connection());
-
-        assert_eq!(view.proposal(), None);
-        assert!(shows(&view, "Atlas"));
-        assert_eq!(view.works().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn a_failed_upload_keeps_the_form_and_shows_the_problem() {
-        let mut view = loaded();
-        let _ = view.update(picked("atlas.pdf", 10), &connection());
-        let _ = view.update(Message::Upload, &connection());
-        let atlas = work(Uuid::from_u128(11), "atlas", "Atlas");
-        let _ = view.update(Message::Created(Ok(atlas)), &connection());
-
-        let _ = view.update(
-            Message::Uploaded(Err(Problem::Refused(
-                "The file is not a PDF file that Presswork can read.".to_owned(),
-            ))),
-            &connection(),
-        );
-
-        assert!(shows(
-            &view,
-            "The file is not a PDF file that Presswork can read."
-        ));
-        assert!(view.proposal().is_some());
-        assert!(matches!(clicks(&view, "Add").as_slice(), [Message::Upload]));
-    }
-
-    #[test]
-    fn a_search_shows_the_pages_and_cite_gives_the_page() {
-        let mut view = loaded();
-        let _ = view.update(Message::Query("fine grain".to_owned()), &connection());
-        assert!(matches!(
-            clicks(&view, "Find").as_slice(),
-            [Message::Search]
-        ));
-
-        let _ = view.update(Message::Found(Ok(vec![hit()])), &connection());
-
-        assert!(shows(&view, "Field Notes · p. 3"));
-        assert!(shows(&view, "The fine grain of the paper"));
-        let messages = clicks(&view, "Cite");
-        assert!(
-            matches!(messages.as_slice(), [Message::Cite(cited)] if *cited == hit()),
-            "{messages:?}"
-        );
-        let _ = view.update(Message::Found(Ok(Vec::new())), &connection());
-        assert!(shows(&view, "No page has all these words."));
     }
 }

@@ -9,31 +9,36 @@ use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
 use object_store::path::Path as BlobPath;
 use object_store::{ObjectStore, ObjectStoreExt, PutPayload};
-use presswork_api::{FileState, LibraryFile, NewWork, SearchHit, Work};
+use presswork_api::{Edition, FileState, LibraryFile, NewEdition, NewWork, SearchHit, Work};
 use presswork_library::{KeyError, parse_key};
 use presswork_ocr::{ReadError, page_count, text_layer};
 use presswork_search::{PageIndex, SearchError};
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
 use crate::jobs;
 
 pub const MAX_FILE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_TITLE_CHARACTERS: usize = 500;
-const MAX_CREATOR_CHARACTERS: usize = 200;
-const MAX_CREATORS: usize = 20;
+const MAX_NAME_CHARACTERS: usize = 200;
+const MAX_NAMES: usize = 20;
+const MAX_PUBLISHER_CHARACTERS: usize = 200;
+const MAX_LANGUAGE_CHARACTERS: usize = 35;
 const YEARS: RangeInclusive<i32> = -9999..=9999;
 const SEARCH_LIMIT: usize = 20;
 const UNIQUE_VIOLATION: &str = "23505";
 
-type WorkRow = (
+type WorkRow = (Uuid, Uuid, String, String, Vec<String>);
+
+type EditionRow = (
     Uuid,
     Uuid,
+    Option<i32>,
     String,
     String,
     Vec<String>,
-    Option<i32>,
+    bool,
     Option<i64>,
     Option<i32>,
     Option<i32>,
@@ -49,6 +54,14 @@ pub enum LibraryError {
     InvalidTitle,
     #[error("a work can have 20 creators or fewer, and each name must have 1 to 200 characters")]
     InvalidCreators,
+    #[error(
+        "an edition can have 20 translators or fewer, and each name must have 1 to 200 characters"
+    )]
+    InvalidTranslators,
+    #[error("the name of a publisher must have 200 characters or fewer")]
+    InvalidPublisher,
+    #[error("a language must have 35 characters or fewer")]
+    InvalidLanguage,
     #[error("the year must be from -9999 to 9999")]
     InvalidYear,
     #[error("the organization already has a work with this citation key")]
@@ -57,7 +70,7 @@ pub enum LibraryError {
     NotPdf,
     #[error("the PDF file is encrypted. Upload a PDF file without a password")]
     Encrypted,
-    #[error("the work does not exist")]
+    #[error("the work or the edition does not exist")]
     NotFound,
     #[error("the blob store failed: {0}")]
     Blobs(#[from] object_store::Error),
@@ -76,7 +89,44 @@ pub(crate) struct ValidWork {
     key: String,
     title: String,
     creators: Vec<String>,
+    edition: ValidEdition,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ValidEdition {
     year: Option<i32>,
+    publisher: String,
+    language: String,
+    translators: Vec<String>,
+}
+
+fn names(names: &[String]) -> Option<Vec<String>> {
+    let names: Vec<String> = names.iter().map(|name| name.trim().to_owned()).collect();
+    let valid = names.len() <= MAX_NAMES
+        && names
+            .iter()
+            .all(|name| (1..=MAX_NAME_CHARACTERS).contains(&name.chars().count()));
+    valid.then_some(names)
+}
+
+pub(crate) fn parse_edition(edition: &NewEdition) -> Result<ValidEdition, LibraryError> {
+    if edition.year.is_some_and(|year| !YEARS.contains(&year)) {
+        return Err(LibraryError::InvalidYear);
+    }
+    let publisher = edition.publisher.trim();
+    if publisher.chars().count() > MAX_PUBLISHER_CHARACTERS {
+        return Err(LibraryError::InvalidPublisher);
+    }
+    let language = edition.language.trim();
+    if language.chars().count() > MAX_LANGUAGE_CHARACTERS {
+        return Err(LibraryError::InvalidLanguage);
+    }
+    Ok(ValidEdition {
+        year: edition.year,
+        publisher: publisher.to_owned(),
+        language: language.to_owned(),
+        translators: names(&edition.translators).ok_or(LibraryError::InvalidTranslators)?,
+    })
 }
 
 pub(crate) fn parse_work(work: &NewWork) -> Result<ValidWork, LibraryError> {
@@ -85,26 +135,11 @@ pub(crate) fn parse_work(work: &NewWork) -> Result<ValidWork, LibraryError> {
     if !(1..=MAX_TITLE_CHARACTERS).contains(&title.chars().count()) {
         return Err(LibraryError::InvalidTitle);
     }
-    let creators: Vec<String> = work
-        .creators
-        .iter()
-        .map(|creator| creator.trim().to_owned())
-        .collect();
-    let valid_creators = creators.len() <= MAX_CREATORS
-        && creators
-            .iter()
-            .all(|creator| (1..=MAX_CREATOR_CHARACTERS).contains(&creator.chars().count()));
-    if !valid_creators {
-        return Err(LibraryError::InvalidCreators);
-    }
-    if work.year.is_some_and(|year| !YEARS.contains(&year)) {
-        return Err(LibraryError::InvalidYear);
-    }
     Ok(ValidWork {
         key,
         title: title.to_owned(),
-        creators,
-        year: work.year,
+        creators: names(&work.creators).ok_or(LibraryError::InvalidCreators)?,
+        edition: parse_edition(&work.edition)?,
     })
 }
 
@@ -135,12 +170,7 @@ pub async fn create_work(
         }
         _ => LibraryError::Database(error),
     })?;
-    sqlx::query("INSERT INTO editions (id, work_id, year) VALUES ($1, $2, $3)")
-        .bind(Uuid::now_v7())
-        .bind(id)
-        .bind(valid.year)
-        .execute(&mut *transaction)
-        .await?;
+    let edition = insert_edition(&mut transaction, id, valid.edition, true).await?;
     transaction.commit().await?;
     Ok(Work {
         id,
@@ -148,44 +178,140 @@ pub async fn create_work(
         key: valid.key,
         title: valid.title,
         creators: valid.creators,
-        year: valid.year,
+        editions: vec![edition],
+    })
+}
+
+async fn insert_edition(
+    connection: &mut PgConnection,
+    work_id: Uuid,
+    edition: ValidEdition,
+    standard: bool,
+) -> Result<Edition, sqlx::Error> {
+    let id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO editions (id, work_id, year, publisher, language, translators, standard) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(id)
+    .bind(work_id)
+    .bind(edition.year)
+    .bind(&edition.publisher)
+    .bind(&edition.language)
+    .bind(&edition.translators)
+    .bind(standard)
+    .execute(connection)
+    .await?;
+    Ok(Edition {
+        id,
+        year: edition.year,
+        publisher: edition.publisher,
+        language: edition.language,
+        translators: edition.translators,
+        standard,
         file: None,
     })
 }
 
+pub async fn add_edition(
+    pool: &PgPool,
+    work_id: Uuid,
+    new: &NewEdition,
+) -> Result<Edition, LibraryError> {
+    let valid = parse_edition(new)?;
+    let mut connection = pool.acquire().await?;
+    Ok(insert_edition(&mut connection, work_id, valid, false).await?)
+}
+
+pub async fn set_standard(pool: &PgPool, edition_id: Uuid) -> Result<Work, LibraryError> {
+    let mut transaction = pool.begin().await?;
+    let work_id: Uuid = sqlx::query_scalar("SELECT work_id FROM editions WHERE id = $1")
+        .bind(edition_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(LibraryError::NotFound)?;
+    sqlx::query("UPDATE editions SET standard = false WHERE work_id = $1 AND standard")
+        .bind(work_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("UPDATE editions SET standard = true WHERE id = $1")
+        .bind(edition_id)
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
+    work(pool, work_id).await?.ok_or(LibraryError::NotFound)
+}
+
 pub async fn works(pool: &PgPool, organization_id: Uuid) -> Result<Vec<Work>, LibraryError> {
     let rows: Vec<WorkRow> = sqlx::query_as(
-        "SELECT works.id, works.organization_id, works.key, works.title, works.creators, \
-         editions.year, library_files.size, library_files.pages, library_files.pages_with_text, \
-         library_files.state, library_files.problem \
-         FROM works JOIN editions ON editions.work_id = works.id \
-         LEFT JOIN library_files ON library_files.edition_id = editions.id \
-         WHERE works.organization_id = $1 ORDER BY lower(works.title), works.key",
+        "SELECT id, organization_id, key, title, creators FROM works \
+         WHERE organization_id = $1 ORDER BY lower(title), key",
     )
     .bind(organization_id)
     .fetch_all(pool)
     .await?;
-    Ok(rows.into_iter().map(work_from).collect())
+    with_editions(pool, rows).await
 }
 
 pub async fn work(pool: &PgPool, work_id: Uuid) -> Result<Option<Work>, LibraryError> {
-    let row: Option<WorkRow> = sqlx::query_as(
-        "SELECT works.id, works.organization_id, works.key, works.title, works.creators, \
-         editions.year, library_files.size, library_files.pages, library_files.pages_with_text, \
-         library_files.state, library_files.problem \
-         FROM works JOIN editions ON editions.work_id = works.id \
-         LEFT JOIN library_files ON library_files.edition_id = editions.id \
-         WHERE works.id = $1",
-    )
-    .bind(work_id)
-    .fetch_optional(pool)
-    .await?;
-    Ok(row.map(work_from))
+    let row: Option<WorkRow> =
+        sqlx::query_as("SELECT id, organization_id, key, title, creators FROM works WHERE id = $1")
+            .bind(work_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(with_editions(pool, row.into_iter().collect()).await?.pop())
 }
 
-async fn file_owner(pool: &PgPool, file_id: Uuid) -> Result<Option<(Uuid, Uuid)>, LibraryError> {
+async fn with_editions(pool: &PgPool, rows: Vec<WorkRow>) -> Result<Vec<Work>, LibraryError> {
+    let ids: Vec<Uuid> = rows.iter().map(|row| row.0).collect();
+    let editions: Vec<EditionRow> = sqlx::query_as(
+        "SELECT editions.id, editions.work_id, editions.year, editions.publisher, \
+         editions.language, editions.translators, editions.standard, library_files.size, \
+         library_files.pages, library_files.pages_with_text, library_files.state, \
+         library_files.problem \
+         FROM editions LEFT JOIN library_files ON library_files.edition_id = editions.id \
+         WHERE editions.work_id = ANY($1) ORDER BY editions.created_at, editions.id",
+    )
+    .bind(&ids)
+    .fetch_all(pool)
+    .await?;
+    let mut by_work: HashMap<Uuid, Vec<Edition>> = HashMap::new();
+    for row in editions {
+        let (work_id, edition) = edition_from(row);
+        by_work.entry(work_id).or_default().push(edition);
+    }
+    Ok(rows
+        .into_iter()
+        .map(|(id, organization_id, key, title, creators)| Work {
+            id,
+            organization_id,
+            key,
+            title,
+            creators,
+            editions: by_work.remove(&id).unwrap_or_default(),
+        })
+        .collect())
+}
+
+pub async fn edition_owner(
+    pool: &PgPool,
+    edition_id: Uuid,
+) -> Result<Option<(Uuid, Uuid)>, LibraryError> {
     Ok(sqlx::query_as(
-        "SELECT works.organization_id, works.id FROM library_files \
+        "SELECT works.organization_id, works.id FROM editions \
+         JOIN works ON works.id = editions.work_id WHERE editions.id = $1",
+    )
+    .bind(edition_id)
+    .fetch_optional(pool)
+    .await?)
+}
+
+async fn file_owner(
+    pool: &PgPool,
+    file_id: Uuid,
+) -> Result<Option<(Uuid, Uuid, Uuid)>, LibraryError> {
+    Ok(sqlx::query_as(
+        "SELECT works.organization_id, works.id, editions.id FROM library_files \
          JOIN editions ON editions.id = library_files.edition_id \
          JOIN works ON works.id = editions.work_id WHERE library_files.id = $1",
     )
@@ -205,7 +331,7 @@ pub(crate) async fn mark_failed(
         .execute(pool)
         .await?;
     match file_owner(pool, file_id).await? {
-        Some((_, work_id)) => work(pool, work_id).await,
+        Some((_, work_id, _)) => work(pool, work_id).await,
         None => Ok(None),
     }
 }
@@ -249,14 +375,15 @@ pub async fn work_organization(pool: &PgPool, work_id: Uuid) -> Result<Option<Uu
     )
 }
 
-fn work_from(row: WorkRow) -> Work {
+fn edition_from(row: EditionRow) -> (Uuid, Edition) {
     let (
         id,
-        organization_id,
-        key,
-        title,
-        creators,
+        work_id,
         year,
+        publisher,
+        language,
+        translators,
+        standard,
         size,
         pages,
         pages_with_text,
@@ -273,15 +400,16 @@ fn work_from(row: WorkRow) -> Work {
         }),
         _ => None,
     };
-    Work {
+    let edition = Edition {
         id,
-        organization_id,
-        key,
-        title,
-        creators,
         year,
+        publisher,
+        language,
+        translators,
+        standard,
         file,
-    }
+    };
+    (work_id, edition)
 }
 
 struct NewFile<'a> {
@@ -293,18 +421,11 @@ struct NewFile<'a> {
 
 async fn attach_file(
     pool: &PgPool,
-    work_id: Uuid,
+    edition: Uuid,
     created_by: Uuid,
     file: &NewFile<'_>,
 ) -> Result<Option<Uuid>, LibraryError> {
     let mut transaction = pool.begin().await?;
-    let edition: Uuid = sqlx::query_scalar(
-        "SELECT id FROM editions WHERE work_id = $1 ORDER BY created_at, id LIMIT 1",
-    )
-    .bind(work_id)
-    .fetch_optional(&mut *transaction)
-    .await?
-    .ok_or(LibraryError::NotFound)?;
     let replaced: Option<Uuid> =
         sqlx::query_scalar("DELETE FROM library_files WHERE edition_id = $1 RETURNING id")
             .bind(edition)
@@ -382,8 +503,7 @@ impl Library {
     pub async fn add_file(
         &self,
         pool: &PgPool,
-        organization: Uuid,
-        work_id: Uuid,
+        (organization, work_id, edition): (Uuid, Uuid, Uuid),
         created_by: Uuid,
         file: Bytes,
     ) -> Result<Work, LibraryError> {
@@ -401,7 +521,7 @@ impl Library {
         };
         let location = blob_path(new.id);
         self.blobs.put(&location, PutPayload::from(file)).await?;
-        let replaced = match attach_file(pool, work_id, created_by, &new).await {
+        let replaced = match attach_file(pool, edition, created_by, &new).await {
             Ok(replaced) => replaced,
             Err(error) => {
                 if let Err(error) = self.blobs.delete(&location).await {
@@ -415,7 +535,8 @@ impl Library {
         {
             tracing::warn!(%error, "An old library file was not deleted");
         }
-        if let Err(error) = self.index_pages(organization, work_id, Vec::new()).await {
+        let owner = (organization, work_id, edition);
+        if let Err(error) = self.index_pages(owner, Vec::new()).await {
             tracing::error!(%error, "The old pages of a library file stay in the search index");
         }
         work(pool, work_id).await?.ok_or(LibraryError::NotFound)
@@ -426,7 +547,7 @@ impl Library {
         pool: &PgPool,
         file_id: Uuid,
     ) -> Result<Option<Work>, LibraryError> {
-        let Some((organization, work_id)) = file_owner(pool, file_id).await? else {
+        let Some(owner) = file_owner(pool, file_id).await? else {
             return Ok(None);
         };
         let bytes = self.blobs.get(&blob_path(file_id)).await?.bytes().await?;
@@ -436,18 +557,18 @@ impl Library {
             .map_err(read_error)?;
         let pages = readable(pages);
         store_pages(pool, file_id, &pages).await?;
-        self.index_pages(organization, work_id, pages).await?;
-        work(pool, work_id).await
+        self.index_pages(owner, pages).await?;
+        work(pool, owner.1).await
     }
 
     async fn index_pages(
         &self,
-        organization: Uuid,
-        work_id: Uuid,
+        (organization, work_id, edition): (Uuid, Uuid, Uuid),
         pages: Vec<String>,
     ) -> Result<(), LibraryError> {
         let index = Arc::clone(&self.index);
-        tokio::task::spawn_blocking(move || index.put(organization, work_id, &pages)).await??;
+        tokio::task::spawn_blocking(move || index.put(organization, work_id, edition, &pages))
+            .await??;
         Ok(())
     }
 
@@ -462,15 +583,24 @@ impl Library {
         let hits =
             tokio::task::spawn_blocking(move || index.search(organization, &words, SEARCH_LIMIT))
                 .await??;
-        let ids: Vec<Uuid> = hits.iter().map(|hit| hit.work).collect();
+        let work_ids: Vec<Uuid> = hits.iter().map(|hit| hit.work).collect();
         let names: HashMap<Uuid, (String, String)> = sqlx::query_as::<_, (Uuid, String, String)>(
             "SELECT id, key, title FROM works WHERE id = ANY($1)",
         )
-        .bind(&ids)
+        .bind(&work_ids)
         .fetch_all(pool)
         .await?
         .into_iter()
         .map(|(id, key, title)| (id, (key, title)))
+        .collect();
+        let edition_ids: Vec<Uuid> = hits.iter().map(|hit| hit.edition).collect();
+        let standards: HashMap<Uuid, bool> = sqlx::query_as::<_, (Uuid, bool)>(
+            "SELECT id, standard FROM editions WHERE id = ANY($1)",
+        )
+        .bind(&edition_ids)
+        .fetch_all(pool)
+        .await?
+        .into_iter()
         .collect();
         Ok(hits
             .into_iter()
@@ -478,10 +608,12 @@ impl Library {
                 let (key, title) = names.get(&hit.work)?;
                 Some(SearchHit {
                     work_id: hit.work,
+                    edition_id: hit.edition,
                     key: key.clone(),
                     title: title.clone(),
                     page: hit.page,
                     snippet: hit.snippet,
+                    standard: *standards.get(&hit.edition)?,
                 })
             })
             .collect())
@@ -491,28 +623,31 @@ impl Library {
         if !self.index.is_empty() {
             return Ok(0);
         }
-        let rows: Vec<(Uuid, Uuid, String)> = sqlx::query_as(
-            "SELECT works.organization_id, works.id, library_pages.text FROM library_pages \
+        let rows: Vec<(Uuid, Uuid, Uuid, String)> = sqlx::query_as(
+            "SELECT works.organization_id, works.id, editions.id, library_pages.text \
+             FROM library_pages \
              JOIN library_files ON library_files.id = library_pages.file_id \
              JOIN editions ON editions.id = library_files.edition_id \
              JOIN works ON works.id = editions.work_id \
-             ORDER BY works.id, library_pages.number",
+             ORDER BY editions.id, library_pages.number",
         )
         .fetch_all(pool)
         .await?;
-        let mut works: Vec<(Uuid, Uuid, Vec<String>)> = Vec::new();
-        for (organization, work, text) in rows {
-            match works.last_mut() {
-                Some((_, last, pages)) if *last == work => pages.push(text),
-                _ => works.push((organization, work, vec![text])),
+        let mut editions: Vec<((Uuid, Uuid, Uuid), Vec<String>)> = Vec::new();
+        for (organization, work, edition, text) in rows {
+            match editions.last_mut() {
+                Some(((_, _, last), pages)) if *last == edition => pages.push(text),
+                _ => editions.push(((organization, work, edition), vec![text])),
             }
         }
-        let count = works.len();
+        let count = editions.len();
         let index = Arc::clone(&self.index);
         tokio::task::spawn_blocking(move || {
-            works
+            editions
                 .iter()
-                .try_for_each(|(organization, work, pages)| index.put(*organization, *work, pages))
+                .try_for_each(|((organization, work, edition), pages)| {
+                    index.put(*organization, *work, *edition, pages)
+                })
         })
         .await??;
         Ok(count)
@@ -536,7 +671,10 @@ mod tests {
             key: key.to_owned(),
             title: title.to_owned(),
             creators: vec!["Gutenberg, Johannes".to_owned()],
-            year: Some(1455),
+            edition: NewEdition {
+                year: Some(1455),
+                ..NewEdition::default()
+            },
         }
     }
 
@@ -560,7 +698,12 @@ mod tests {
             key: " field-notes ".to_owned(),
             title: "  Field Notes ".to_owned(),
             creators: vec![" Gutenberg, Johannes ".to_owned()],
-            year: Some(-500),
+            edition: NewEdition {
+                year: Some(-500),
+                publisher: " Field Press ".to_owned(),
+                language: " en ".to_owned(),
+                translators: vec![" Maude, Louise ".to_owned()],
+            },
         };
 
         assert_eq!(
@@ -569,7 +712,12 @@ mod tests {
                 key: "field-notes".to_owned(),
                 title: "Field Notes".to_owned(),
                 creators: vec!["Gutenberg, Johannes".to_owned()],
-                year: Some(-500),
+                edition: ValidEdition {
+                    year: Some(-500),
+                    publisher: "Field Press".to_owned(),
+                    language: "en".to_owned(),
+                    translators: vec!["Maude, Louise".to_owned()],
+                },
             }
         );
     }
@@ -596,7 +744,10 @@ mod tests {
             ),
             (
                 NewWork {
-                    year: Some(10_000),
+                    edition: NewEdition {
+                        year: Some(10_000),
+                        ..NewEdition::default()
+                    },
                     ..new_work("field-notes", "Field Notes")
                 },
                 "year",
@@ -616,6 +767,33 @@ mod tests {
     }
 
     #[test]
+    fn a_new_edition_needs_valid_values() {
+        let edition = |change: fn(&mut NewEdition)| {
+            let mut edition = NewEdition::default();
+            change(&mut edition);
+            parse_edition(&edition)
+        };
+
+        assert!(matches!(
+            edition(|edition| edition.year = Some(-10_000)),
+            Err(LibraryError::InvalidYear)
+        ));
+        assert!(matches!(
+            edition(|edition| edition.publisher = "x".repeat(201)),
+            Err(LibraryError::InvalidPublisher)
+        ));
+        assert!(matches!(
+            edition(|edition| edition.language = "x".repeat(36)),
+            Err(LibraryError::InvalidLanguage)
+        ));
+        assert!(matches!(
+            edition(|edition| edition.translators = vec![" ".to_owned()]),
+            Err(LibraryError::InvalidTranslators)
+        ));
+        assert!(edition(|_| {}).is_ok());
+    }
+
+    #[test]
     fn page_texts_lose_null_characters() {
         assert_eq!(
             readable(vec!["Good\0 paper".to_owned()]),
@@ -627,7 +805,14 @@ mod tests {
         while jobs::run_one(state).await.unwrap() {}
     }
 
-    async fn press_with_work(pool: &PgPool) -> (AppState, Uuid, Uuid, Uuid) {
+    struct Press {
+        state: AppState,
+        ann: Uuid,
+        work: Work,
+        owner: (Uuid, Uuid, Uuid),
+    }
+
+    async fn press_with_work(pool: &PgPool) -> Press {
         let press = create_organization(pool, "Field Press").await.unwrap();
         let ann = member(pool, press.id, "ann@example.com").await;
         let work = create_work(
@@ -638,12 +823,19 @@ mod tests {
         )
         .await
         .unwrap();
-        let state = AppState::new(pool.clone(), Library::in_memory().unwrap());
-        (state, press.id, ann.id, work.id)
+        let owner = (press.id, work.id, work.editions[0].id);
+        Press {
+            state: AppState::new(pool.clone(), Library::in_memory().unwrap()),
+            ann: ann.id,
+            work,
+            owner,
+        }
     }
 
     fn state_of(work: &Work) -> Option<(FileState, u32, Option<&str>)> {
-        work.file
+        work.editions
+            .first()?
+            .file
             .as_ref()
             .map(|file| (file.state, file.pages_with_text, file.problem.as_deref()))
     }
@@ -654,16 +846,18 @@ mod tests {
             return;
         };
         let pool = &database.pool;
-        let (state, press, ann, work) = press_with_work(pool).await;
+        let press = press_with_work(pool).await;
+        let (organization, _, _) = press.owner;
 
-        let stored = state
+        let stored = press
+            .state
             .library
-            .add_file(pool, press, ann, work, Bytes::from_static(PDF))
+            .add_file(pool, press.owner, press.ann, Bytes::from_static(PDF))
             .await
             .unwrap();
 
         assert_eq!(
-            stored.file,
+            stored.editions[0].file,
             Some(LibraryFile {
                 size: u64::try_from(PDF.len()).unwrap(),
                 pages: 2,
@@ -672,16 +866,97 @@ mod tests {
                 problem: None,
             })
         );
+        let library = &press.state.library;
         assert_eq!(
-            state.library.search(pool, press, "grain").await.unwrap(),
+            library.search(pool, organization, "grain").await.unwrap(),
             []
         );
-        run_all(&state).await;
-        let ready = works(pool, press).await.unwrap();
+        run_all(&press.state).await;
+        let ready = works(pool, organization).await.unwrap();
         assert_eq!(state_of(&ready[0]), Some((FileState::Ready, 2, None)));
-        let hits = state.library.search(pool, press, "grain").await.unwrap();
+        let hits = library.search(pool, organization, "grain").await.unwrap();
         assert_eq!(hits.len(), 1, "{hits:?}");
-        assert_eq!((hits[0].key.as_str(), hits[0].page), ("field-notes", 1));
+        assert_eq!(
+            (hits[0].key.as_str(), hits[0].page, hits[0].standard),
+            ("field-notes", 1, true)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_work_gets_more_editions_and_one_standard_edition() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let press = press_with_work(pool).await;
+        assert!(press.work.editions[0].standard);
+
+        let added = add_edition(
+            pool,
+            press.work.id,
+            &NewEdition {
+                year: Some(1922),
+                publisher: "Oxford".to_owned(),
+                language: "en".to_owned(),
+                translators: vec!["Maude, Louise".to_owned()],
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!added.standard);
+        let changed = set_standard(pool, added.id).await.unwrap();
+
+        let standards: Vec<(Uuid, bool)> = changed
+            .editions
+            .iter()
+            .map(|edition| (edition.id, edition.standard))
+            .collect();
+        assert_eq!(
+            standards,
+            [(press.work.editions[0].id, false), (added.id, true)]
+        );
+        assert_eq!(changed.standard_edition().unwrap().publisher, "Oxford");
+        assert_eq!(works(pool, press.owner.0).await.unwrap(), [changed]);
+        assert_eq!(
+            edition_owner(pool, added.id).await.unwrap(),
+            Some((press.owner.0, press.work.id))
+        );
+    }
+
+    #[tokio::test]
+    async fn each_edition_has_its_own_file_and_pages() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let press = press_with_work(pool).await;
+        let second = add_edition(pool, press.work.id, &NewEdition::default())
+            .await
+            .unwrap();
+
+        for owner in [press.owner, (press.owner.0, press.work.id, second.id)] {
+            press
+                .state
+                .library
+                .add_file(pool, owner, press.ann, Bytes::from_static(PDF))
+                .await
+                .unwrap();
+        }
+        run_all(&press.state).await;
+
+        let mut hits: Vec<(Uuid, bool)> = press
+            .state
+            .library
+            .search(pool, press.owner.0, "grain")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|hit| (hit.edition_id, hit.standard))
+            .collect();
+        hits.sort();
+        let mut expected = vec![(press.owner.2, true), (second.id, false)];
+        expected.sort();
+        assert_eq!(hits, expected);
     }
 
     #[tokio::test]
@@ -690,16 +965,17 @@ mod tests {
             return;
         };
         let pool = &database.pool;
-        let (state, press, ann, work) = press_with_work(pool).await;
+        let press = press_with_work(pool).await;
 
         for _ in 0..2 {
-            state
+            press
+                .state
                 .library
-                .add_file(pool, press, ann, work, Bytes::from_static(PDF))
+                .add_file(pool, press.owner, press.ann, Bytes::from_static(PDF))
                 .await
                 .unwrap();
         }
-        run_all(&state).await;
+        run_all(&press.state).await;
 
         let files: i64 = sqlx::query_scalar("SELECT count(*) FROM library_files")
             .fetch_one(pool)
@@ -707,13 +983,14 @@ mod tests {
             .unwrap();
         assert_eq!(files, 1);
         assert_eq!(
-            state_of(&works(pool, press).await.unwrap()[0]),
+            state_of(&works(pool, press.owner.0).await.unwrap()[0]),
             Some((FileState::Ready, 2, None))
         );
         assert_eq!(
-            state
+            press
+                .state
                 .library
-                .search(pool, press, "grain")
+                .search(pool, press.owner.0, "grain")
                 .await
                 .unwrap()
                 .len(),
@@ -727,21 +1004,23 @@ mod tests {
             return;
         };
         let pool = &database.pool;
-        let (state, press, ann, work) = press_with_work(pool).await;
+        let press = press_with_work(pool).await;
         let (outbox, mut inbox) = tokio::sync::mpsc::unbounded_channel();
-        state
+        press
+            .state
             .hub
-            .join(press, 1, outbox, || async { Ok(Vec::new()) })
+            .join(press.owner.0, 1, outbox, || async { Ok(Vec::new()) })
             .await
             .unwrap();
         let _ = inbox.try_recv();
 
-        state
+        press
+            .state
             .library
-            .add_file(pool, press, ann, work, Bytes::from_static(PDF))
+            .add_file(pool, press.owner, press.ann, Bytes::from_static(PDF))
             .await
             .unwrap();
-        run_all(&state).await;
+        run_all(&press.state).await;
 
         let told = inbox.try_recv().unwrap();
         assert!(
@@ -760,29 +1039,36 @@ mod tests {
             return;
         };
         let pool = &database.pool;
-        let (state, press, ann, work) = press_with_work(pool).await;
-        state
+        let press = press_with_work(pool).await;
+        press
+            .state
             .library
-            .add_file(pool, press, ann, work, Bytes::from_static(PDF))
+            .add_file(pool, press.owner, press.ann, Bytes::from_static(PDF))
             .await
             .unwrap();
         let file: Uuid = sqlx::query_scalar("SELECT id FROM library_files")
             .fetch_one(pool)
             .await
             .unwrap();
-        state.library.blobs.delete(&blob_path(file)).await.unwrap();
+        press
+            .state
+            .library
+            .blobs
+            .delete(&blob_path(file))
+            .await
+            .unwrap();
 
         for _ in 0..3 {
-            assert!(jobs::run_one(&state).await.unwrap());
+            assert!(jobs::run_one(&press.state).await.unwrap());
             sqlx::query("UPDATE jobs SET run_after = now()")
                 .execute(pool)
                 .await
                 .unwrap();
         }
 
-        assert!(!jobs::run_one(&state).await.unwrap());
+        assert!(!jobs::run_one(&press.state).await.unwrap());
         assert_eq!(
-            state_of(&works(pool, press).await.unwrap()[0]),
+            state_of(&works(pool, press.owner.0).await.unwrap()[0]),
             Some((
                 FileState::Failed,
                 0,
@@ -797,32 +1083,23 @@ mod tests {
             return;
         };
         let pool = &database.pool;
-        let press = create_organization(pool, "Field Press").await.unwrap();
-        let ann = member(pool, press.id, "ann@example.com").await;
-        let library = Library::in_memory().unwrap();
-        let work = create_work(
-            pool,
-            press.id,
-            ann.id,
-            &new_work("field-notes", "Field Notes"),
-        )
-        .await
-        .unwrap();
+        let press = press_with_work(pool).await;
 
-        let result = library
+        let result = press
+            .state
+            .library
             .add_file(
                 pool,
-                press.id,
-                work.id,
-                ann.id,
+                press.owner,
+                press.ann,
                 Bytes::from_static(b"Good paper"),
             )
             .await;
 
         assert!(matches!(result, Err(LibraryError::NotPdf)), "{result:?}");
         assert_eq!(
-            work_organization(pool, work.id).await.unwrap(),
-            Some(press.id)
+            work_organization(pool, press.work.id).await.unwrap(),
+            Some(press.owner.0)
         );
     }
 
@@ -863,18 +1140,22 @@ mod tests {
             return;
         };
         let pool = &database.pool;
-        let (state, press, ann, work) = press_with_work(pool).await;
-        state
+        let press = press_with_work(pool).await;
+        press
+            .state
             .library
-            .add_file(pool, press, ann, work, Bytes::from_static(PDF))
+            .add_file(pool, press.owner, press.ann, Bytes::from_static(PDF))
             .await
             .unwrap();
-        run_all(&state).await;
+        run_all(&press.state).await;
         let library = Library::in_memory().unwrap();
 
         assert_eq!(library.rebuild_if_empty(pool).await.unwrap(), 1);
         assert_eq!(library.rebuild_if_empty(pool).await.unwrap(), 0);
-        assert_eq!(library.search(pool, press, "dry").await.unwrap()[0].page, 2);
+        assert_eq!(
+            library.search(pool, press.owner.0, "dry").await.unwrap()[0].page,
+            2
+        );
     }
 
     #[tokio::test]

@@ -141,6 +141,9 @@ impl From<LibraryError> for HttpError {
             LibraryError::InvalidKey(_)
             | LibraryError::InvalidTitle
             | LibraryError::InvalidCreators
+            | LibraryError::InvalidTranslators
+            | LibraryError::InvalidPublisher
+            | LibraryError::InvalidLanguage
             | LibraryError::InvalidYear
             | LibraryError::NotPdf
             | LibraryError::Encrypted => Self::Invalid(sentence(&error.to_string())),

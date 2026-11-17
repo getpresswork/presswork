@@ -9,8 +9,37 @@ pub struct Work {
     pub key: String,
     pub title: String,
     pub creators: Vec<String>,
+    pub editions: Vec<Edition>,
+}
+
+impl Work {
+    #[must_use]
+    pub fn standard_edition(&self) -> Option<&Edition> {
+        self.editions.iter().find(|edition| edition.standard)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct Edition {
+    pub id: Uuid,
     pub year: Option<i32>,
+    pub publisher: String,
+    pub language: String,
+    pub translators: Vec<String>,
+    pub standard: bool,
     pub file: Option<LibraryFile>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NewEdition {
+    #[serde(default)]
+    pub year: Option<i32>,
+    #[serde(default)]
+    pub publisher: String,
+    #[serde(default)]
+    pub language: String,
+    #[serde(default)]
+    pub translators: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -111,16 +140,18 @@ pub struct NewWork {
     #[serde(default)]
     pub creators: Vec<String>,
     #[serde(default)]
-    pub year: Option<i32>,
+    pub edition: NewEdition,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SearchHit {
     pub work_id: Uuid,
+    pub edition_id: Uuid,
     pub key: String,
     pub title: String,
     pub page: u32,
     pub snippet: String,
+    pub standard: bool,
 }
 
 #[cfg(test)]
@@ -129,6 +160,18 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+
+    fn edition(id: u128, year: i32, standard: bool) -> Edition {
+        Edition {
+            id: Uuid::from_u128(id),
+            year: Some(year),
+            publisher: "Russky Vestnik".to_owned(),
+            language: "ru".to_owned(),
+            translators: Vec::new(),
+            standard,
+            file: None,
+        }
+    }
 
     #[test]
     fn a_new_work_needs_only_a_key_and_a_title() {
@@ -142,36 +185,76 @@ mod tests {
                 key: "field-notes".to_owned(),
                 title: "Field Notes".to_owned(),
                 creators: Vec::new(),
-                year: None,
+                edition: NewEdition::default(),
             }
         );
     }
 
     #[test]
-    fn a_work_tells_the_pages_of_its_file() {
+    fn a_new_edition_needs_no_values() {
+        let new: NewEdition =
+            serde_json::from_value(json!({ "year": 1922, "translators": ["Maude, Louise"] }))
+                .unwrap();
+
+        assert_eq!(
+            new,
+            NewEdition {
+                year: Some(1922),
+                publisher: String::new(),
+                language: String::new(),
+                translators: vec!["Maude, Louise".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn a_work_tells_its_editions_and_the_pages_of_their_files() {
+        let mut first = edition(1, 1869, true);
+        first.file = Some(LibraryFile {
+            size: 2048,
+            pages: 12,
+            pages_with_text: 11,
+            state: FileState::Ready,
+            problem: None,
+        });
         let work = Work {
             id: Uuid::nil(),
             organization_id: Uuid::nil(),
-            key: "field-notes".to_owned(),
-            title: "Field Notes".to_owned(),
-            creators: vec!["Gutenberg, Johannes".to_owned()],
-            year: Some(1455),
-            file: Some(LibraryFile {
-                size: 2048,
-                pages: 12,
-                pages_with_text: 11,
-                state: FileState::Ready,
-                problem: None,
-            }),
+            key: "war-and-peace".to_owned(),
+            title: "War and Peace".to_owned(),
+            creators: vec!["Tolstoy, Leo".to_owned()],
+            editions: vec![first, edition(2, 1922, false)],
         };
 
         let value = serde_json::to_value(&work).unwrap();
 
         assert_eq!(
-            value["file"],
+            value["editions"][0]["file"],
             json!({ "size": 2048, "pages": 12, "pages_with_text": 11, "state": "ready" })
         );
         assert_eq!(serde_json::from_value::<Work>(value).unwrap(), work);
+    }
+
+    #[test]
+    fn the_standard_edition_is_the_marked_edition() {
+        let work = Work {
+            id: Uuid::nil(),
+            organization_id: Uuid::nil(),
+            key: "war-and-peace".to_owned(),
+            title: "War and Peace".to_owned(),
+            creators: Vec::new(),
+            editions: vec![edition(1, 1869, false), edition(2, 1922, true)],
+        };
+
+        assert_eq!(
+            work.standard_edition().map(|edition| edition.id),
+            Some(Uuid::from_u128(2))
+        );
+        let without = Work {
+            editions: Vec::new(),
+            ..work
+        };
+        assert_eq!(without.standard_edition(), None);
     }
 
     #[test]
@@ -240,17 +323,21 @@ mod tests {
     }
 
     #[test]
-    fn a_search_hit_names_the_work_and_the_page() {
+    fn a_search_hit_names_the_work_the_edition_and_the_page() {
         let hit: SearchHit = serde_json::from_value(json!({
             "work_id": Uuid::nil(),
+            "edition_id": Uuid::from_u128(2),
             "key": "field-notes",
             "title": "Field Notes",
             "page": 3,
             "snippet": "good paper",
+            "standard": false,
         }))
         .unwrap();
 
         assert_eq!(hit.page, 3);
         assert_eq!(hit.key, "field-notes");
+        assert_eq!(hit.edition_id, Uuid::from_u128(2));
+        assert!(!hit.standard);
     }
 }
