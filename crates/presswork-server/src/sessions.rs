@@ -6,6 +6,8 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::access_tokens;
+
 pub const TOKEN_PREFIX: &str = "pws_";
 const TOKEN_BYTES: usize = 32;
 const IDLE_DAYS: i32 = 30;
@@ -25,6 +27,12 @@ pub enum SessionError {
 pub struct Signed {
     pub user_id: Uuid,
     pub session_id: Uuid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Identity {
+    pub user_id: Uuid,
+    pub session_id: Option<Uuid>,
 }
 
 pub fn new_token() -> Result<String, SessionError> {
@@ -105,10 +113,24 @@ pub async fn find(pool: &PgPool, token: &str) -> Result<Option<Signed>, SessionE
     }))
 }
 
+pub async fn identify(pool: &PgPool, token: &str) -> Result<Option<Identity>, SessionError> {
+    if token.starts_with(access_tokens::TOKEN_PREFIX) {
+        let user_id = access_tokens::find(pool, token).await?;
+        return Ok(user_id.map(|user_id| Identity {
+            user_id,
+            session_id: None,
+        }));
+    }
+    Ok(find(pool, token).await?.map(|signed| Identity {
+        user_id: signed.user_id,
+        session_id: Some(signed.session_id),
+    }))
+}
+
 pub async fn list(
     pool: &PgPool,
     user_id: Uuid,
-    current: Uuid,
+    current: Option<Uuid>,
 ) -> Result<Vec<Session>, SessionError> {
     let rows: Vec<(Uuid, String, SqlTimestamp, SqlTimestamp)> = sqlx::query_as(
         "SELECT id, device, created_at, last_used_at FROM sessions \
@@ -126,7 +148,7 @@ pub async fn list(
             device,
             created_at: created_at.to_jiff(),
             last_used_at: last_used_at.to_jiff(),
-            current: id == current,
+            current: Some(id) == current,
         })
         .collect())
 }
@@ -248,7 +270,9 @@ mod tests {
         let (_, phone) = start(&database.pool, user.id, "Phone").await.unwrap();
         let (_, bobs) = start(&database.pool, other.id, "Desktop").await.unwrap();
 
-        let sessions = list(&database.pool, user.id, laptop.id).await.unwrap();
+        let sessions = list(&database.pool, user.id, Some(laptop.id))
+            .await
+            .unwrap();
         let devices: Vec<(&str, bool)> = sessions
             .iter()
             .map(|session| (session.device.as_str(), session.current))
@@ -260,11 +284,40 @@ mod tests {
         assert!(end(&database.pool, user.id, phone.id).await.unwrap());
         assert!(!end(&database.pool, user.id, bobs.id).await.unwrap());
         assert_eq!(
-            list(&database.pool, user.id, laptop.id)
+            list(&database.pool, user.id, Some(laptop.id))
                 .await
                 .unwrap()
                 .len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn a_session_or_an_access_token_identifies_the_user() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let user = ann(&database.pool).await;
+        let (session_token, session) = start(&database.pool, user.id, "Laptop").await.unwrap();
+        let (access_token, _) = access_tokens::create(&database.pool, user.id, "CI", None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            identify(&database.pool, &session_token).await.unwrap(),
+            Some(Identity {
+                user_id: user.id,
+                session_id: Some(session.id)
+            })
+        );
+        assert_eq!(
+            identify(&database.pool, &access_token).await.unwrap(),
+            Some(Identity {
+                user_id: user.id,
+                session_id: None
+            })
+        );
+        assert_eq!(identify(&database.pool, "pwt_other").await.unwrap(), None);
+        assert_eq!(identify(&database.pool, "pws_other").await.unwrap(), None);
     }
 }

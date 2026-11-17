@@ -208,6 +208,10 @@ pub async fn reset_password(pool: &PgPool, token: &str, password: &str) -> Resul
         .bind(user_id)
         .execute(&mut *transaction)
         .await?;
+    sqlx::query("DELETE FROM access_tokens WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&mut *transaction)
+        .await?;
     transaction.commit().await?;
     Ok(())
 }
@@ -365,6 +369,9 @@ mod tests {
         let (session_token, _) = sessions::start(&database.pool, ann.id, "Laptop")
             .await
             .unwrap();
+        let (access_token, _) = crate::access_tokens::create(&database.pool, ann.id, "CI", None)
+            .await
+            .unwrap();
         let token = reset_link(&database.pool, "ANN@example.com").await.unwrap();
 
         reset_password(&database.pool, &token, OTHER_PASSWORD)
@@ -384,6 +391,12 @@ mod tests {
         );
         assert_eq!(
             sessions::find(&database.pool, &session_token)
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            crate::access_tokens::find(&database.pool, &access_token)
                 .await
                 .unwrap(),
             None

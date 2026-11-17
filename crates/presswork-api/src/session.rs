@@ -50,6 +50,42 @@ impl fmt::Debug for SignedIn {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AccessToken {
+    pub id: Uuid,
+    pub name: String,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: Timestamp,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub expires_at: Option<Timestamp>,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub last_used_at: Option<Timestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct NewAccessToken {
+    pub name: String,
+    #[serde(default)]
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub expires_at: Option<Timestamp>,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CreatedAccessToken {
+    pub token: String,
+    pub access_token: AccessToken,
+}
+
+impl fmt::Debug for CreatedAccessToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CreatedAccessToken")
+            .field("token", &"[removed]")
+            .field("access_token", &self.access_token)
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,5 +135,46 @@ mod tests {
         assert_eq!(json["created_at"], "2026-11-15T10:00:00Z");
         assert_eq!(json["last_used_at"], "2026-11-15T11:30:00Z");
         assert_eq!(json["current"], true);
+    }
+
+    fn ci_token() -> AccessToken {
+        AccessToken {
+            id: Uuid::nil(),
+            name: "CI".to_owned(),
+            created_at: "2026-11-17T08:00:00Z".parse().unwrap(),
+            expires_at: None,
+            last_used_at: None,
+        }
+    }
+
+    #[test]
+    fn the_debug_text_of_a_new_access_token_hides_the_token() {
+        let created = CreatedAccessToken {
+            token: "pwt_secret".to_owned(),
+            access_token: ci_token(),
+        };
+
+        let text = format!("{created:?}");
+
+        assert!(text.contains("CI"));
+        assert!(!text.contains("pwt_secret"));
+    }
+
+    #[test]
+    fn an_access_token_without_an_expiry_has_null_times() {
+        let json = serde_json::to_value(ci_token()).unwrap();
+        assert_eq!(json["created_at"], "2026-11-17T08:00:00Z");
+        assert_eq!(json["expires_at"], serde_json::Value::Null);
+        assert_eq!(json["last_used_at"], serde_json::Value::Null);
+
+        let new: NewAccessToken = serde_json::from_str(r#"{ "name": "CI" }"#).unwrap();
+        assert_eq!(new.expires_at, None);
+        let new: NewAccessToken =
+            serde_json::from_str(r#"{ "name": "CI", "expires_at": "2027-01-01T00:00:00Z" }"#)
+                .unwrap();
+        assert_eq!(
+            new.expires_at,
+            Some("2027-01-01T00:00:00Z".parse().unwrap())
+        );
     }
 }

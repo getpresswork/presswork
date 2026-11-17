@@ -11,13 +11,14 @@ use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use presswork_api::ApiError;
 
+use crate::access_tokens::AccessTokenError;
 use crate::accounts::AccountError;
 use crate::documents::DocumentError;
 use crate::library::LibraryError;
 use crate::limits;
 use crate::links::LinkError;
 use crate::routes::AppState;
-use crate::sessions::{self, SessionError, Signed};
+use crate::sessions::{self, Identity, SessionError};
 use crate::work::WorkError;
 
 const BEARER: &str = "Bearer ";
@@ -123,6 +124,20 @@ impl From<SessionError> for HttpError {
     }
 }
 
+impl From<AccessTokenError> for HttpError {
+    fn from(error: AccessTokenError) -> Self {
+        match error {
+            AccessTokenError::InvalidName | AccessTokenError::PastExpiry => {
+                Self::Invalid(sentence(&error.to_string()))
+            }
+            AccessTokenError::TooMany => Self::Conflict(sentence(&error.to_string())),
+            AccessTokenError::Random(_) | AccessTokenError::Database(_) => {
+                Self::Internal(error.to_string())
+            }
+        }
+    }
+}
+
 impl From<LinkError> for HttpError {
     fn from(error: LinkError) -> Self {
         match error {
@@ -184,7 +199,7 @@ impl From<LibraryError> for HttpError {
     }
 }
 
-pub(crate) struct Caller(pub(crate) Signed);
+pub(crate) struct Caller(pub(crate) Identity);
 
 impl FromRequestParts<AppState> for Caller {
     type Rejection = HttpError;
@@ -196,7 +211,7 @@ impl FromRequestParts<AppState> for Caller {
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.strip_prefix(BEARER))
             .ok_or(HttpError::Unauthenticated)?;
-        sessions::find(&state.database, token)
+        sessions::identify(&state.database, token)
             .await?
             .map(Caller)
             .ok_or(HttpError::Unauthenticated)

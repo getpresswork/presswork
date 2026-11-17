@@ -7,10 +7,11 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use presswork_api::{
-    AcceptInvite, ApiError, CreatedInvite, Document, Edition, FileState, Health, Joined,
-    LabelStyle, LibraryFile, Membership, NewDocument, NewEdition, NewInvite, NewPassword,
-    NewProject, NewTask, NewWork, PageMap, PageRange, Project, ProjectChange, Role, SearchHit,
-    Session, SignIn, SignedIn, Status, Task, TaskChange, TaskState, Work,
+    AcceptInvite, AccessToken, ApiError, CreatedAccessToken, CreatedInvite, Document, Edition,
+    FileState, Health, Joined, LabelStyle, LibraryFile, Membership, NewAccessToken, NewDocument,
+    NewEdition, NewInvite, NewPassword, NewProject, NewTask, NewWork, PageMap, PageRange, Project,
+    ProjectChange, Role, SearchHit, Session, SignIn, SignedIn, Status, Task, TaskChange, TaskState,
+    Work,
 };
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -26,7 +27,7 @@ use crate::hub::Hub;
 use crate::jobs::Jobs;
 use crate::library::{self, Library};
 use crate::limits::SignInLimits;
-use crate::{accounts, database, documents, links, sessions, work};
+use crate::{access_tokens, accounts, database, documents, links, sessions, work};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -42,6 +43,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         sign_in,
         list_sessions,
         end_session,
+        create_access_token,
+        list_access_tokens,
+        revoke_access_token,
         accept_invite,
         reset_password,
         create_invite,
@@ -70,6 +74,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         SignIn,
         SignedIn,
         Session,
+        AccessToken,
+        NewAccessToken,
+        CreatedAccessToken,
         Role,
         AcceptInvite,
         Joined,
@@ -156,6 +163,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/openapi.json", get(openapi))
         .route("/api/v1/sessions", post(sign_in).get(list_sessions))
         .route("/api/v1/sessions/{id}", delete(end_session))
+        .route(
+            "/api/v1/access-tokens",
+            get(list_access_tokens).post(create_access_token),
+        )
+        .route("/api/v1/access-tokens/{id}", delete(revoke_access_token))
         .route("/api/v1/invites/{token}/accept", post(accept_invite))
         .route("/api/v1/password-resets/{token}", post(reset_password))
         .route("/api/v1/organizations/{id}/invites", post(create_invite))
@@ -780,6 +792,89 @@ async fn sign_in(
 }
 
 #[utoipa::path(
+    post,
+    path = "/api/v1/access-tokens",
+    tag = "access tokens",
+    security(("bearer" = [])),
+    request_body = NewAccessToken,
+    responses(
+        (status = 201, description = "The new token. Only this answer contains the token.", body = CreatedAccessToken),
+        (status = 400, description = "The name or the expiry time is not valid.", body = ApiError),
+        (status = 401, description = "The request has no valid session.", body = ApiError),
+        (status = 403, description = "Only a session can make an access token.", body = ApiError),
+        (status = 409, description = "The user has 100 access tokens.", body = ApiError)
+    )
+)]
+async fn create_access_token(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Json(request): Json<NewAccessToken>,
+) -> Result<(StatusCode, Json<CreatedAccessToken>), HttpError> {
+    if signed.session_id.is_none() {
+        return Err(HttpError::Forbidden);
+    }
+    let (token, access_token) = access_tokens::create(
+        &state.database,
+        signed.user_id,
+        &request.name,
+        request.expires_at,
+    )
+    .await?;
+    tracing::info!(user = %signed.user_id, token = %access_token.id, "Access token made");
+    Ok((
+        StatusCode::CREATED,
+        Json(CreatedAccessToken {
+            token,
+            access_token,
+        }),
+    ))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/access-tokens",
+    tag = "access tokens",
+    security(("bearer" = [])),
+    responses(
+        (status = 200, description = "The access tokens of the user, without the tokens.", body = [AccessToken]),
+        (status = 401, description = "The request has no valid session.", body = ApiError)
+    )
+)]
+async fn list_access_tokens(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+) -> Result<Json<Vec<AccessToken>>, HttpError> {
+    Ok(Json(
+        access_tokens::list(&state.database, signed.user_id).await?,
+    ))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/access-tokens/{id}",
+    tag = "access tokens",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the access token.")),
+    responses(
+        (status = 204, description = "The access token is revoked."),
+        (status = 401, description = "The request has no valid session.", body = ApiError),
+        (status = 404, description = "The user has no access token with this ID.", body = ApiError)
+    )
+)]
+async fn revoke_access_token(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, HttpError> {
+    if access_tokens::revoke(&state.database, signed.user_id, id).await? {
+        tracing::info!(user = %signed.user_id, token = %id, "Access token revoked");
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(HttpError::NotFound)
+    }
+}
+
+#[utoipa::path(
     get,
     path = "/api/v1/sessions",
     tag = "sessions",
@@ -1098,6 +1193,110 @@ mod tests {
             .await
             .unwrap();
         assert_ne!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn the_openapi_description_contains_the_access_tokens() {
+        let (_, body) = get("/api/v1/openapi.json").await;
+
+        assert!(body["paths"]["/api/v1/access-tokens"]["post"].is_object());
+        assert!(body["paths"]["/api/v1/access-tokens/{id}"]["delete"].is_object());
+    }
+
+    #[tokio::test]
+    async fn an_access_token_has_the_rights_of_its_user_until_it_is_revoked() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let signed_in = sign_in_ann(&database.pool).await;
+        let session = signed_in["token"].as_str().unwrap();
+        let app = app(&database.pool);
+
+        let (status, created) = send(
+            app.clone(),
+            "POST",
+            "/api/v1/access-tokens",
+            Some(session),
+            Some(json!({ "name": "CI" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let token = created["token"].as_str().unwrap();
+        assert!(token.starts_with("pwt_"));
+        assert_eq!(created["access_token"]["name"], "CI");
+
+        let (status, _) = send(
+            app.clone(),
+            "GET",
+            "/api/v1/organizations",
+            Some(token),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (_, sessions) = send(app.clone(), "GET", "/api/v1/sessions", Some(token), None).await;
+        assert_eq!(sessions[0]["current"], false);
+        let (status, _) = send(
+            app.clone(),
+            "POST",
+            "/api/v1/access-tokens",
+            Some(token),
+            Some(json!({ "name": "More" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (_, tokens) = send(
+            app.clone(),
+            "GET",
+            "/api/v1/access-tokens",
+            Some(session),
+            None,
+        )
+        .await;
+        assert_eq!(tokens.as_array().unwrap().len(), 1);
+        assert!(tokens[0].get("token").is_none());
+        assert!(tokens[0]["last_used_at"].is_string());
+
+        let id = created["access_token"]["id"].as_str().unwrap();
+        let path = format!("/api/v1/access-tokens/{id}");
+        let (status, _) = send(app.clone(), "DELETE", &path, Some(session), None).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (status, _) = send(
+            app.clone(),
+            "GET",
+            "/api/v1/organizations",
+            Some(token),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _) = send(app, "DELETE", &path, Some(session), None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn an_access_token_needs_a_name_and_a_future_expiry() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let signed_in = sign_in_ann(&database.pool).await;
+        let session = signed_in["token"].as_str().unwrap();
+
+        for request in [
+            json!({ "name": "  " }),
+            json!({ "name": "CI", "expires_at": "2020-01-01T00:00:00Z" }),
+        ] {
+            let (status, body) = send(
+                app(&database.pool),
+                "POST",
+                "/api/v1/access-tokens",
+                Some(session),
+                Some(request),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(body["code"], "invalid_request");
+        }
     }
 
     #[tokio::test]

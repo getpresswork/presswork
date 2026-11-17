@@ -102,7 +102,7 @@ async fn hello(socket: &mut WebSocket, state: &AppState) -> Option<Uuid> {
         .await;
         return None;
     }
-    match sessions::find(&state.database, &token).await {
+    match sessions::identify(&state.database, &token).await {
         Ok(Some(signed)) => {
             send(
                 socket,
@@ -515,6 +515,25 @@ mod tests {
         let history = join(&mut late, press.organization).await;
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].text, "The proofs are ready.");
+    }
+
+    #[tokio::test]
+    async fn an_access_token_opens_a_live_connection() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let press = press(&database.pool).await;
+        let ann = crate::accounts::find_user(&database.pool, "ann@example.com")
+            .await
+            .unwrap()
+            .unwrap();
+        let (token, _) = crate::access_tokens::create(&database.pool, ann.id, "CI", None)
+            .await
+            .unwrap();
+
+        let mut live = Person::connect(&press, &token).await;
+
+        assert_eq!(join(&mut live, press.organization).await, []);
     }
 
     #[tokio::test]
