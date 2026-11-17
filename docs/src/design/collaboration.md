@@ -44,6 +44,8 @@ The client and the server send messages through one WebSocket at `/api/v1/live`.
 5. The server sends `Ack` with the ID of an update when it has stored the update. The client keeps each change until it gets the `Ack` for it.
 6. If the server cannot do a request, it sends `Error` with a code and a message. The codes are the codes of the HTTP API, and `unsupported_protocol`.
 
+The protocol version is 2. Version 2 added `WorkChanged`: after a client sends `Join` for an organization, the server tells it each change of the state of a library file in that organization (D145).
+
 A version vector tells which changes a peer has. Thus the protocol sends each change only one time. This is also true after a long time offline.
 
 The `presswork-sync` crate keeps the text model and the Loro document of a file together (D123). It turns each local change set into a Loro update. It turns each remote update into a change set with one edit for each changed area. Thus the cursors and the undo history of the user stay correct.

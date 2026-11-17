@@ -240,7 +240,9 @@ impl LiveSession {
                 tracing::warn!(%code, %message, "The server refused a live request");
                 Ok(None)
             }
-            ServerMessage::Welcome { .. } | ServerMessage::Ack { .. } => Ok(None),
+            ServerMessage::Welcome { .. }
+            | ServerMessage::Ack { .. }
+            | ServerMessage::WorkChanged { .. } => Ok(None),
         }
     }
 

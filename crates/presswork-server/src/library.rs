@@ -9,13 +9,15 @@ use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
 use object_store::path::Path as BlobPath;
 use object_store::{ObjectStore, ObjectStoreExt, PutPayload};
-use presswork_api::{LibraryFile, NewWork, SearchHit, Work};
+use presswork_api::{FileState, LibraryFile, NewWork, SearchHit, Work};
 use presswork_library::{KeyError, parse_key};
-use presswork_ocr::{ReadError, text_layer};
+use presswork_ocr::{ReadError, page_count, text_layer};
 use presswork_search::{PageIndex, SearchError};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
+
+use crate::jobs;
 
 pub const MAX_FILE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_TITLE_CHARACTERS: usize = 500;
@@ -35,6 +37,8 @@ type WorkRow = (
     Option<i64>,
     Option<i32>,
     Option<i32>,
+    Option<String>,
+    Option<String>,
 );
 
 #[derive(Debug, thiserror::Error)]
@@ -152,7 +156,8 @@ pub async fn create_work(
 pub async fn works(pool: &PgPool, organization_id: Uuid) -> Result<Vec<Work>, LibraryError> {
     let rows: Vec<WorkRow> = sqlx::query_as(
         "SELECT works.id, works.organization_id, works.key, works.title, works.creators, \
-         editions.year, library_files.size, library_files.pages, library_files.pages_with_text \
+         editions.year, library_files.size, library_files.pages, library_files.pages_with_text, \
+         library_files.state, library_files.problem \
          FROM works JOIN editions ON editions.work_id = works.id \
          LEFT JOIN library_files ON library_files.edition_id = editions.id \
          WHERE works.organization_id = $1 ORDER BY lower(works.title), works.key",
@@ -166,7 +171,8 @@ pub async fn works(pool: &PgPool, organization_id: Uuid) -> Result<Vec<Work>, Li
 pub async fn work(pool: &PgPool, work_id: Uuid) -> Result<Option<Work>, LibraryError> {
     let row: Option<WorkRow> = sqlx::query_as(
         "SELECT works.id, works.organization_id, works.key, works.title, works.creators, \
-         editions.year, library_files.size, library_files.pages, library_files.pages_with_text \
+         editions.year, library_files.size, library_files.pages, library_files.pages_with_text, \
+         library_files.state, library_files.problem \
          FROM works JOIN editions ON editions.work_id = works.id \
          LEFT JOIN library_files ON library_files.edition_id = editions.id \
          WHERE works.id = $1",
@@ -175,6 +181,63 @@ pub async fn work(pool: &PgPool, work_id: Uuid) -> Result<Option<Work>, LibraryE
     .fetch_optional(pool)
     .await?;
     Ok(row.map(work_from))
+}
+
+async fn file_owner(pool: &PgPool, file_id: Uuid) -> Result<Option<(Uuid, Uuid)>, LibraryError> {
+    Ok(sqlx::query_as(
+        "SELECT works.organization_id, works.id FROM library_files \
+         JOIN editions ON editions.id = library_files.edition_id \
+         JOIN works ON works.id = editions.work_id WHERE library_files.id = $1",
+    )
+    .bind(file_id)
+    .fetch_optional(pool)
+    .await?)
+}
+
+pub(crate) async fn mark_failed(
+    pool: &PgPool,
+    file_id: Uuid,
+    problem: &str,
+) -> Result<Option<Work>, LibraryError> {
+    sqlx::query("UPDATE library_files SET state = 'failed', problem = $2 WHERE id = $1")
+        .bind(file_id)
+        .bind(problem)
+        .execute(pool)
+        .await?;
+    match file_owner(pool, file_id).await? {
+        Some((_, work_id)) => work(pool, work_id).await,
+        None => Ok(None),
+    }
+}
+
+async fn store_pages(pool: &PgPool, file_id: Uuid, pages: &[String]) -> Result<(), LibraryError> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query("DELETE FROM library_pages WHERE file_id = $1")
+        .bind(file_id)
+        .execute(&mut *transaction)
+        .await?;
+    let numbers: Vec<i32> = (1..=count(pages.len())).collect();
+    sqlx::query(
+        "INSERT INTO library_pages (file_id, number, text) \
+         SELECT $1, page.number, page.text FROM UNNEST($2::INTEGER[], $3::TEXT[]) AS page (number, text)",
+    )
+    .bind(file_id)
+    .bind(&numbers)
+    .bind(pages)
+    .execute(&mut *transaction)
+    .await?;
+    let with_text = pages.iter().filter(|page| !page.trim().is_empty()).count();
+    sqlx::query(
+        "UPDATE library_files SET state = 'ready', problem = NULL, pages = $2, \
+         pages_with_text = $3 WHERE id = $1",
+    )
+    .bind(file_id)
+    .bind(count(pages.len()))
+    .bind(count(with_text))
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(())
 }
 
 pub async fn work_organization(pool: &PgPool, work_id: Uuid) -> Result<Option<Uuid>, LibraryError> {
@@ -187,12 +250,26 @@ pub async fn work_organization(pool: &PgPool, work_id: Uuid) -> Result<Option<Uu
 }
 
 fn work_from(row: WorkRow) -> Work {
-    let (id, organization_id, key, title, creators, year, size, pages, pages_with_text) = row;
-    let file = match (size, pages, pages_with_text) {
-        (Some(size), Some(pages), Some(pages_with_text)) => Some(LibraryFile {
+    let (
+        id,
+        organization_id,
+        key,
+        title,
+        creators,
+        year,
+        size,
+        pages,
+        pages_with_text,
+        state,
+        problem,
+    ) = row;
+    let file = match (size, pages, pages_with_text, state) {
+        (Some(size), Some(pages), Some(pages_with_text), Some(state)) => Some(LibraryFile {
             size: u64::try_from(size).unwrap_or_default(),
             pages: u32::try_from(pages).unwrap_or_default(),
             pages_with_text: u32::try_from(pages_with_text).unwrap_or_default(),
+            state: FileState::parse(&state).unwrap_or(FileState::Failed),
+            problem,
         }),
         _ => None,
     };
@@ -211,7 +288,7 @@ struct NewFile<'a> {
     id: Uuid,
     size: i64,
     digest: &'a [u8],
-    pages: &'a [String],
+    pages: u32,
 }
 
 async fn attach_file(
@@ -233,36 +310,29 @@ async fn attach_file(
             .bind(edition)
             .fetch_optional(&mut *transaction)
             .await?;
-    let with_text = file
-        .pages
-        .iter()
-        .filter(|page| !page.trim().is_empty())
-        .count();
     sqlx::query(
-        "INSERT INTO library_files (id, edition_id, size, sha256, pages, pages_with_text, created_by) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        "INSERT INTO library_files \
+         (id, edition_id, size, sha256, pages, pages_with_text, state, created_by) \
+         VALUES ($1, $2, $3, $4, $5, 0, 'reading', $6)",
     )
     .bind(file.id)
     .bind(edition)
     .bind(file.size)
     .bind(file.digest)
-    .bind(count(file.pages.len()))
-    .bind(count(with_text))
+    .bind(i32::try_from(file.pages).unwrap_or(i32::MAX))
     .bind(created_by)
     .execute(&mut *transaction)
     .await?;
-    let numbers: Vec<i32> = (1..=count(file.pages.len())).collect();
-    sqlx::query(
-        "INSERT INTO library_pages (file_id, number, text) \
-         SELECT $1, page.number, page.text FROM UNNEST($2::INTEGER[], $3::TEXT[]) AS page (number, text)",
-    )
-    .bind(file.id)
-    .bind(&numbers)
-    .bind(file.pages)
-    .execute(&mut *transaction)
-    .await?;
+    jobs::add(&mut transaction, jobs::READ_TEXT, file.id).await?;
     transaction.commit().await?;
     Ok(replaced)
+}
+
+fn read_error(error: ReadError) -> LibraryError {
+    match error {
+        ReadError::Invalid => LibraryError::NotPdf,
+        ReadError::Encrypted => LibraryError::Encrypted,
+    }
 }
 
 fn count(value: usize) -> i32 {
@@ -318,20 +388,16 @@ impl Library {
         file: Bytes,
     ) -> Result<Work, LibraryError> {
         let reader = file.clone();
-        let pages = tokio::task::spawn_blocking(move || text_layer(reader))
+        let pages = tokio::task::spawn_blocking(move || page_count(reader))
             .await
             .map_err(|_| LibraryError::NotPdf)?
-            .map_err(|error| match error {
-                ReadError::Invalid => LibraryError::NotPdf,
-                ReadError::Encrypted => LibraryError::Encrypted,
-            })?;
-        let pages = readable(pages);
+            .map_err(read_error)?;
         let digest = Sha256::digest(&file);
         let new = NewFile {
             id: Uuid::now_v7(),
             size: i64::try_from(file.len()).unwrap_or(i64::MAX),
             digest: digest.as_slice(),
-            pages: &pages,
+            pages,
         };
         let location = blob_path(new.id);
         self.blobs.put(&location, PutPayload::from(file)).await?;
@@ -349,15 +415,40 @@ impl Library {
         {
             tracing::warn!(%error, "An old library file was not deleted");
         }
-        let index = Arc::clone(&self.index);
-        let indexed = tokio::task::spawn_blocking(move || index.put(organization, work_id, &pages))
-            .await
-            .map_err(LibraryError::from)
-            .and_then(|result| result.map_err(LibraryError::from));
-        if let Err(error) = indexed {
-            tracing::error!(%error, "The pages of a library file are not in the search index");
+        if let Err(error) = self.index_pages(organization, work_id, Vec::new()).await {
+            tracing::error!(%error, "The old pages of a library file stay in the search index");
         }
         work(pool, work_id).await?.ok_or(LibraryError::NotFound)
+    }
+
+    pub(crate) async fn read_text(
+        &self,
+        pool: &PgPool,
+        file_id: Uuid,
+    ) -> Result<Option<Work>, LibraryError> {
+        let Some((organization, work_id)) = file_owner(pool, file_id).await? else {
+            return Ok(None);
+        };
+        let bytes = self.blobs.get(&blob_path(file_id)).await?.bytes().await?;
+        let pages = tokio::task::spawn_blocking(move || text_layer(bytes))
+            .await
+            .map_err(|_| LibraryError::NotPdf)?
+            .map_err(read_error)?;
+        let pages = readable(pages);
+        store_pages(pool, file_id, &pages).await?;
+        self.index_pages(organization, work_id, pages).await?;
+        work(pool, work_id).await
+    }
+
+    async fn index_pages(
+        &self,
+        organization: Uuid,
+        work_id: Uuid,
+        pages: Vec<String>,
+    ) -> Result<(), LibraryError> {
+        let index = Arc::clone(&self.index);
+        tokio::task::spawn_blocking(move || index.put(organization, work_id, &pages)).await??;
+        Ok(())
     }
 
     pub async fn search(
@@ -435,6 +526,7 @@ mod tests {
     use super::*;
     use crate::accounts::{User, create_user};
     use crate::links::create_organization;
+    use crate::routes::AppState;
     use crate::testing::test_database;
 
     const PDF: &[u8] = include_bytes!("../../presswork-ocr/fixtures/typst.pdf");
@@ -531,15 +623,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn a_work_gets_its_file_and_the_search_finds_its_pages() {
-        let Some(database) = test_database().await else {
-            return;
-        };
-        let pool = &database.pool;
+    async fn run_all(state: &AppState) {
+        while jobs::run_one(state).await.unwrap() {}
+    }
+
+    async fn press_with_work(pool: &PgPool) -> (AppState, Uuid, Uuid, Uuid) {
         let press = create_organization(pool, "Field Press").await.unwrap();
         let ann = member(pool, press.id, "ann@example.com").await;
-        let library = Library::in_memory().unwrap();
         let work = create_work(
             pool,
             press.id,
@@ -548,9 +638,27 @@ mod tests {
         )
         .await
         .unwrap();
+        let state = AppState::new(pool.clone(), Library::in_memory().unwrap());
+        (state, press.id, ann.id, work.id)
+    }
 
-        let stored = library
-            .add_file(pool, press.id, work.id, ann.id, Bytes::from_static(PDF))
+    fn state_of(work: &Work) -> Option<(FileState, u32, Option<&str>)> {
+        work.file
+            .as_ref()
+            .map(|file| (file.state, file.pages_with_text, file.problem.as_deref()))
+    }
+
+    #[tokio::test]
+    async fn a_job_reads_the_pages_and_then_the_search_finds_them() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let (state, press, ann, work) = press_with_work(pool).await;
+
+        let stored = state
+            .library
+            .add_file(pool, press, ann, work, Bytes::from_static(PDF))
             .await
             .unwrap();
 
@@ -559,13 +667,21 @@ mod tests {
             Some(LibraryFile {
                 size: u64::try_from(PDF.len()).unwrap(),
                 pages: 2,
-                pages_with_text: 2,
+                pages_with_text: 0,
+                state: FileState::Reading,
+                problem: None,
             })
         );
-        let hits = library.search(pool, press.id, "grain").await.unwrap();
+        assert_eq!(
+            state.library.search(pool, press, "grain").await.unwrap(),
+            []
+        );
+        run_all(&state).await;
+        let ready = works(pool, press).await.unwrap();
+        assert_eq!(state_of(&ready[0]), Some((FileState::Ready, 2, None)));
+        let hits = state.library.search(pool, press, "grain").await.unwrap();
         assert_eq!(hits.len(), 1, "{hits:?}");
         assert_eq!((hits[0].key.as_str(), hits[0].page), ("field-notes", 1));
-        assert_eq!(works(pool, press.id).await.unwrap(), [stored]);
     }
 
     #[tokio::test]
@@ -574,24 +690,16 @@ mod tests {
             return;
         };
         let pool = &database.pool;
-        let press = create_organization(pool, "Field Press").await.unwrap();
-        let ann = member(pool, press.id, "ann@example.com").await;
-        let library = Library::in_memory().unwrap();
-        let work = create_work(
-            pool,
-            press.id,
-            ann.id,
-            &new_work("field-notes", "Field Notes"),
-        )
-        .await
-        .unwrap();
+        let (state, press, ann, work) = press_with_work(pool).await;
 
         for _ in 0..2 {
-            library
-                .add_file(pool, press.id, work.id, ann.id, Bytes::from_static(PDF))
+            state
+                .library
+                .add_file(pool, press, ann, work, Bytes::from_static(PDF))
                 .await
                 .unwrap();
         }
+        run_all(&state).await;
 
         let files: i64 = sqlx::query_scalar("SELECT count(*) FROM library_files")
             .fetch_one(pool)
@@ -599,8 +707,87 @@ mod tests {
             .unwrap();
         assert_eq!(files, 1);
         assert_eq!(
-            library.search(pool, press.id, "grain").await.unwrap().len(),
+            state_of(&works(pool, press).await.unwrap()[0]),
+            Some((FileState::Ready, 2, None))
+        );
+        assert_eq!(
+            state
+                .library
+                .search(pool, press, "grain")
+                .await
+                .unwrap()
+                .len(),
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_member_who_joined_hears_when_the_pages_are_ready() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let (state, press, ann, work) = press_with_work(pool).await;
+        let (outbox, mut inbox) = tokio::sync::mpsc::unbounded_channel();
+        state
+            .hub
+            .join(press, 1, outbox, || async { Ok(Vec::new()) })
+            .await
+            .unwrap();
+        let _ = inbox.try_recv();
+
+        state
+            .library
+            .add_file(pool, press, ann, work, Bytes::from_static(PDF))
+            .await
+            .unwrap();
+        run_all(&state).await;
+
+        let told = inbox.try_recv().unwrap();
+        assert!(
+            matches!(
+                &told,
+                crate::hub::Outgoing::Message(presswork_api::live::ServerMessage::WorkChanged { work: changed })
+                    if state_of(changed) == Some((FileState::Ready, 2, None))
+            ),
+            "{told:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_file_that_the_job_cannot_read_fails_after_three_attempts() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let (state, press, ann, work) = press_with_work(pool).await;
+        state
+            .library
+            .add_file(pool, press, ann, work, Bytes::from_static(PDF))
+            .await
+            .unwrap();
+        let file: Uuid = sqlx::query_scalar("SELECT id FROM library_files")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        state.library.blobs.delete(&blob_path(file)).await.unwrap();
+
+        for _ in 0..3 {
+            assert!(jobs::run_one(&state).await.unwrap());
+            sqlx::query("UPDATE jobs SET run_after = now()")
+                .execute(pool)
+                .await
+                .unwrap();
+        }
+
+        assert!(!jobs::run_one(&state).await.unwrap());
+        assert_eq!(
+            state_of(&works(pool, press).await.unwrap()[0]),
+            Some((
+                FileState::Failed,
+                0,
+                Some("Presswork cannot read the pages of the file. Upload the file again.")
+            ))
         );
     }
 
@@ -676,29 +863,18 @@ mod tests {
             return;
         };
         let pool = &database.pool;
-        let press = create_organization(pool, "Field Press").await.unwrap();
-        let ann = member(pool, press.id, "ann@example.com").await;
-        let work = create_work(
-            pool,
-            press.id,
-            ann.id,
-            &new_work("field-notes", "Field Notes"),
-        )
-        .await
-        .unwrap();
-        Library::in_memory()
-            .unwrap()
-            .add_file(pool, press.id, work.id, ann.id, Bytes::from_static(PDF))
+        let (state, press, ann, work) = press_with_work(pool).await;
+        state
+            .library
+            .add_file(pool, press, ann, work, Bytes::from_static(PDF))
             .await
             .unwrap();
+        run_all(&state).await;
         let library = Library::in_memory().unwrap();
 
         assert_eq!(library.rebuild_if_empty(pool).await.unwrap(), 1);
         assert_eq!(library.rebuild_if_empty(pool).await.unwrap(), 0);
-        assert_eq!(
-            library.search(pool, press.id, "dry").await.unwrap()[0].page,
-            2
-        );
+        assert_eq!(library.search(pool, press, "dry").await.unwrap()[0].page, 2);
     }
 
     #[tokio::test]

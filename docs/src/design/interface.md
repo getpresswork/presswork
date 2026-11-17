@@ -205,7 +205,8 @@ When a server document is open, the Plan workspace shows the tasks of its projec
 
 When a server document is open, the Research workspace shows the library of its organization (D141). Refer to [Library](library.md). Each work shows its title, its creators, its year, its citation key, and the number of pages with text.
 
-- To add a work, select **Add PDF…** and select a PDF file. Presswork proposes a title from the file name and a citation key from the title. Change the values if necessary, then select **Add**. Presswork uploads the file, and the server reads the text of its pages. The limit for one file is 64 MiB.
+- To add a work, select **Add PDF…** and select a PDF file. Presswork proposes a title from the file name and a citation key from the title. Change the values if necessary, then select **Add**. Presswork uploads the file. The limit for one file is 64 MiB.
+- After the upload, the work shows "The server reads the text of the pages." When the server is ready, the list changes at once and shows the number of pages with text. If the server cannot read the file, the work shows the reason.
 - To find a passage, type words in the search field. Then select **Find** or push Enter. The results show each page that has all the words, with the text around them.
 - To cite a page, select **Cite** next to a result. Presswork opens the Write workspace and puts `@key[p. N]` at the cursor. If the document has no `#bibliography`, Presswork adds `#bibliography("library.yml")` at the end.
 - Presswork gives the Typst engine the file `library.yml` with the works of the library. Thus the citations compile in the preview.

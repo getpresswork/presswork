@@ -6,9 +6,10 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use presswork_api::{
-    AcceptInvite, ApiError, CreatedInvite, Document, Health, Joined, LibraryFile, Membership,
-    NewDocument, NewInvite, NewPassword, NewProject, NewTask, NewWork, Project, ProjectChange,
-    Role, SearchHit, Session, SignIn, SignedIn, Status, Task, TaskChange, TaskState, Work,
+    AcceptInvite, ApiError, CreatedInvite, Document, FileState, Health, Joined, LibraryFile,
+    Membership, NewDocument, NewInvite, NewPassword, NewProject, NewTask, NewWork, Project,
+    ProjectChange, Role, SearchHit, Session, SignIn, SignedIn, Status, Task, TaskChange, TaskState,
+    Work,
 };
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -20,6 +21,7 @@ use presswork_domain::{Action, allowed};
 
 use crate::http::{Caller, HttpError};
 use crate::hub::Hub;
+use crate::jobs::Jobs;
 use crate::library::{self, Library};
 use crate::{accounts, database, documents, links, sessions, work};
 
@@ -81,6 +83,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         Work,
         NewWork,
         LibraryFile,
+        FileState,
         SearchHit
     )),
     modifiers(&Bearer)
@@ -104,6 +107,7 @@ pub struct AppState {
     pub database: PgPool,
     pub(crate) hub: Arc<Hub>,
     pub(crate) library: Library,
+    pub(crate) jobs: Jobs,
 }
 
 impl AppState {
@@ -113,7 +117,12 @@ impl AppState {
             database,
             hub: Arc::default(),
             library,
+            jobs: Jobs::default(),
         }
+    }
+
+    pub fn start_workers(&self) {
+        crate::jobs::start(self);
     }
 }
 
@@ -374,7 +383,7 @@ async fn create_work(
         content(("application/pdf"))
     ),
     responses(
-        (status = 200, description = "The work with its file. The server has read the text of all pages.", body = Work),
+        (status = 202, description = "The work with its file in the state `reading`. A job reads the text of the pages, and the WebSocket tells the members when the file is ready.", body = Work),
         (status = 400, description = "The file is not a PDF file that the server can read, or it is encrypted.", body = ApiError),
         (status = 404, description = "The work does not exist for this user.", body = ApiError),
         (status = 413, description = "The file is larger than 64 MiB.")
@@ -385,7 +394,7 @@ async fn upload_file(
     Caller(signed): Caller,
     Path(id): Path<Uuid>,
     file: Bytes,
-) -> Result<Json<Work>, HttpError> {
+) -> Result<(StatusCode, Json<Work>), HttpError> {
     let organization = library::work_organization(&state.database, id)
         .await?
         .ok_or(HttpError::NotFound)?;
@@ -394,7 +403,8 @@ async fn upload_file(
         .library
         .add_file(&state.database, organization, id, signed.user_id, file)
         .await?;
-    Ok(Json(work))
+    state.jobs.wake();
+    Ok((StatusCode::ACCEPTED, Json(work)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1466,12 +1476,20 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
         assert_eq!(work["file"], Value::Null);
         let id = work["id"].as_str().unwrap();
-        assert_eq!(upload(app(), id, &team.member, PDF).await, StatusCode::OK);
+        assert_eq!(
+            upload(app(), id, &team.member, PDF).await,
+            StatusCode::ACCEPTED
+        );
+        let (_, listed) = send(app(), "GET", &works, Some(&team.member), None).await;
+        assert_eq!(listed[0]["file"]["state"], "reading");
+        let state = AppState::new(pool.clone(), library.clone());
+        while crate::jobs::run_one(&state).await.unwrap() {}
 
         let (status, listed) = send(app(), "GET", &works, Some(&team.administrator), None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(listed[0]["key"], "field-notes");
         assert_eq!(listed[0]["file"]["pages"], 2);
+        assert_eq!(listed[0]["file"]["state"], "ready");
         let (status, hits) = send(
             app(),
             "GET",

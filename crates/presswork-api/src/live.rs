@@ -5,7 +5,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const PROTOCOL: u32 = 1;
+use crate::Work;
+
+pub const PROTOCOL: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -76,6 +78,9 @@ pub enum ServerMessage {
     },
     Said {
         message: ChatMessage,
+    },
+    WorkChanged {
+        work: Box<Work>,
     },
 }
 
@@ -182,6 +187,10 @@ impl fmt::Debug for ServerMessage {
                 .debug_struct("Said")
                 .field("message", &message.id)
                 .finish(),
+            Self::WorkChanged { work } => formatter
+                .debug_struct("WorkChanged")
+                .field("work", &work.id)
+                .finish(),
         }
     }
 }
@@ -265,6 +274,23 @@ mod tests {
             },
             ServerMessage::Said {
                 message: chat_message(),
+            },
+            ServerMessage::WorkChanged {
+                work: Box::new(crate::Work {
+                    id: Uuid::from_u128(10),
+                    organization_id: document(),
+                    key: "field-notes".to_owned(),
+                    title: "Field Notes".to_owned(),
+                    creators: vec!["Gutenberg, Johannes".to_owned()],
+                    year: Some(1455),
+                    file: Some(crate::LibraryFile {
+                        size: 12_470,
+                        pages: 2,
+                        pages_with_text: 0,
+                        state: crate::FileState::Failed,
+                        problem: Some("Presswork cannot read the text of the file.".to_owned()),
+                    }),
+                }),
             },
         ] {
             let bytes = encode(&message).unwrap();

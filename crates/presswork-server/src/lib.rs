@@ -6,6 +6,7 @@ mod database;
 pub mod documents;
 mod http;
 mod hub;
+mod jobs;
 pub mod library;
 pub mod links;
 mod live;
@@ -69,7 +70,9 @@ pub async fn run(config: Config) -> Result<(), ServerError> {
         .await
         .map_err(ServerError::Listen)?;
     tracing::info!(address = %config.listen, "Presswork server started");
-    axum::serve(listener, router(AppState::new(pool, library)))
+    let state = AppState::new(pool, library);
+    state.start_workers();
+    axum::serve(listener, router(state))
         .with_graceful_shutdown(shutdown())
         .await
         .map_err(ServerError::Listen)

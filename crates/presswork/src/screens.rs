@@ -9,7 +9,7 @@ use presswork_ui::theme::Mode;
 use presswork_ui::{font, font_size};
 
 use presswork_api::live::{ChatMessage, ServerMessage as LiveMessage};
-use presswork_api::{Document, LibraryFile, Project, SearchHit, Task, TaskState, Work};
+use presswork_api::{Document, FileState, LibraryFile, Project, SearchHit, Task, TaskState, Work};
 use presswork_client::Api;
 use presswork_editor::{Action as EditorAction, Motion};
 use presswork_preview::Action as PreviewAction;
@@ -237,20 +237,27 @@ fn render_screens() {
 
 fn render_library(app: &mut App) {
     send(app, Message::SelectWorkspace(Workspace::Research));
-    let work =
-        |id: u128, key: &str, title: &str, creators: &[&str], year, pages: Option<u32>| Work {
-            id: Uuid::from_u128(id),
-            organization_id: Uuid::from_u128(1),
-            key: key.to_owned(),
-            title: title.to_owned(),
-            creators: creators.iter().map(|name| (*name).to_owned()).collect(),
-            year,
-            file: pages.map(|pages| LibraryFile {
-                size: u64::from(pages) * 40_000,
-                pages,
-                pages_with_text: pages,
-            }),
-        };
+    let work = |id: u128,
+                key: &str,
+                title: &str,
+                creators: &[&str],
+                year,
+                pages: u32,
+                state: FileState| Work {
+        id: Uuid::from_u128(id),
+        organization_id: Uuid::from_u128(1),
+        key: key.to_owned(),
+        title: title.to_owned(),
+        creators: creators.iter().map(|name| (*name).to_owned()).collect(),
+        year,
+        file: Some(LibraryFile {
+            size: u64::from(pages) * 40_000,
+            pages,
+            pages_with_text: if state == FileState::Ready { pages } else { 0 },
+            state,
+            problem: None,
+        }),
+    };
     let works = vec![
         work(
             12,
@@ -258,7 +265,8 @@ fn render_library(app: &mut App) {
             "Atlas of Presses",
             &["Moxon, Joseph"],
             Some(1683),
-            Some(212),
+            212,
+            FileState::Ready,
         ),
         work(
             11,
@@ -266,7 +274,8 @@ fn render_library(app: &mut App) {
             "Field Notes: A Small Handbook for Printers",
             &["Gutenberg, Johannes"],
             Some(1455),
-            Some(2),
+            2,
+            FileState::Ready,
         ),
         work(
             13,
@@ -274,7 +283,8 @@ fn render_library(app: &mut App) {
             "Paper and Ink",
             &["Hunter, Dard"],
             Some(1947),
-            None,
+            384,
+            FileState::Reading,
         ),
     ];
     send(app, Message::Library(LibraryMessage::Loaded(Ok(works))));

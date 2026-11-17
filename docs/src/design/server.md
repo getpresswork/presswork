@@ -100,10 +100,12 @@ The library of an organization keeps works (D136). A work has a citation key, a 
 | --- | --- | --- |
 | `GET /api/v1/organizations/{id}/works` | List the works, in the sequence of their titles. | Member |
 | `POST /api/v1/organizations/{id}/works` | Add a work without a file. | Member |
-| `PUT /api/v1/works/{id}/file` | Upload the PDF file of a work, 64 MiB or less (D140). A new file takes the place of the old file. | Member |
+| `PUT /api/v1/works/{id}/file` | Upload the PDF file of a work, 64 MiB or less (D140, D143). A new file takes the place of the old file. The answer is 202 with the file in the state `reading`. | Member |
 | `GET /api/v1/organizations/{id}/library/search?q=…` | Find the pages that have all the words. | Member |
 
-- The server reads the text layer of each page with the `presswork-ocr` crate (D138). It refuses a file that is not a PDF file or that is encrypted.
+- The upload request opens the PDF file and counts its pages (D143). It refuses a file that is not a PDF file or that is encrypted.
+- A job then reads the text layer of each page with the `presswork-ocr` crate (D138) and sets the state `ready`. If the job cannot read the file, the state is `failed`, with a reason. Refer to "Jobs in milestone 1".
+- When the state of a file changes, the server sends `WorkChanged` on the live WebSocket to each client that joined the organization (D145).
 - The server keeps each file in the `blobs` folder of its `data` folder (D137), and the text of each page in the `library_pages` table.
 - The `presswork-search` crate keeps a Tantivy index of the pages in the `index` folder (D139). If the index is empty when the server starts, the server makes it again from the database.
 - A search gives 20 pages or fewer, with the text around the words.
@@ -132,6 +134,17 @@ The library of an organization keeps works (D136). A work has a citation key, a 
 - The engine puts each routine run into a job queue in PostgreSQL. Workers take jobs with `FOR UPDATE SKIP LOCKED`.
 - Each step of a routine is idempotent. If a worker stops during a run, a different worker can do the run again without problems.
 - Compile and export steps run in separate worker processes, with limits for time and memory.
+
+### Jobs in milestone 1
+
+Milestone 1 has the job queue without routines (D142 to D144). The only kind of job is `read_text`, which reads the pages of a library file.
+
+- The `jobs` table keeps each job with its kind, its subject (the ID of an object), its state (`queued`, `running`, `done`, or `failed`), its attempts, and the time from which it can run.
+- The server adds a job in the same transaction as the record that needs it.
+- Two worker tasks in the server process take jobs with `FOR UPDATE SKIP LOCKED`. A worker holds a job for 10 minutes. If the server stops during a job, a worker takes the job again after that time.
+- A new job wakes the workers at once. The workers also look for jobs every 5 seconds.
+- A job has 3 attempts. After a temporary error, it runs again after 10 seconds, and then after 1 minute. A file that Presswork cannot read fails at once.
+- Each job is idempotent. A job for an object that does not exist any more ends without an error.
 
 ## Document storage
 

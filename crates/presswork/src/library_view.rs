@@ -3,7 +3,7 @@ use std::sync::Arc;
 use iced::alignment::Vertical;
 use iced::widget::{button, column, container, row, scrollable, space, text, text_input};
 use iced::{Element, Fill, Task};
-use presswork_api::{NewWork, SearchHit, Work};
+use presswork_api::{FileState, NewWork, SearchHit, Work};
 use presswork_library::{parse_key, propose_key};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::{font, font_size, space as gap};
@@ -17,8 +17,11 @@ const LIST_WIDTH: f32 = 720.0;
 const YEAR_WIDTH: f32 = 96.0;
 
 #[cfg(test)]
-pub(crate) const TEXT_IDS: [&str; 20] = [
+pub(crate) const TEXT_IDS: [&str; 23] = [
     "library-form-creators-example",
+    "library-page-count",
+    "library-reading",
+    "library-failed",
     "library-title",
     "library-add",
     "library-search-placeholder",
@@ -257,6 +260,14 @@ impl LibraryView {
             self.draft = Some(Draft::new(file));
             self.trouble = None;
         }
+    }
+
+    pub(crate) fn changed(&mut self, work: Work) -> bool {
+        if work.organization_id != self.organization {
+            return false;
+        }
+        self.keep(work);
+        true
     }
 
     fn keep(&mut self, work: Work) {
@@ -530,29 +541,55 @@ fn work_line<'a>(work: &'a Work, localizer: &Localizer) -> Element<'a, Message> 
         parts.push(year.to_string());
     }
     parts.push(format!("@{}", work.key));
-    parts.push(match work.file {
+    let mut state = None;
+    match &work.file {
         Some(file) => {
             let mut args = FluentArgs::new();
             args.set("pages", file.pages);
             args.set("text", file.pages_with_text);
-            localizer.format("library-pages", &args)
+            match file.state {
+                FileState::Ready => parts.push(localizer.format("library-pages", &args)),
+                FileState::Reading => {
+                    parts.push(localizer.format("library-page-count", &args));
+                    state = Some(
+                        text(localizer.text("library-reading"))
+                            .size(font_size::SMALL)
+                            .style(style::tone(Tone::Info)),
+                    );
+                }
+                FileState::Failed => {
+                    parts.push(localizer.format("library-page-count", &args));
+                    let problem = file
+                        .problem
+                        .clone()
+                        .unwrap_or_else(|| localizer.text("library-failed"));
+                    state = Some(
+                        text(problem)
+                            .size(font_size::SMALL)
+                            .style(style::tone(Tone::Danger)),
+                    );
+                }
+            }
         }
-        None => localizer.text("library-no-file"),
-    });
-    column![
+        None => parts.push(localizer.text("library-no-file")),
+    }
+    let mut line = column![
         text(work.title.as_str()).font(font::UI_SEMIBOLD),
         text(parts.join(" · "))
             .size(font_size::SMALL)
             .style(style::muted),
     ]
-    .spacing(gap::XXS)
-    .into()
+    .spacing(gap::XXS);
+    if let Some(state) = state {
+        line = line.push(state);
+    }
+    line.into()
 }
 
 #[cfg(test)]
 mod tests {
     use iced_test::simulator;
-    use presswork_api::LibraryFile;
+    use presswork_api::{FileState, LibraryFile};
     use presswork_client::Api;
 
     use super::*;
@@ -579,8 +616,80 @@ mod tests {
                 size: 12_470,
                 pages: 2,
                 pages_with_text: 2,
+                state: FileState::Ready,
+                problem: None,
             }),
         }
+    }
+
+    fn in_state(state: FileState, problem: Option<&str>) -> Work {
+        let mut work = work(NOTES, "field-notes", "Field Notes");
+        if let Some(file) = &mut work.file {
+            file.state = state;
+            file.pages_with_text = 0;
+            file.problem = problem.map(str::to_owned);
+        }
+        work
+    }
+
+    #[test]
+    fn a_file_that_the_server_reads_shows_its_state() {
+        let mut view = LibraryView::new(PRESS, "Field Press".to_owned());
+
+        let _ = view.update(
+            Message::Loaded(Ok(vec![in_state(FileState::Reading, None)])),
+            &connection(),
+        );
+
+        assert!(shows(
+            &view,
+            "Gutenberg, Johannes · 1455 · @field-notes · 2 pages"
+        ));
+        assert!(shows(&view, "The server reads the text of the pages."));
+    }
+
+    #[test]
+    fn a_failed_file_shows_the_problem() {
+        let mut view = LibraryView::new(PRESS, "Field Press".to_owned());
+        let problem = "Presswork cannot read the pages of the file. Upload the file again.";
+
+        let _ = view.update(
+            Message::Loaded(Ok(vec![
+                in_state(FileState::Failed, Some(problem)),
+                Work {
+                    id: Uuid::from_u128(11),
+                    key: "atlas".to_owned(),
+                    title: "Atlas".to_owned(),
+                    ..in_state(FileState::Failed, None)
+                },
+            ])),
+            &connection(),
+        );
+
+        assert!(shows(&view, problem));
+        assert!(shows(&view, "The server cannot read the text of the file."));
+    }
+
+    #[test]
+    fn a_changed_work_takes_the_place_of_the_old_one() {
+        let mut view = LibraryView::new(PRESS, "Field Press".to_owned());
+        let _ = view.update(
+            Message::Loaded(Ok(vec![in_state(FileState::Reading, None)])),
+            &connection(),
+        );
+
+        assert!(view.changed(work(NOTES, "field-notes", "Field Notes")));
+        assert!(shows(
+            &view,
+            "Gutenberg, Johannes · 1455 · @field-notes · 2 pages, 2 with text"
+        ));
+        assert!(!shows(&view, "The server reads the text of the pages."));
+        let elsewhere = Work {
+            organization_id: Uuid::from_u128(99),
+            ..work(Uuid::from_u128(12), "atlas", "Atlas")
+        };
+        assert!(!view.changed(elsewhere));
+        assert_eq!(view.works().unwrap().len(), 1);
     }
 
     fn loaded() -> LibraryView {

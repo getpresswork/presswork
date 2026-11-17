@@ -198,8 +198,8 @@ mod tests {
     use axum::{Json, Router};
     use jiff::Timestamp;
     use presswork_api::{
-        ApiError, Document, LibraryFile, Membership, NewDocument, NewTask, NewWork, Project, Role,
-        SearchHit, Session, SignIn, SignedIn, Task, TaskChange, TaskState, Work,
+        ApiError, Document, FileState, LibraryFile, Membership, NewDocument, NewTask, NewWork,
+        Project, Role, SearchHit, Session, SignIn, SignedIn, Task, TaskChange, TaskState, Work,
     };
     use tokio::net::TcpListener;
     use uuid::Uuid;
@@ -481,8 +481,13 @@ mod tests {
                             size: u64::try_from(body.len()).unwrap(),
                             pages: u32::from(pdf),
                             pages_with_text: 0,
+                            state: FileState::Reading,
+                            problem: None,
                         };
-                        Ok(Json(work(id, "atlas", "Atlas", Some(file))))
+                        Ok((
+                            StatusCode::ACCEPTED,
+                            Json(work(id, "atlas", "Atlas", Some(file))),
+                        ))
                     },
                 ),
             )
@@ -541,6 +546,8 @@ mod tests {
                 size: 8,
                 pages: 1,
                 pages_with_text: 0,
+                state: FileState::Reading,
+                problem: None,
             })
         );
         assert_eq!(hits[0].page, 3);

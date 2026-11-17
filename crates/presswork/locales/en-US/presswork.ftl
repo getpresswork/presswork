@@ -52,6 +52,12 @@ library-pages = { $pages ->
     [one] 1 page
    *[other] { $pages } pages
 }, { $text } with text
+library-page-count = { $pages ->
+    [one] 1 page
+   *[other] { $pages } pages
+}
+library-reading = The server reads the text of the pages.
+library-failed = The server cannot read the text of the file.
 library-no-file = No file
 library-form-title = Title
 library-form-creators = Creators

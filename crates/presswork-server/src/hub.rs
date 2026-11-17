@@ -61,13 +61,16 @@ impl Hub {
     }
 
     pub(crate) async fn announce(&self, message: ChatMessage) {
+        let organization = message.organization;
+        self.tell(organization, &ServerMessage::Said { message })
+            .await;
+    }
+
+    pub(crate) async fn tell(&self, organization: Uuid, message: &ServerMessage) {
         let chats = self.chats.lock().await;
-        if let Some(members) = chats.get(&message.organization) {
+        if let Some(members) = chats.get(&organization) {
             for outbox in members.values() {
-                let said = ServerMessage::Said {
-                    message: message.clone(),
-                };
-                let _ = outbox.send(Outgoing::Message(said));
+                let _ = outbox.send(Outgoing::Message(message.clone()));
             }
         }
     }
@@ -426,6 +429,31 @@ mod tests {
                 Outgoing::Message(ServerMessage::Said { message: said }) if said == message
             ));
         }
+    }
+
+    #[tokio::test]
+    async fn a_message_for_an_organization_reaches_only_its_members() {
+        let hub = Hub::default();
+        let (ann, mut ann_inbox) = outbox();
+        let (eve, mut eve_inbox) = outbox();
+        let other = Uuid::from_u128(99);
+        hub.join(PRESS, 1, ann, || async { Ok(Vec::new()) })
+            .await
+            .unwrap();
+        hub.join(other, 2, eve, || async { Ok(Vec::new()) })
+            .await
+            .unwrap();
+        next(&mut ann_inbox);
+        next(&mut eve_inbox);
+        let message = ServerMessage::Error {
+            code: "test".to_owned(),
+            message: "Only for Field Press.".to_owned(),
+        };
+
+        hub.tell(PRESS, &message).await;
+
+        assert!(matches!(next(&mut ann_inbox), Outgoing::Message(told) if told == message));
+        assert!(eve_inbox.try_recv().is_err());
     }
 
     #[tokio::test]

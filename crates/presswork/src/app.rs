@@ -10,6 +10,7 @@ use iced::{
     Element, Fill, FillPortion, Size, Subscription, Task, Theme, event, keyboard, padding, system,
     window,
 };
+use presswork_api::live::ServerMessage;
 use presswork_api::{Document, SearchHit};
 use presswork_editor::{Editor, Mark, MarkKind, Motion};
 use presswork_log::{Level, LogStore};
@@ -505,6 +506,17 @@ impl App {
     }
 
     fn live_event(&mut self, event: live_session::Event) -> Task<Message> {
+        if let live_session::Event::Received(ServerMessage::WorkChanged { work }) = &event {
+            let changed = self
+                .library
+                .as_mut()
+                .is_some_and(|library| library.changed((**work).clone()));
+            return if changed {
+                self.give_bibliography()
+            } else {
+                Task::none()
+            };
+        }
         let Some(live) = &mut self.live else {
             return Task::none();
         };
@@ -2453,6 +2465,43 @@ mod tests {
             .collect();
         assert_eq!(errors, Vec::<&str>::new());
         assert_eq!(app.preview.page_count(), 1);
+    }
+
+    #[test]
+    fn a_live_change_of_a_work_reaches_the_library_and_the_bibliography() {
+        let mut app = app();
+        let _receiver = open_with_chat(&mut app);
+        subscribed(
+            &mut app,
+            &server_with(
+                "#set page(width: 200pt, height: auto)\n\
+                 See @field-notes[p. 3].\n\
+                 #bibliography(\"library.yml\")\n",
+            ),
+        );
+        send(
+            &mut app,
+            Message::Library(library_view::Message::Loaded(Ok(Vec::new()))),
+        );
+
+        send(
+            &mut app,
+            Message::Live(live_session::Event::Received(ServerMessage::WorkChanged {
+                work: Box::new(field_notes_work()),
+            })),
+        );
+        app.compile_now();
+
+        assert_eq!(app.library.as_ref().unwrap().works().unwrap().len(), 1);
+        let errors = app
+            .compiled
+            .as_ref()
+            .unwrap()
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .count();
+        assert_eq!(errors, 0);
     }
 
     #[test]

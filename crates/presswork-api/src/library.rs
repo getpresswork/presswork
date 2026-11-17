@@ -13,11 +13,43 @@ pub struct Work {
     pub file: Option<LibraryFile>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct LibraryFile {
     pub size: u64,
     pub pages: u32,
     pub pages_with_text: u32,
+    pub state: FileState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FileState {
+    Reading,
+    Ready,
+    Failed,
+}
+
+impl FileState {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Reading => "reading",
+            Self::Ready => "ready",
+            Self::Failed => "failed",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "reading" => Some(Self::Reading),
+            "ready" => Some(Self::Ready),
+            "failed" => Some(Self::Failed),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -76,6 +108,8 @@ mod tests {
                 size: 2048,
                 pages: 12,
                 pages_with_text: 11,
+                state: FileState::Ready,
+                problem: None,
             }),
         };
 
@@ -83,9 +117,41 @@ mod tests {
 
         assert_eq!(
             value["file"],
-            json!({ "size": 2048, "pages": 12, "pages_with_text": 11 })
+            json!({ "size": 2048, "pages": 12, "pages_with_text": 11, "state": "ready" })
         );
         assert_eq!(serde_json::from_value::<Work>(value).unwrap(), work);
+    }
+
+    #[test]
+    fn file_states_have_snake_case_names() {
+        for (state, name) in [
+            (FileState::Reading, "reading"),
+            (FileState::Ready, "ready"),
+            (FileState::Failed, "failed"),
+        ] {
+            assert_eq!(serde_json::to_value(state).unwrap(), name);
+            assert_eq!(state.as_str(), name);
+            assert_eq!(FileState::parse(name), Some(state));
+        }
+        assert_eq!(FileState::parse("lost"), None);
+    }
+
+    #[test]
+    fn a_failed_file_tells_the_problem() {
+        let file: LibraryFile = serde_json::from_value(json!({
+            "size": 10,
+            "pages": 1,
+            "pages_with_text": 0,
+            "state": "failed",
+            "problem": "Presswork cannot read the text of the file.",
+        }))
+        .unwrap();
+
+        assert_eq!(file.state, FileState::Failed);
+        assert_eq!(
+            file.problem.as_deref(),
+            Some("Presswork cannot read the text of the file.")
+        );
     }
 
     #[test]
