@@ -31,9 +31,9 @@ You can deploy the server as a container image, or as one executable with system
 
 - Each account comes from an invite link (D102). A command on the server makes an organization and the invite link of its first administrator. After that, administrators make invite links through the API or with a command.
 - An invite link is for one email address and one role: `administrator` or `member`. It is valid for 7 days and for one use. If the email address has an account, the person must give the password of that account.
-- A password must have 12 characters or more (D113). A reset link is valid for 24 hours and for one use. A new password ends all sessions of the user.
+- A password must have 12 characters or more (D113). A reset link is valid for 24 hours and for one use. A new password ends all sessions of the user and revokes all personal access tokens of the user (D151).
 - A session lasts 30 days after its last use (D104).
-- Each token has a prefix that tells its type: `pws_` for a session, `pwi_` for an invite, and `pwr_` for a password reset. Thus secret scanners can find tokens in text.
+- Each token has a prefix that tells its type: `pws_` for a session, `pwt_` for a personal access token, `pwi_` for an invite, and `pwr_` for a password reset. Thus secret scanners can find tokens in text.
 - The server does not send email in milestone 1 (D103). The administrator sends each link.
 
 These commands make links. They print the link and write nothing else to the standard output:
@@ -49,8 +49,11 @@ The API has these operations for accounts:
 | Operation | Use | Authentication |
 | --- | --- | --- |
 | `POST /api/v1/sessions` | Sign in, and get a session for this device. | None |
-| `GET /api/v1/sessions` | List the sessions of the user. | Session |
-| `DELETE /api/v1/sessions/{id}` | End a session. | Session |
+| `GET /api/v1/sessions` | List the sessions of the user. | Session or access token |
+| `DELETE /api/v1/sessions/{id}` | End a session. | Session or access token |
+| `POST /api/v1/access-tokens` | Make a personal access token. | Session |
+| `GET /api/v1/access-tokens` | List the personal access tokens of the user, without the tokens. | Session or access token |
+| `DELETE /api/v1/access-tokens/{id}` | Revoke a personal access token. | Session or access token |
 | `POST /api/v1/invites/{token}/accept` | Accept an invite, and get a session. | None |
 | `POST /api/v1/password-resets/{token}` | Set a new password. | None |
 | `POST /api/v1/organizations/{id}/invites` | Make an invite link. | Session of an administrator |
@@ -66,7 +69,14 @@ The server limits the sign-in attempts (D148, D150):
 - The server keeps the counts in memory. A restart removes them. The server keeps the count of an email address as a SHA-256 hash, and it keeps 100,000 counts or fewer of each type.
 - The client address is the address of the connection. Behind a reverse proxy, set `trust_forwarded`. Then the server uses the last address in the `X-Forwarded-For` header. Set it only if the reverse proxy adds this header to each request, because a client can send a false header.
 
-Personal access tokens are not available yet.
+A personal access token is for scripts and CI (D149, D151):
+
+- A token has a name with 1 to 100 characters and an optional expiry time in the future. It has the rights of its user in all operations and on the live WebSocket.
+- The server shows the token only in the answer of `POST /api/v1/access-tokens`. It keeps only the SHA-256 hash of the token. The list shows the name, the time of creation, the expiry time, and the time of the last use.
+- Only a session can make a token. Thus a stolen token cannot make more tokens.
+- A user can have 100 tokens or fewer.
+
+A request with a personal access token uses the same `Authorization: Bearer` header as a session. A sign-in with a password always makes a session.
 
 ### Projects and tasks in milestone 1
 
