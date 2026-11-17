@@ -124,11 +124,12 @@ An edition has a year, a publisher, a language, translators, and one PDF file (D
 | `POST /api/v1/works/{id}/editions` | Add an edition to a work. | Member |
 | `POST /api/v1/editions/{id}/standard` | Make an edition the standard edition of its work. | Member |
 | `PUT /api/v1/editions/{id}/file` | Upload the PDF file of an edition, 64 MiB or less (D140, D143). A new file takes the place of the old file. The answer is 202 with the file in the state `reading`. | Member |
-| `PUT /api/v1/editions/{id}/page-map` | Replace the corrections of the page map of an edition (D147). The edition must have a file in the state `ready`. | Member |
+| `PUT /api/v1/editions/{id}/page-map` | Replace the corrections of the page map of an edition (D147). The edition must have a file in the state `ready` or `recognizing`. | Member |
 | `GET /api/v1/organizations/{id}/library/search?q=…` | Find the pages that have all the words, in all editions. Each result has the printed page number and tells if its edition is the standard edition. | Member |
 
 - The upload request opens the PDF file and counts its pages (D143). It refuses a file that is not a PDF file or that is encrypted.
 - A job then reads the text layer of each page with the `presswork-ocr` crate (D138) and sets the state `ready`. If the job cannot read the file, the state is `failed`, with a reason. Refer to "Jobs in milestone 1".
+- If some pages have no text layer and the server has an OCR engine, the state is `recognizing` and a second job runs OCR (D152). Refer to "OCR in milestone 1".
 - The job also reads the page labels of the PDF file and keeps them in the `page_ranges` table. The corrections of the members are in the same table. The `presswork-library` crate calculates the printed page number of each page from the two lists, and the server keeps it with the text of the page.
 - A page map has 100 corrections or fewer. A correction has a PDF page of the file, a style, a start number from 1 to 100,000, and a prefix of 20 characters or fewer, without control characters. A new file of the edition has no corrections.
 - When the state of a file changes, the server sends `WorkChanged` on the live WebSocket to each client that joined the organization (D145).
@@ -163,14 +164,34 @@ An edition has a year, a publisher, a language, translators, and one PDF file (D
 
 ### Jobs in milestone 1
 
-Milestone 1 has the job queue without routines (D142 to D144). The only kind of job is `read_text`, which reads the pages of a library file.
+Milestone 1 has the job queue without routines (D142 to D144). There are two kinds of jobs: `read_text` reads the pages of a library file, and `ocr` runs OCR on the pages without a text layer.
 
 - The `jobs` table keeps each job with its kind, its subject (the ID of an object), its state (`queued`, `running`, `done`, or `failed`), its attempts, and the time from which it can run.
 - The server adds a job in the same transaction as the record that needs it.
-- Two worker tasks in the server process take jobs with `FOR UPDATE SKIP LOCKED`. A worker holds a job for 10 minutes. If the server stops during a job, a worker takes the job again after that time.
+- Two worker tasks in the server process take jobs with `FOR UPDATE SKIP LOCKED`. A worker holds a job for 10 minutes, and extends this time while the job runs. If the server stops during a job, a worker takes the job again after that time.
 - A new job wakes the workers at once. The workers also look for jobs every 5 seconds.
 - A job has 3 attempts. After a temporary error, it runs again after 10 seconds, and then after 1 minute. A file that Presswork cannot read fails at once.
 - Each job is idempotent. A job for an object that does not exist any more ends without an error.
+
+### OCR in milestone 1
+
+The server runs OCRmyPDF with Tesseract on the pages without a text layer (D152 to D156).
+
+- At the start, the server runs `ocrmypdf --version` and `tesseract --list-langs`. If one of them fails, the server writes a warning in the log and operates without OCR.
+- The `ocr` job runs `ocrmypdf --skip-text --output-type pdf --optimize 0` on the file, in a temporary folder. Each run has a time limit of one hour.
+- The language of the edition gives the Tesseract language, for example `de` gives `deu` (D153). If the server has no data for that language, OCR uses the setting `ocr_languages`.
+- The server keeps the copy with the text layer as `library/{file}.ocr.pdf` in the `blobs` folder. The original file does not change.
+- The job reads the text of each page from the copy, keeps it in `library_pages`, adds it to the search index, and sets the state `ready`.
+- A problem of the file, for example an encrypted or signed file, stops OCR at once. After the last attempt, the file gets the state `ready` with a problem. Its pages keep the text of the text layer.
+- OCRmyPDF, Tesseract, and Ghostscript read files that members upload. Run the server in a container or with a user that has few rights. Refer to [Security](security.md).
+
+To install the tools on Debian or Ubuntu:
+
+```sh
+sudo apt-get install ocrmypdf tesseract-ocr-eng
+```
+
+Install one `tesseract-ocr-*` package for each language of the library, for example `tesseract-ocr-deu` for German.
 
 ## Document storage
 
@@ -195,6 +216,8 @@ The environment variable `PRESSWORK_CONFIG` gives the path of the settings file.
 | `database_url` | `PRESSWORK_DATABASE_URL` | None. The setting is necessary. | The PostgreSQL connection URL. |
 | `data` | `PRESSWORK_DATA` | `data` in the working folder | The folder for the library files (`blobs`) and the search index (`index`). |
 | `trust_forwarded` | `PRESSWORK_TRUST_FORWARDED` | `false` | If `true`, the client address for the sign-in limits is the last address in the `X-Forwarded-For` header. Use `true` only behind a reverse proxy that adds this header. |
+| `ocrmypdf` | `PRESSWORK_OCRMYPDF` | `ocrmypdf` | The OCRmyPDF program, as a name on the `PATH` or as a full path. An empty value turns OCR off. |
+| `ocr_languages` | `PRESSWORK_OCR_LANGUAGES` | `eng` | The Tesseract languages for the files whose edition language has no Tesseract data, for example `eng+deu`. |
 
 The server refuses a settings file with an unknown key. Thus a key with a spelling error gives an error and is not ignored.
 

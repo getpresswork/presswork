@@ -13,6 +13,7 @@ This chapter tells how Presswork protects documents, accounts, and computers.
 - The server limits the failed sign-ins for each email address and for each client address (D148). Refer to [Server](server.md).
 - Each request handler checks the permission before it does the operation. The default is no access.
 - Put the server behind a reverse proxy that uses TLS. Do not let clients connect to the server with plain HTTP.
+- OCR runs OCRmyPDF, Tesseract, and Ghostscript on the files that members upload (D152). These programs are not in Rust, and a hostile PDF file can attack them. Run the server in a container, or with a user that can write only to the `data` folder. Each OCR run has a time limit of one hour.
 - The audit log records all changes.
 
 ## Two-factor sign-in
@@ -60,6 +61,7 @@ Before release 1.0, an external security audit examines the encryption design an
 - The toolchain manager downloads only through HTTPS.
 - The toolchain manager compares the SHA-256 digest of each file with the published digest before it unpacks the file.
 - The toolchain manager does not unpack paths outside of the target folder.
+- The two model files of the ocrs engine have fixed SHA-256 digests in the `presswork-ocr` crate. The engine does not load a model file with a different digest (D154).
 
 ## Updates
 

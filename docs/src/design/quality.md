@@ -22,7 +22,19 @@ A change in behavior must come with tests for that behavior.
 | Snapshot tests | Diagnostics, API data, rendered widgets | `insta` |
 | Interface tests | Application flows without a window | `iced_test` |
 | Database tests | Server repositories and API handlers | PostgreSQL, with one database for each test |
+| OCR tests | The OCR engines in `presswork-ocr` | OCRmyPDF with Tesseract, and ocrs with its models |
 | End-to-end tests | Two clients and one server in one process | All of the above |
+
+## OCR tests
+
+The OCR tests run the real engines on an image of a page (D155). They run only when these variables are set. Without a variable, its tests stop at once and write a note.
+
+| Variable | Value |
+| --- | --- |
+| `PRESSWORK_TEST_OCRMYPDF` | The OCRmyPDF program, for example `ocrmypdf`. `tesseract` must be on the `PATH`, with the English data. |
+| `PRESSWORK_TEST_OCRS_MODELS` | A folder with the ocrs models `text-detection.onnx` and `text-recognition.onnx`. The test checks their SHA-256 digests. |
+
+In CI, the "OCR tests" job installs the tools, downloads the models, and sets both variables.
 
 ## Interface tests
 

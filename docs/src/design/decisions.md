@@ -1064,3 +1064,38 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** Only a session can make a personal access token (D149). A request with a token can use all other operations of the user, also the list and the revocation of tokens. A new password revokes all tokens of the user, as it ends all sessions. A user can have 100 tokens or fewer. A token name has 1 to 100 characters without control characters. An expiry time must be in the future. The server records the time of the last use of a token, with a precision of one minute.
 - **Reason:** A stolen token must not make new tokens that stay after the user revokes the stolen token. A password reset is the response to a stolen account, and milestone 1 does not send an email when a token is made, so the user possibly does not see a token of an attacker. The maximum count stops a script that makes tokens in a loop.
 - **Other options:** A new password that keeps the tokens, so that CI continues to operate. Tokens that can make tokens. No maximum count.
+
+## D152. OCR on the server for the pages without a text layer
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Project owner.
+- **Decision:** After the job reads the text layer of a file, a second job runs OCRmyPDF with Tesseract (D29) on the pages without a text layer (`--skip-text`). The file has the state `recognizing` until OCR ends. The server keeps the copy with the new text layer next to the original file. The original file does not change. If OCR fails, or if the server has no OCR engine, the file gets the state `ready`, and the pages without a text layer have no text.
+- **Reason:** Many library files are scans. A text layer from the publisher is usually better than OCR, so OCR does not replace it.
+- **Other options:** OCR only when a member starts it. OCR of all pages again with `--redo-ocr`.
+
+## D153. The OCR language from the edition
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Project owner.
+- **Decision:** The server changes the language of the edition, for example `de` or `de-AT`, into the Tesseract language, for example `deu`. If the server has no Tesseract data for that language, OCR uses the languages of the setting `ocr_languages`. The default is `eng`.
+- **Reason:** The language data has a large effect on the accuracy of OCR, and each edition already has its language.
+- **Other options:** One server setting for all files. The language of the edition together with English.
+
+## D154. The ocrs engine without a desktop screen in milestone 1
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Project owner.
+- **Decision:** The `presswork-ocr` crate contains the ocrs engine (D29) behind the `OcrEngine` trait, in the cargo feature `ocrs`. The server does not compile it. The two model files of ocrs have fixed SHA-256 digests. Local libraries (milestone 4) and the command-line tool (milestone 2) use the engine later. Then the desktop application downloads the models from the ocrs model host at the first use, after the user approves, checks the digests, and keeps the models in its data folder, as for Typst toolchains.
+- **Reason:** The engine and its tests are ready for local libraries. Milestone 1 gets no new screens before its release.
+- **Other options:** OCR on the desktop before the upload. The command-line tool now. The models in the installers. A copy of the models in the releases of Presswork.
+
+## D155. The real OCR engines in tests
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Project owner.
+- **Decision:** The OCR tests use the real engines. They run only when the variables `PRESSWORK_TEST_OCRMYPDF` and `PRESSWORK_TEST_OCRS_MODELS` are set, as the database tests do (D105). The CI job "OCR tests" installs OCRmyPDF and the English Tesseract data from the Ubuntu 24.04 archive. It also downloads the ocrs models, checks their digests, and keeps them in the CI cache. On the computer of the project owner, scoop installs Tesseract and Ghostscript, and pip installs OCRmyPDF in a virtual environment.
+- **Reason:** A fake engine cannot find the problems of the real tools. Without the tools, all other tests still run.
+- **Other options:** The real engines only in CI. A fake engine only.
+
+## D156. Details of OCR on the server
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Default.
+- **Decision:** OCRmyPDF runs with `--output-type pdf` and `--optimize 0`, so that the copy keeps the images and the structure of the original file. Each run has a time limit of one hour. A worker extends the lease of its job (D142) while the job runs, so that a long OCR job does not start two times. Each run uses the processors of the server divided by the number of workers. A problem of the file, for example an encrypted or signed file, stops OCR at once. Other problems get three attempts (D144). After OCR fails, the file shows the problem, and its pages keep the text of the text layer. A member can correct the page map while OCR runs. `tesseract` must be on the `PATH` of the server. The setting `ocrmypdf` gives the OCRmyPDF program, and an empty value turns OCR off.
+- **Reason:** A library file is a reference copy, so OCR must not change its images. A scan of many hundreds of pages can take more than the lease of ten minutes.
+- **Other options:** PDF/A output. Optimized images. A time limit for each page only.

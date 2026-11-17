@@ -8,12 +8,13 @@ The library keeps the texts that a team reads, quotes, and cites. All members us
 
 ## Library in milestone 1
 
-Milestone 1 has a small library of the organization (D136 to D147):
+Milestone 1 has a small library of the organization (D136 to D147, D152 to D156):
 
 - A work can have many editions, for example a translation or a reprint. Each edition has a year, a publisher, a language, translators, and one PDF file.
 - One edition of each work is the standard edition of the organization (D146). The first edition is the standard edition until a member selects a different one.
 - To add a work, type the title, the creators, the citation key, and the data of the first edition. Then upload the PDF file.
-- A job on the server reads the text layer of each page (D143). A page without a text layer has no text until OCR is available.
+- A job on the server reads the text layer of each page (D143). For the pages without a text layer, a second job runs OCR with OCRmyPDF and Tesseract, in the language of the edition (D152, D153). While OCR runs, the edition shows "The server finds the text of the scanned pages with OCR".
+- In milestone 1, OCR gives a copy of the file with a text layer, and the text of each page. The positions of the words and a proposed page map come later.
 - The job also reads the page labels of the PDF file, for example `xii` or `412`. These labels are the page map of the edition (D147). A page without a label uses its PDF page number.
 - If the page labels are incorrect or missing, a member can correct them with **Page numbers…**. A correction starts at a PDF page, for example "PDF page 15 is printed page 1", with Arabic or Roman numbers. A correction replaces the labels from its page to the next correction.
 - The search finds the pages of all editions of all works of the organization. Each result shows the printed page number and tells if its edition is the standard edition.
@@ -65,7 +66,7 @@ Scanned PDF files have no text layer. OCR makes the text layer.
 | Server | OCRmyPDF with Tesseract | All server libraries. More than 100 languages. The server runs OCR as a background job. |
 | Desktop | ocrs | Local libraries and encrypted projects. Languages with the Latin script. |
 
-Both engines are behind the `OcrEngine` trait. The result of OCR has these parts:
+Both engines are behind the `OcrEngine` trait in the `presswork-ocr` crate. In milestone 1, only the server uses OCR. The desktop engine is ready for local libraries (D154). The result of OCR has these parts:
 
 - A copy of the PDF file with a text layer. The original file does not change.
 - The text of each page, with the position of each word.
