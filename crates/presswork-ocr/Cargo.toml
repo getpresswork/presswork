@@ -15,4 +15,5 @@ workspace = true
 [dependencies]
 hayro-interpret.workspace = true
 kurbo.workspace = true
+presswork-api.workspace = true
 thiserror.workspace = true

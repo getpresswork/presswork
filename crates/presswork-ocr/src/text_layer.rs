@@ -8,6 +8,9 @@ use hayro_interpret::{
     InterpreterSettings, Paint, PathDrawMode, SoftMask, TransformExt, interpret_page,
 };
 use kurbo::{Affine, BezPath, Point, Rect};
+use presswork_api::PageRange;
+
+use crate::labels::label_ranges;
 
 const GLYPH_UNITS: f64 = 1000.0;
 const NEW_LINE: f64 = 0.5;
@@ -34,15 +37,31 @@ pub fn page_count(pdf: impl AsRef<[u8]> + Send + Sync + 'static) -> Result<u32, 
     Ok(u32::try_from(pdf.pages().len()).unwrap_or(u32::MAX))
 }
 
-pub fn text_layer(pdf: impl AsRef<[u8]> + Send + Sync + 'static) -> Result<Vec<String>, ReadError> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PdfPages {
+    pub texts: Vec<String>,
+    pub labels: Vec<PageRange>,
+}
+
+pub fn read_pages(pdf: impl AsRef<[u8]> + Send + Sync + 'static) -> Result<PdfPages, ReadError> {
     let pdf = open(pdf)?;
+    Ok(PdfPages {
+        labels: label_ranges(&pdf),
+        texts: texts(&pdf),
+    })
+}
+
+pub fn text_layer(pdf: impl AsRef<[u8]> + Send + Sync + 'static) -> Result<Vec<String>, ReadError> {
+    Ok(texts(&open(pdf)?))
+}
+
+fn texts(pdf: &Pdf) -> Vec<String> {
     let cache = InterpreterCache::new();
     let settings = InterpreterSettings {
         render_annotations: false,
         ..InterpreterSettings::default()
     };
-    let pages = pdf
-        .pages()
+    pdf.pages()
         .iter()
         .map(|page| {
             let (width, height) = page.render_dimensions();
@@ -57,8 +76,7 @@ pub fn text_layer(pdf: impl AsRef<[u8]> + Send + Sync + 'static) -> Result<Vec<S
             interpret_page(page, &mut context, &mut device);
             device.text.trim_end().to_owned()
         })
-        .collect();
-    Ok(pages)
+        .collect()
 }
 
 #[derive(Clone, Copy)]
@@ -158,6 +176,8 @@ impl<'a> Device<'a> for TextDevice {
 mod tests {
     use std::fmt::Write as _;
 
+    use presswork_api::LabelStyle;
+
     use super::*;
 
     fn escaped(text: &str) -> String {
@@ -176,11 +196,15 @@ mod tests {
     }
 
     fn pdf(pages: &[String]) -> Vec<u8> {
+        pdf_with_catalog(pages, "")
+    }
+
+    fn pdf_with_catalog(pages: &[String], catalog: &str) -> Vec<u8> {
         let kids: Vec<String> = (0..pages.len())
             .map(|index| format!("{} 0 R", 4 + 2 * index))
             .collect();
         let mut objects = vec![
-            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+            format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>"),
             format!(
                 "<< /Type /Pages /Kids [{}] /Count {} >>",
                 kids.join(" "),
@@ -284,6 +308,62 @@ mod tests {
             ]
         );
         assert!(pages[0].starts_with("Paper and ink\n"), "{:?}", pages[0]);
+    }
+
+    fn range(first_page: u32, style: LabelStyle, prefix: &str, start: u32) -> PageRange {
+        PageRange {
+            first_page,
+            style,
+            prefix: prefix.to_owned(),
+            start,
+        }
+    }
+
+    #[test]
+    fn the_page_labels_of_the_pdf_file_give_ranges() {
+        let file = pdf_with_catalog(
+            &vec![String::new(); 5],
+            "/PageLabels << /Nums [0 << /S /r >> 2 << /S /D >> 4 << /P (A-) /S /D /St 8 >>] >>",
+        );
+
+        let pages = read_pages(file).unwrap();
+
+        assert_eq!(pages.texts.len(), 5);
+        assert_eq!(
+            pages.labels,
+            [
+                range(1, LabelStyle::LowerRoman, "", 1),
+                range(3, LabelStyle::Arabic, "", 1),
+                range(5, LabelStyle::Arabic, "A-", 8),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_label_tree_with_kids_gives_all_ranges() {
+        let file = pdf_with_catalog(
+            &vec![String::new(); 4],
+            "/PageLabels << /Kids [<< /Nums [0 << /S /R >>] >> \
+             << /Nums [3 << /S /a /St 2 /P <FEFF0041002D> >>] >>] >>",
+        );
+
+        assert_eq!(
+            read_pages(file).unwrap().labels,
+            [
+                range(1, LabelStyle::UpperRoman, "", 1),
+                range(4, LabelStyle::LowerLetters, "A-", 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_pdf_file_without_labels_has_no_ranges() {
+        let file = pdf(&[lines(&["Text."])]);
+
+        let pages = read_pages(file).unwrap();
+
+        assert_eq!(pages.texts, ["Text."]);
+        assert_eq!(pages.labels, []);
     }
 
     #[test]
