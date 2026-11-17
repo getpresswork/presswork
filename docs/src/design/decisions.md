@@ -983,7 +983,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D140. Upload in two requests
 
-- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Status:** Accepted, 2026-11-16. Partially replaced by D143. **Origin:** Default.
 - **Decision:** The client sends the data of a new work as JSON: `POST /api/v1/organizations/{id}/works`. Then it sends the PDF file as the body of a second request: `PUT /api/v1/works/{id}/file`. The second request returns when the server has read the text of all pages.
 - **Reason:** The API stays JSON for data, and the server needs no multipart parser. The text is ready for search when the upload is complete.
 - **Other options:** One multipart request. A background job for the text, with a state that the client gets at intervals.
@@ -994,3 +994,31 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** When a server document is open, the Research workspace shows the library of its organization: the works, an **Add PDF…** button, and a search field. Each search result has a **Cite** button. **Cite** opens the Write workspace and puts `@key[p. N]` at the cursor. N is the page in the PDF file, because page maps come in milestone 4. If the document has no `#bibliography`, Presswork adds `#bibliography("library.yml")` at the end. The desktop application makes `library.yml` in the Hayagriva format from the works of the library, and gives it to the Typst engine as a file next to the document.
 - **Reason:** A citation compiles at once after one click. The format follows "Citations in Typst" in [Library](library.md).
 - **Other options:** The user types the bibliography call. A `library.yml` document on the server.
+
+## D142. A job queue in PostgreSQL
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Project owner.
+- **Decision:** The server keeps background jobs in the `jobs` table. A job has a kind, a subject (the ID of an object), a state, a number of attempts, and a time from which it can run. Two worker tasks in the server process take jobs with `FOR UPDATE SKIP LOCKED`. A worker holds a job for 10 minutes. If the worker stops, a different worker takes the job after that time. A new job wakes the workers at once. The workers also look for jobs every 5 seconds.
+- **Reason:** This follows the routine engine in [Server](server.md). The jobs stay in the database when the server stops. Separate worker processes can come with OCR and exports.
+- **Other options:** A separate `presswork-server worker` command. Jobs in memory only.
+
+## D143. Upload with a quick check, then a job for the text
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Project owner.
+- **Decision:** `PUT /api/v1/works/{id}/file` opens the PDF file and counts its pages. If the file is not a PDF file or is encrypted, the server refuses it at once. Otherwise the server keeps the file with the state `reading`, adds a job, and answers 202 with the work. The job reads the text of the pages, keeps it, adds it to the search index, and sets the state `ready`. This replaces the part of D140 where the request waits for the text.
+- **Reason:** A large file does not hold the request. A wrong file still gets a message at once.
+- **Other options:** All checks in the job, so that a wrong file shows the state `failed` some seconds later.
+
+## D144. Three attempts for a job
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Project owner.
+- **Decision:** A job has 3 attempts. After a temporary error, for example a stopped database, the job runs again after 10 seconds, and then after 1 minute. A file that Presswork cannot read fails at once. A failed file has the state `failed` and a reason that the list of works shows.
+- **Reason:** A short stop of the database does not leave a file without text.
+- **Other options:** One attempt.
+
+## D145. WorkChanged on the live WebSocket
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Project owner.
+- **Decision:** When the state of a library file changes, the server sends `WorkChanged` with the work to all clients that joined the organization (D134). The desktop application updates its list of works at once. The protocol version becomes 2.
+- **Reason:** One connection carries all live data (D14). The desktop does not have to ask again.
+- **Other options:** The desktop gets the list every 3 seconds. The list changes only when the user opens the Research workspace again.
