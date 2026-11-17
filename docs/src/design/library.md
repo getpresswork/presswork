@@ -14,8 +14,10 @@ Milestone 1 has a small library of the organization (D136 to D147):
 - One edition of each work is the standard edition of the organization (D146). The first edition is the standard edition until a member selects a different one.
 - To add a work, type the title, the creators, the citation key, and the data of the first edition. Then upload the PDF file.
 - A job on the server reads the text layer of each page (D143). A page without a text layer has no text until OCR is available.
-- The search finds the pages of all editions of all works of the organization. Each result tells if its edition is the standard edition.
-- **Cite** puts `@key[p. N]` in the document. Only the pages of the standard edition can be cited, because the key refers to the standard edition.
+- The job also reads the page labels of the PDF file, for example `xii` or `412`. These labels are the page map of the edition (D147). A page without a label uses its PDF page number.
+- If the page labels are incorrect or missing, a member can correct them with **Page numbers…**. A correction starts at a PDF page, for example "PDF page 15 is printed page 1", with Arabic or Roman numbers. A correction replaces the labels from its page to the next correction.
+- The search finds the pages of all editions of all works of the organization. Each result shows the printed page number and tells if its edition is the standard edition.
+- **Cite** puts `@key[p. N]` in the document, with the printed page number. Only the pages of the standard edition can be cited, because the key refers to the standard edition.
 - The desktop application makes the bibliography file `library.yml` from the standard editions.
 
 ## Records

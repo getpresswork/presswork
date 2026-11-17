@@ -209,8 +209,9 @@ When a server document is open, the Research workspace shows the library of its 
 - To add an edition, for example a translation, select **Add edition…** next to the work and select its PDF file.
 - To change the standard edition, select **Make standard** next to an edition (D146).
 - After the upload, the edition shows "The server reads the text of the pages." When the server is ready, the list changes at once and shows the number of pages with text. If the server cannot read the file, the edition shows the reason.
-- To find a passage, type words in the search field. Then select **Find** or push Enter. The results show each page that has all the words, with the text around them.
-- To cite a page, select **Cite** next to a result. Presswork opens the Write workspace and puts `@key[p. N]` at the cursor. If the document has no `#bibliography`, Presswork adds `#bibliography("library.yml")` at the end. A result from an edition that is not the standard edition shows "Not the standard edition" and has no **Cite**.
+- To correct the printed page numbers of an edition, select **Page numbers…** next to the edition (D147). Each correction shows its first PDF page and its first printed page, for example "PDF page 15 is printed page 1". To add a correction, type the PDF page and the printed page, select the style (1, 2, 3 or i, ii, iii or I, II, III), then select **Add correction**. Select **Save** to send the corrections to the server.
+- To find a passage, type words in the search field. Then select **Find** or push Enter. The results show each page that has all the words, with its printed page number and the text around the words.
+- To cite a page, select **Cite** next to a result. Presswork opens the Write workspace and puts `@key[p. N]` at the cursor, with the printed page number. If the document has no `#bibliography`, Presswork adds `#bibliography("library.yml")` at the end. A result from an edition that is not the standard edition shows "Not the standard edition" and has no **Cite**.
 - Presswork gives the Typst engine the file `library.yml` with the standard editions of the works. Thus the citations compile in the preview.
 
 ## Home dashboard

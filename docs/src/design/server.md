@@ -105,10 +105,13 @@ An edition has a year, a publisher, a language, translators, and one PDF file (D
 | `POST /api/v1/works/{id}/editions` | Add an edition to a work. | Member |
 | `POST /api/v1/editions/{id}/standard` | Make an edition the standard edition of its work. | Member |
 | `PUT /api/v1/editions/{id}/file` | Upload the PDF file of an edition, 64 MiB or less (D140, D143). A new file takes the place of the old file. The answer is 202 with the file in the state `reading`. | Member |
-| `GET /api/v1/organizations/{id}/library/search?q=…` | Find the pages that have all the words, in all editions. Each result tells if its edition is the standard edition. | Member |
+| `PUT /api/v1/editions/{id}/page-map` | Replace the corrections of the page map of an edition (D147). The edition must have a file in the state `ready`. | Member |
+| `GET /api/v1/organizations/{id}/library/search?q=…` | Find the pages that have all the words, in all editions. Each result has the printed page number and tells if its edition is the standard edition. | Member |
 
 - The upload request opens the PDF file and counts its pages (D143). It refuses a file that is not a PDF file or that is encrypted.
 - A job then reads the text layer of each page with the `presswork-ocr` crate (D138) and sets the state `ready`. If the job cannot read the file, the state is `failed`, with a reason. Refer to "Jobs in milestone 1".
+- The job also reads the page labels of the PDF file and keeps them in the `page_ranges` table. The corrections of the members are in the same table. The `presswork-library` crate calculates the printed page number of each page from the two lists, and the server keeps it with the text of the page.
+- A page map has 100 corrections or fewer. A correction has a PDF page of the file, a style, a start number from 1 to 100,000, and a prefix of 20 characters or fewer, without control characters. A new file of the edition has no corrections.
 - When the state of a file changes, the server sends `WorkChanged` on the live WebSocket to each client that joined the organization (D145).
 - The server keeps each file in the `blobs` folder of its `data` folder (D137), and the text of each page in the `library_pages` table.
 - The `presswork-search` crate keeps a Tantivy index of the pages in the `index` folder (D139). If the index is empty when the server starts, the server makes it again from the database.
