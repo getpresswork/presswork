@@ -10,7 +10,8 @@ use presswork_ui::{font, font_size};
 
 use presswork_api::live::{ChatMessage, ServerMessage as LiveMessage};
 use presswork_api::{
-    Document, Edition, FileState, LibraryFile, Project, SearchHit, Task, TaskState, Work,
+    Document, Edition, FileState, LabelStyle, LibraryFile, Project, SearchHit, Task, TaskState,
+    Work,
 };
 use presswork_client::Api;
 use presswork_editor::{Action as EditorAction, Motion};
@@ -246,6 +247,7 @@ fn render_library(app: &mut App) {
         language: String::new(),
         translators: Vec::new(),
         standard,
+        corrections: Vec::new(),
         file: Some(LibraryFile {
             size: u64::from(pages) * 40_000,
             pages,
@@ -298,6 +300,7 @@ fn render_library(app: &mut App) {
         key: String::new(),
         title: title.to_owned(),
         page,
+        label: (page + 10).to_string(),
         snippet: snippet.to_owned(),
         standard,
     };
@@ -321,7 +324,11 @@ fn render_library(app: &mut App) {
     ];
     send(app, Message::Library(LibraryMessage::Found(Ok(hits))));
     render(app, "server-library");
+    render_page_map(app);
+    render_new_work(app);
+}
 
+fn render_new_work(app: &mut App) {
     send(
         app,
         Message::Library(LibraryMessage::Picked(
@@ -338,6 +345,26 @@ fn render_library(app: &mut App) {
         Message::Library(LibraryMessage::Year("1683".to_owned())),
     );
     render(app, "server-library-add");
+}
+
+fn render_page_map(app: &mut App) {
+    send(
+        app,
+        Message::Library(LibraryMessage::EditPageMap(Uuid::from_u128(21))),
+    );
+    for message in [
+        LibraryMessage::CorrectionPage("1".to_owned()),
+        LibraryMessage::CorrectionStyle(LabelStyle::LowerRoman),
+        LibraryMessage::AddCorrection,
+        LibraryMessage::CorrectionPage("9".to_owned()),
+        LibraryMessage::CorrectionStyle(LabelStyle::Arabic),
+        LibraryMessage::AddCorrection,
+        LibraryMessage::CorrectionPage("15".to_owned()),
+    ] {
+        send(app, Message::Library(message));
+    }
+    render(app, "server-library-pages");
+    send(app, Message::Library(LibraryMessage::Cancel));
 }
 
 fn render_server(app: &mut App) {

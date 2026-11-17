@@ -414,7 +414,7 @@ impl App {
         }
         tasks.push(self.edit(presswork_editor::Action::Insert(format!(
             "@{}[p. {}]",
-            hit.key, hit.page
+            hit.key, hit.label
         ))));
         Task::batch(tasks)
     }
@@ -2366,6 +2366,7 @@ mod tests {
             key: "field-notes".to_owned(),
             title: "Field Notes".to_owned(),
             page: 3,
+            label: "iii".to_owned(),
             snippet: "The fine grain of the paper".to_owned(),
             standard: true,
         }
@@ -2385,6 +2386,7 @@ mod tests {
                 language: String::new(),
                 translators: Vec::new(),
                 standard: true,
+                corrections: Vec::new(),
                 file: None,
             }],
         }
@@ -2423,7 +2425,7 @@ mod tests {
         assert_eq!(app.workspace, Workspace::Write);
         assert_eq!(
             app.editor.document().buffer().to_string(),
-            "Paper matters.@field-notes[p. 3]\n#bibliography(\"library.yml\")\n"
+            "Paper matters.@field-notes[p. iii]\n#bibliography(\"library.yml\")\n"
         );
         assert!(
             drained(&mut receiver)

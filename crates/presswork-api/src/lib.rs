@@ -11,7 +11,8 @@ pub use document::{Document, NewDocument};
 pub use error::ApiError;
 pub use health::{Health, Status};
 pub use library::{
-    Edition, FileState, LabelStyle, LibraryFile, NewEdition, NewWork, PageRange, SearchHit, Work,
+    Edition, FileState, LabelStyle, LibraryFile, NewEdition, NewWork, PageMap, PageRange,
+    SearchHit, Work,
 };
 pub use organization::{AcceptInvite, CreatedInvite, Joined, NewInvite, NewPassword, Role};
 pub use session::{Session, SignIn, SignedIn};

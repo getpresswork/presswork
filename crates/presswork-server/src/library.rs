@@ -9,9 +9,11 @@ use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
 use object_store::path::Path as BlobPath;
 use object_store::{ObjectStore, ObjectStoreExt, PutPayload};
-use presswork_api::{Edition, FileState, LibraryFile, NewEdition, NewWork, SearchHit, Work};
-use presswork_library::{KeyError, parse_key};
-use presswork_ocr::{ReadError, page_count, text_layer};
+use presswork_api::{
+    Edition, FileState, LabelStyle, LibraryFile, NewEdition, NewWork, PageRange, SearchHit, Work,
+};
+use presswork_library::{KeyError, page_labels, parse_key};
+use presswork_ocr::{ReadError, page_count, read_pages};
 use presswork_search::{PageIndex, SearchError};
 use sha2::{Digest, Sha256};
 use sqlx::{PgConnection, PgPool};
@@ -28,6 +30,12 @@ const MAX_LANGUAGE_CHARACTERS: usize = 35;
 const YEARS: RangeInclusive<i32> = -9999..=9999;
 const SEARCH_LIMIT: usize = 20;
 const UNIQUE_VIOLATION: &str = "23505";
+const MAX_CORRECTIONS: usize = 100;
+const MAX_PDF_RANGES: usize = 1000;
+const MAX_PREFIX_CHARACTERS: usize = 20;
+const MAX_START: u32 = 100_000;
+const PDF_SOURCE: &str = "pdf";
+const MEMBER_SOURCE: &str = "member";
 
 type WorkRow = (Uuid, Uuid, String, String, Vec<String>);
 
@@ -72,6 +80,12 @@ pub enum LibraryError {
     Encrypted,
     #[error("the work or the edition does not exist")]
     NotFound,
+    #[error("the edition has no file with text yet. Upload its PDF file first")]
+    NoFile,
+    #[error(
+        "a page map can have 100 corrections or fewer. Each correction needs its own PDF page of the file, a start number from 1 to 100000, and a prefix of 20 characters or fewer"
+    )]
+    InvalidPageMap,
     #[error("the blob store failed: {0}")]
     Blobs(#[from] object_store::Error),
     #[error("the search index failed: {0}")]
@@ -209,6 +223,7 @@ async fn insert_edition(
         language: edition.language,
         translators: edition.translators,
         standard,
+        corrections: Vec::new(),
         file: None,
     })
 }
@@ -275,9 +290,28 @@ async fn with_editions(pool: &PgPool, rows: Vec<WorkRow>) -> Result<Vec<Work>, L
     .bind(&ids)
     .fetch_all(pool)
     .await?;
+    let edition_ids: Vec<Uuid> = editions.iter().map(|row| row.0).collect();
+    let mut corrections: HashMap<Uuid, Vec<PageRange>> = HashMap::new();
+    let rows_of_ranges: Vec<(Uuid, i32, String, String, i32)> = sqlx::query_as(
+        "SELECT library_files.edition_id, page_ranges.first_page, page_ranges.style, \
+         page_ranges.prefix, page_ranges.start FROM page_ranges \
+         JOIN library_files ON library_files.id = page_ranges.file_id \
+         WHERE page_ranges.source = 'member' AND library_files.edition_id = ANY($1) \
+         ORDER BY page_ranges.first_page",
+    )
+    .bind(&edition_ids)
+    .fetch_all(pool)
+    .await?;
+    for (edition, first_page, style, prefix, start) in rows_of_ranges {
+        corrections
+            .entry(edition)
+            .or_default()
+            .push(range_from((first_page, style, prefix, start)));
+    }
     let mut by_work: HashMap<Uuid, Vec<Edition>> = HashMap::new();
     for row in editions {
-        let (work_id, edition) = edition_from(row);
+        let (work_id, mut edition) = edition_from(row);
+        edition.corrections = corrections.remove(&edition.id).unwrap_or_default();
         by_work.entry(work_id).or_default().push(edition);
     }
     Ok(rows
@@ -336,20 +370,114 @@ pub(crate) async fn mark_failed(
     }
 }
 
-async fn store_pages(pool: &PgPool, file_id: Uuid, pages: &[String]) -> Result<(), LibraryError> {
+fn range_from((first_page, style, prefix, start): (i32, String, String, i32)) -> PageRange {
+    PageRange {
+        first_page: u32::try_from(first_page).unwrap_or(1),
+        style: LabelStyle::parse(&style).unwrap_or(LabelStyle::Arabic),
+        prefix,
+        start: u32::try_from(start).unwrap_or(1),
+    }
+}
+
+async fn ranges_of(
+    connection: &mut PgConnection,
+    file_id: Uuid,
+    source: &str,
+) -> Result<Vec<PageRange>, sqlx::Error> {
+    let rows: Vec<(i32, String, String, i32)> = sqlx::query_as(
+        "SELECT first_page, style, prefix, start FROM page_ranges \
+         WHERE file_id = $1 AND source = $2 ORDER BY first_page",
+    )
+    .bind(file_id)
+    .bind(source)
+    .fetch_all(connection)
+    .await?;
+    Ok(rows.into_iter().map(range_from).collect())
+}
+
+async fn replace_ranges(
+    connection: &mut PgConnection,
+    file_id: Uuid,
+    source: &str,
+    ranges: &[PageRange],
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM page_ranges WHERE file_id = $1 AND source = $2")
+        .bind(file_id)
+        .bind(source)
+        .execute(&mut *connection)
+        .await?;
+    let first_pages: Vec<i32> = ranges
+        .iter()
+        .map(|range| i32::try_from(range.first_page).unwrap_or(i32::MAX))
+        .collect();
+    let styles: Vec<&str> = ranges.iter().map(|range| range.style.as_str()).collect();
+    let prefixes: Vec<&str> = ranges.iter().map(|range| range.prefix.as_str()).collect();
+    let starts: Vec<i32> = ranges
+        .iter()
+        .map(|range| i32::try_from(range.start).unwrap_or(i32::MAX))
+        .collect();
+    sqlx::query(
+        "INSERT INTO page_ranges (file_id, source, first_page, style, prefix, start) \
+         SELECT $1, $2, range.first_page, range.style, range.prefix, range.start \
+         FROM UNNEST($3::INTEGER[], $4::TEXT[], $5::TEXT[], $6::INTEGER[]) \
+         AS range (first_page, style, prefix, start)",
+    )
+    .bind(file_id)
+    .bind(source)
+    .bind(&first_pages)
+    .bind(&styles)
+    .bind(&prefixes)
+    .bind(&starts)
+    .execute(connection)
+    .await?;
+    Ok(())
+}
+
+fn pdf_ranges(ranges: Vec<PageRange>) -> Vec<PageRange> {
+    ranges
+        .into_iter()
+        .take(MAX_PDF_RANGES)
+        .map(|range| PageRange {
+            prefix: range
+                .prefix
+                .chars()
+                .filter(|character| !character.is_control())
+                .take(MAX_PREFIX_CHARACTERS)
+                .collect(),
+            start: range.start.min(MAX_START),
+            ..range
+        })
+        .collect()
+}
+
+async fn store_pages(
+    pool: &PgPool,
+    file_id: Uuid,
+    pages: &[String],
+    pdf: &[PageRange],
+) -> Result<(), LibraryError> {
     let mut transaction = pool.begin().await?;
+    replace_ranges(&mut transaction, file_id, PDF_SOURCE, pdf).await?;
+    let corrections = ranges_of(&mut transaction, file_id, MEMBER_SOURCE).await?;
+    let labels = page_labels(
+        pdf,
+        &corrections,
+        u32::try_from(pages.len()).unwrap_or(u32::MAX),
+    );
     sqlx::query("DELETE FROM library_pages WHERE file_id = $1")
         .bind(file_id)
         .execute(&mut *transaction)
         .await?;
     let numbers: Vec<i32> = (1..=count(pages.len())).collect();
     sqlx::query(
-        "INSERT INTO library_pages (file_id, number, text) \
-         SELECT $1, page.number, page.text FROM UNNEST($2::INTEGER[], $3::TEXT[]) AS page (number, text)",
+        "INSERT INTO library_pages (file_id, number, text, label) \
+         SELECT $1, page.number, page.text, page.label \
+         FROM UNNEST($2::INTEGER[], $3::TEXT[], $4::TEXT[]) AS page (number, text, label)",
     )
     .bind(file_id)
     .bind(&numbers)
     .bind(pages)
+    .bind(&labels)
     .execute(&mut *transaction)
     .await?;
     let with_text = pages.iter().filter(|page| !page.trim().is_empty()).count();
@@ -407,9 +535,64 @@ fn edition_from(row: EditionRow) -> (Uuid, Edition) {
         language,
         translators,
         standard,
+        corrections: Vec::new(),
         file,
     };
     (work_id, edition)
+}
+
+pub(crate) fn parse_page_map(corrections: &[PageRange], pages: u32) -> Result<(), LibraryError> {
+    let mut first_pages: Vec<u32> = corrections.iter().map(|range| range.first_page).collect();
+    first_pages.sort_unstable();
+    first_pages.dedup();
+    let valid = corrections.len() <= MAX_CORRECTIONS
+        && first_pages.len() == corrections.len()
+        && corrections.iter().all(|range| {
+            (1..=pages).contains(&range.first_page)
+                && (1..=MAX_START).contains(&range.start)
+                && range.prefix.chars().count() <= MAX_PREFIX_CHARACTERS
+                && !range.prefix.chars().any(char::is_control)
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(LibraryError::InvalidPageMap)
+    }
+}
+
+pub async fn set_page_map(
+    pool: &PgPool,
+    edition_id: Uuid,
+    corrections: &[PageRange],
+) -> Result<Work, LibraryError> {
+    let mut transaction = pool.begin().await?;
+    let (file_id, pages, work_id): (Uuid, i32, Uuid) = sqlx::query_as(
+        "SELECT library_files.id, library_files.pages, editions.work_id FROM library_files \
+         JOIN editions ON editions.id = library_files.edition_id \
+         WHERE library_files.edition_id = $1 AND library_files.state = 'ready'",
+    )
+    .bind(edition_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .ok_or(LibraryError::NoFile)?;
+    let pages = u32::try_from(pages).unwrap_or_default();
+    parse_page_map(corrections, pages)?;
+    replace_ranges(&mut transaction, file_id, MEMBER_SOURCE, corrections).await?;
+    let pdf = ranges_of(&mut transaction, file_id, PDF_SOURCE).await?;
+    let labels = page_labels(&pdf, corrections, pages);
+    let numbers: Vec<i32> = (1..=count(labels.len())).collect();
+    sqlx::query(
+        "UPDATE library_pages SET label = page.label \
+         FROM UNNEST($2::INTEGER[], $3::TEXT[]) AS page (number, label) \
+         WHERE library_pages.file_id = $1 AND library_pages.number = page.number",
+    )
+    .bind(file_id)
+    .bind(&numbers)
+    .bind(&labels)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    work(pool, work_id).await?.ok_or(LibraryError::NotFound)
 }
 
 struct NewFile<'a> {
@@ -551,12 +734,12 @@ impl Library {
             return Ok(None);
         };
         let bytes = self.blobs.get(&blob_path(file_id)).await?.bytes().await?;
-        let pages = tokio::task::spawn_blocking(move || text_layer(bytes))
+        let read = tokio::task::spawn_blocking(move || read_pages(bytes))
             .await
             .map_err(|_| LibraryError::NotPdf)?
             .map_err(read_error)?;
-        let pages = readable(pages);
-        store_pages(pool, file_id, &pages).await?;
+        let pages = readable(read.texts);
+        store_pages(pool, file_id, &pages, &pdf_ranges(read.labels)).await?;
         self.index_pages(owner, pages).await?;
         work(pool, owner.1).await
     }
@@ -602,16 +785,41 @@ impl Library {
         .await?
         .into_iter()
         .collect();
+        let numbers: Vec<i32> = hits
+            .iter()
+            .map(|hit| i32::try_from(hit.page).unwrap_or(i32::MAX))
+            .collect();
+        let labels: HashMap<(Uuid, i32), String> = sqlx::query_as::<_, (Uuid, i32, String)>(
+            "SELECT library_files.edition_id, library_pages.number, library_pages.label \
+                 FROM library_pages \
+                 JOIN library_files ON library_files.id = library_pages.file_id \
+                 JOIN UNNEST($1::UUID[], $2::INTEGER[]) AS hit (edition, number) \
+                 ON hit.edition = library_files.edition_id AND hit.number = library_pages.number",
+        )
+        .bind(&edition_ids)
+        .bind(&numbers)
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|(edition, number, label)| ((edition, number), label))
+        .collect();
         Ok(hits
             .into_iter()
             .filter_map(|hit| {
                 let (key, title) = names.get(&hit.work)?;
+                let number = i32::try_from(hit.page).ok()?;
+                let label = labels
+                    .get(&(hit.edition, number))
+                    .filter(|label| !label.is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| hit.page.to_string());
                 Some(SearchHit {
                     work_id: hit.work,
                     edition_id: hit.edition,
                     key: key.clone(),
                     title: title.clone(),
                     page: hit.page,
+                    label,
                     snippet: hit.snippet,
                     standard: *standards.get(&hit.edition)?,
                 })
@@ -793,6 +1001,52 @@ mod tests {
         assert!(edition(|_| {}).is_ok());
     }
 
+    fn correction(first_page: u32, start: u32, prefix: &str) -> PageRange {
+        PageRange {
+            first_page,
+            style: LabelStyle::Arabic,
+            prefix: prefix.to_owned(),
+            start,
+        }
+    }
+
+    #[test]
+    fn a_page_map_needs_valid_corrections() {
+        assert!(parse_page_map(&[correction(1, 1, ""), correction(5, 3, "A-")], 5).is_ok());
+        for corrections in [
+            vec![correction(6, 1, "")],
+            vec![correction(0, 1, "")],
+            vec![correction(1, 0, "")],
+            vec![correction(1, 100_001, "")],
+            vec![correction(1, 1, &"x".repeat(21))],
+            vec![correction(1, 1, "A\0")],
+            vec![correction(1, 1, "A\n")],
+            vec![correction(2, 1, ""), correction(2, 4, "")],
+        ] {
+            assert!(
+                matches!(
+                    parse_page_map(&corrections, 5),
+                    Err(LibraryError::InvalidPageMap)
+                ),
+                "{corrections:?}"
+            );
+        }
+        let many: Vec<PageRange> = (1..=101).map(|page| correction(page, 1, "")).collect();
+        assert!(parse_page_map(&many[..100], 200).is_ok());
+        assert!(matches!(
+            parse_page_map(&many, 200),
+            Err(LibraryError::InvalidPageMap)
+        ));
+    }
+
+    #[test]
+    fn page_ranges_of_a_pdf_file_lose_control_characters() {
+        assert_eq!(
+            pdf_ranges(vec![correction(1, 1, "A\0-\u{7}")]),
+            [correction(1, 1, "A-")]
+        );
+    }
+
     #[test]
     fn page_texts_lose_null_characters() {
         assert_eq!(
@@ -879,6 +1133,76 @@ mod tests {
         assert_eq!(
             (hits[0].key.as_str(), hits[0].page, hits[0].standard),
             ("field-notes", 1, true)
+        );
+    }
+
+    #[tokio::test]
+    async fn corrections_give_the_printed_page_numbers_of_the_search() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let press = press_with_work(pool).await;
+        let (organization, _, edition) = press.owner;
+        press
+            .state
+            .library
+            .add_file(pool, press.owner, press.ann, Bytes::from_static(PDF))
+            .await
+            .unwrap();
+        run_all(&press.state).await;
+        let label = || async {
+            press
+                .state
+                .library
+                .search(pool, organization, "dry")
+                .await
+                .unwrap()[0]
+                .label
+                .clone()
+        };
+        assert_eq!(label().await, "2");
+
+        let corrected = set_page_map(
+            pool,
+            edition,
+            &[PageRange {
+                style: LabelStyle::LowerRoman,
+                ..correction(2, 1, "")
+            }],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(corrected.editions[0].corrections.len(), 1);
+        assert_eq!(label().await, "i");
+        set_page_map(pool, edition, &[]).await.unwrap();
+        assert_eq!(label().await, "2");
+    }
+
+    #[tokio::test]
+    async fn a_page_map_needs_a_file_with_text() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let press = press_with_work(pool).await;
+        let (_, _, edition) = press.owner;
+
+        let early = set_page_map(pool, edition, &[correction(1, 1, "")]).await;
+        press
+            .state
+            .library
+            .add_file(pool, press.owner, press.ann, Bytes::from_static(PDF))
+            .await
+            .unwrap();
+        run_all(&press.state).await;
+        let outside = set_page_map(pool, edition, &[correction(3, 1, "")]).await;
+
+        assert!(matches!(early, Err(LibraryError::NoFile)), "{early:?}");
+        assert!(
+            matches!(outside, Err(LibraryError::InvalidPageMap)),
+            "{outside:?}"
         );
     }
 

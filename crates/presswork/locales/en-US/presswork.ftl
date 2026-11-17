@@ -53,6 +53,18 @@ library-other-edition = Not the standard edition
 library-standard = Standard edition
 library-make-standard = Make standard
 library-translators = Translated by { $names }
+library-page-numbers = Page numbers…
+library-page-map-title = Page numbers of { $title }
+library-page-map-empty = The page numbers come from the PDF file.
+library-correction = PDF page { $page } is printed page { $label }
+library-correction-page = PDF page
+library-correction-start = Printed page
+library-style-arabic = 1, 2, 3
+library-style-lower-roman = i, ii, iii
+library-style-upper-roman = I, II, III
+library-correction-add = Add correction
+library-correction-remove = Remove
+library-page-map-save = Save
 library-pages = { $pages ->
     [one] 1 page
    *[other] { $pages } pages

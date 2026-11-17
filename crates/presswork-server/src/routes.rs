@@ -7,9 +7,9 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use presswork_api::{
     AcceptInvite, ApiError, CreatedInvite, Document, Edition, FileState, Health, Joined,
-    LibraryFile, Membership, NewDocument, NewEdition, NewInvite, NewPassword, NewProject, NewTask,
-    NewWork, Project, ProjectChange, Role, SearchHit, Session, SignIn, SignedIn, Status, Task,
-    TaskChange, TaskState, Work,
+    LabelStyle, LibraryFile, Membership, NewDocument, NewEdition, NewInvite, NewPassword,
+    NewProject, NewTask, NewWork, PageMap, PageRange, Project, ProjectChange, Role, SearchHit,
+    Session, SignIn, SignedIn, Status, Task, TaskChange, TaskState, Work,
 };
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -56,6 +56,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         create_work,
         add_edition,
         set_standard_edition,
+        put_page_map,
         upload_file,
         search_library
     ),
@@ -86,6 +87,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
         NewWork,
         Edition,
         NewEdition,
+        PageMap,
+        PageRange,
+        LabelStyle,
         LibraryFile,
         FileState,
         SearchHit
@@ -165,6 +169,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/editions/{id}/file",
             put(upload_file).layer(DefaultBodyLimit::max(library::MAX_FILE_BYTES)),
         )
+        .route("/api/v1/editions/{id}/page-map", put(put_page_map))
         .route(
             "/api/v1/organizations/{id}/library/search",
             get(search_library),
@@ -435,6 +440,31 @@ async fn set_standard_edition(
 ) -> Result<Json<Work>, HttpError> {
     edition_owner(&state, id, signed.user_id).await?;
     Ok(Json(library::set_standard(&state.database, id).await?))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/editions/{id}/page-map",
+    tag = "library",
+    security(("bearer" = [])),
+    params(("id" = Uuid, Path, description = "The ID of the edition.")),
+    request_body = PageMap,
+    responses(
+        (status = 200, description = "The work. The pages of the edition have new printed page numbers.", body = Work),
+        (status = 400, description = "A correction is not valid, or the edition has no file with text.", body = ApiError),
+        (status = 404, description = "The edition does not exist for this user.", body = ApiError)
+    )
+)]
+async fn put_page_map(
+    State(state): State<AppState>,
+    Caller(signed): Caller,
+    Path(id): Path<Uuid>,
+    Json(request): Json<PageMap>,
+) -> Result<Json<Work>, HttpError> {
+    edition_owner(&state, id, signed.user_id).await?;
+    Ok(Json(
+        library::set_page_map(&state.database, id, &request.corrections).await?,
+    ))
 }
 
 #[utoipa::path(
@@ -1569,6 +1599,44 @@ mod tests {
         assert_eq!(hits[0]["page"], 1);
         assert_eq!(hits[0]["edition_id"], edition);
         assert_eq!(hits[0]["standard"], true);
+        assert_eq!(hits[0]["label"], "1");
+
+        let (status, corrected) = send(
+            app(),
+            "PUT",
+            &format!("/api/v1/editions/{edition}/page-map"),
+            Some(&team.member),
+            Some(
+                json!({ "corrections": [{ "first_page": 1, "style": "upper_roman", "start": 4 }] }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            corrected["editions"][0]["corrections"][0]["style"],
+            "upper_roman"
+        );
+        let (_, hits) = send(
+            app(),
+            "GET",
+            &format!(
+                "/api/v1/organizations/{}/library/search?q=fine%20grain",
+                team.organization
+            ),
+            Some(&team.member),
+            None,
+        )
+        .await;
+        assert_eq!(hits[0]["label"], "IV");
+        let (status, _) = send(
+            app(),
+            "PUT",
+            &format!("/api/v1/editions/{edition}/page-map"),
+            Some(&team.outsider),
+            Some(json!({ "corrections": [] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -1689,6 +1757,7 @@ mod tests {
             ("/api/v1/works/{id}/editions", "post"),
             ("/api/v1/editions/{id}/standard", "post"),
             ("/api/v1/editions/{id}/file", "put"),
+            ("/api/v1/editions/{id}/page-map", "put"),
             ("/api/v1/organizations/{id}/library/search", "get"),
         ] {
             assert!(body["paths"][path][method].is_object(), "{path} {method}");

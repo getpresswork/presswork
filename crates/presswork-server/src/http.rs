@@ -145,6 +145,8 @@ impl From<LibraryError> for HttpError {
             | LibraryError::InvalidPublisher
             | LibraryError::InvalidLanguage
             | LibraryError::InvalidYear
+            | LibraryError::NoFile
+            | LibraryError::InvalidPageMap
             | LibraryError::NotPdf
             | LibraryError::Encrypted => Self::Invalid(sentence(&error.to_string())),
             LibraryError::KeyTaken => Self::Conflict(sentence(&error.to_string())),

@@ -3,8 +3,10 @@ use std::sync::Arc;
 use iced::alignment::Vertical;
 use iced::widget::{button, column, container, row, scrollable, space, text, text_input};
 use iced::{Element, Fill, Task};
-use presswork_api::{Edition, FileState, NewEdition, NewWork, SearchHit, Work};
-use presswork_library::{parse_key, propose_key};
+use presswork_api::{
+    Edition, FileState, LabelStyle, NewEdition, NewWork, PageRange, SearchHit, Work,
+};
+use presswork_library::{page_labels, parse_key, propose_key};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::{font, font_size, space as gap};
 use uuid::Uuid;
@@ -18,7 +20,19 @@ const YEAR_WIDTH: f32 = 96.0;
 const LANGUAGE_WIDTH: f32 = 120.0;
 
 #[cfg(test)]
-pub(crate) const TEXT_IDS: [&str; 33] = [
+pub(crate) const TEXT_IDS: [&str; 45] = [
+    "library-page-numbers",
+    "library-page-map-title",
+    "library-page-map-empty",
+    "library-correction",
+    "library-correction-page",
+    "library-correction-start",
+    "library-style-arabic",
+    "library-style-lower-roman",
+    "library-style-upper-roman",
+    "library-correction-add",
+    "library-correction-remove",
+    "library-page-map-save",
     "library-title",
     "library-add",
     "library-add-edition",
@@ -97,8 +111,46 @@ pub(crate) enum Message {
     Uploaded(Result<Work, Problem>),
     MakeStandard(Uuid),
     Changed(Result<Work, Problem>),
+    EditPageMap(Uuid),
+    CorrectionPage(String),
+    CorrectionStart(String),
+    CorrectionStyle(LabelStyle),
+    AddCorrection,
+    RemoveCorrection(usize),
+    SavePageMap,
+    PageMapSaved(Result<Work, Problem>),
     Cancel,
     Cite(SearchHit),
+}
+
+#[derive(Debug)]
+struct PageForm {
+    edition: Uuid,
+    title: String,
+    corrections: Vec<PageRange>,
+    page: String,
+    start: String,
+    style: LabelStyle,
+    sending: bool,
+}
+
+impl PageForm {
+    fn correction(&self) -> Option<PageRange> {
+        let first_page: u32 = self.page.trim().parse().ok().filter(|page| *page >= 1)?;
+        let start: u32 = self.start.trim().parse().ok().filter(|start| *start >= 1)?;
+        Some(PageRange {
+            first_page,
+            style: self.style,
+            prefix: String::new(),
+            start,
+        })
+    }
+}
+
+fn printed(correction: &PageRange) -> String {
+    page_labels(&[], std::slice::from_ref(correction), correction.first_page)
+        .pop()
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Clone)]
@@ -203,6 +255,7 @@ pub(crate) struct LibraryView {
     query: String,
     hits: Option<Vec<SearchHit>>,
     draft: Option<Draft>,
+    page_form: Option<PageForm>,
     trouble: Option<Trouble>,
 }
 
@@ -215,8 +268,13 @@ impl LibraryView {
             query: String::new(),
             hits: None,
             draft: None,
+            page_form: None,
             trouble: None,
         }
+    }
+
+    fn free(&self) -> bool {
+        self.draft.is_none() && self.page_form.is_none()
     }
 
     pub(crate) fn works(&self) -> Option<&[Work]> {
@@ -294,13 +352,99 @@ impl LibraryView {
             }
             Message::MakeStandard(edition) => return self.make_standard(edition, connection),
             Message::Changed(Ok(work)) => self.keep(work),
+            Message::EditPageMap(edition) => self.open_page_form(edition),
+            Message::SavePageMap => return self.save_page_map(connection),
+            Message::PageMapSaved(Ok(work)) => {
+                self.page_form = None;
+                self.keep(work);
+            }
+            Message::PageMapSaved(Err(problem)) => {
+                if let Some(form) = &mut self.page_form {
+                    form.sending = false;
+                }
+                self.trouble = Some(Trouble::Server(problem));
+            }
             Message::Cancel => {
                 self.draft = None;
+                self.page_form = None;
                 self.trouble = None;
             }
+            Message::CorrectionPage(_)
+            | Message::CorrectionStart(_)
+            | Message::CorrectionStyle(_)
+            | Message::AddCorrection
+            | Message::RemoveCorrection(_) => self.edit_page_form(message),
             field => self.edit_draft(field),
         }
         Task::none()
+    }
+
+    fn open_page_form(&mut self, edition: Uuid) {
+        let found = self.works.as_ref().and_then(|works| {
+            works.iter().find_map(|work| {
+                work.editions
+                    .iter()
+                    .find(|known| known.id == edition)
+                    .map(|known| (work.title.clone(), known.corrections.clone()))
+            })
+        });
+        let Some((title, corrections)) = found else {
+            return;
+        };
+        self.draft = None;
+        self.trouble = None;
+        self.page_form = Some(PageForm {
+            edition,
+            title,
+            corrections,
+            page: String::new(),
+            start: "1".to_owned(),
+            style: LabelStyle::Arabic,
+            sending: false,
+        });
+    }
+
+    fn edit_page_form(&mut self, message: Message) {
+        let Some(form) = &mut self.page_form else {
+            return;
+        };
+        match message {
+            Message::CorrectionPage(page) => form.page = page,
+            Message::CorrectionStart(start) => form.start = start,
+            Message::CorrectionStyle(style) => form.style = style,
+            Message::AddCorrection => {
+                if let Some(correction) = form.correction() {
+                    form.corrections
+                        .retain(|known| known.first_page != correction.first_page);
+                    form.corrections.push(correction);
+                    form.corrections.sort_by_key(|known| known.first_page);
+                    form.page.clear();
+                }
+            }
+            Message::RemoveCorrection(index) if index < form.corrections.len() => {
+                form.corrections.remove(index);
+            }
+            _ => {}
+        }
+    }
+
+    fn save_page_map(&mut self, connection: &Connection) -> Task<Message> {
+        let Some(form) = &mut self.page_form else {
+            return Task::none();
+        };
+        form.sending = true;
+        self.trouble = None;
+        let Connection { api, token } = connection.clone();
+        let edition = form.edition;
+        let corrections = form.corrections.clone();
+        Task::perform(
+            async move {
+                api.set_page_map(&token, edition, corrections)
+                    .await
+                    .map_err(problem)
+            },
+            Message::PageMapSaved,
+        )
     }
 
     fn edit_draft(&mut self, message: Message) {
@@ -462,7 +606,7 @@ impl LibraryView {
             button(text(localizer.text("library-add")))
                 .padding([gap::XS + gap::XXS, gap::M])
                 .style(style::secondary)
-                .on_press_maybe(self.draft.is_none().then_some(Message::Pick(Target::Work))),
+                .on_press_maybe(self.free().then_some(Message::Pick(Target::Work))),
         ]
         .align_y(Vertical::Center);
         let ready = !self.query.trim().is_empty();
@@ -494,6 +638,9 @@ impl LibraryView {
         if let Some(draft) = &self.draft {
             content = content.push(self.draft_form(draft, localizer));
         }
+        if let Some(form) = &self.page_form {
+            content = content.push(page_form(form, localizer));
+        }
         let mut lists = column![].spacing(gap::L);
         if let Some(hits) = &self.hits {
             lists = lists.push(hit_list(hits, localizer));
@@ -522,7 +669,7 @@ impl LibraryView {
             Some(works) => column(
                 works
                     .iter()
-                    .map(|work| work_entry(work, self.draft.is_none(), localizer)),
+                    .map(|work| work_entry(work, self.free(), localizer)),
             )
             .spacing(gap::M)
             .into(),
@@ -655,7 +802,7 @@ fn hit_list<'a>(hits: &'a [SearchHit], localizer: &Localizer) -> Element<'a, Mes
     column(hits.iter().map(|hit| {
         let mut args = FluentArgs::new();
         args.set("title", hit.title.clone());
-        args.set("page", hit.page);
+        args.set("page", hit.label.clone());
         let action: Element<'a, Message> = if hit.standard {
             button(text(localizer.text("library-cite")))
                 .padding([gap::XS, gap::M])
@@ -707,7 +854,7 @@ fn work_entry<'a>(work: &'a Work, free: bool, localizer: &Localizer) -> Element<
         column(
             work.editions
                 .iter()
-                .map(|edition| edition_line(edition, localizer))
+                .map(|edition| edition_line(edition, free, localizer))
         )
         .spacing(gap::XXS),
     ]
@@ -715,7 +862,11 @@ fn work_entry<'a>(work: &'a Work, free: bool, localizer: &Localizer) -> Element<
     .into()
 }
 
-fn edition_line<'a>(edition: &'a Edition, localizer: &Localizer) -> Element<'a, Message> {
+fn edition_line<'a>(
+    edition: &'a Edition,
+    free: bool,
+    localizer: &Localizer,
+) -> Element<'a, Message> {
     let mut parts = Vec::new();
     if let Some(year) = edition.year {
         parts.push(year.to_string());
@@ -779,10 +930,113 @@ fn edition_line<'a>(edition: &'a Edition, localizer: &Localizer) -> Element<'a, 
             .on_press(Message::MakeStandard(edition.id))
             .into()
     };
-    row![details.width(Fill), mark]
+    let ready = edition
+        .file
+        .as_ref()
+        .is_some_and(|file| file.state == FileState::Ready);
+    let mut line = row![details.width(Fill)]
         .spacing(gap::M)
         .align_y(Vertical::Center)
-        .padding([0.0, gap::M])
+        .padding([0.0, gap::M]);
+    if ready {
+        line = line.push(
+            button(text(localizer.text("library-page-numbers")).size(font_size::SMALL))
+                .padding([gap::XXS, gap::S])
+                .style(style::ghost)
+                .on_press_maybe(free.then_some(Message::EditPageMap(edition.id))),
+        );
+    }
+    line.push(mark).into()
+}
+
+fn page_form<'a>(form: &'a PageForm, localizer: &Localizer) -> Element<'a, Message> {
+    let mut args = FluentArgs::new();
+    args.set("title", form.title.clone());
+    let mut content =
+        column![text(localizer.format("library-page-map-title", &args)).font(font::UI_SEMIBOLD)]
+            .spacing(gap::S);
+    if form.corrections.is_empty() {
+        content = content.push(
+            text(localizer.text("library-page-map-empty"))
+                .size(font_size::SMALL)
+                .style(style::muted),
+        );
+    }
+    for (index, correction) in form.corrections.iter().enumerate() {
+        let mut args = FluentArgs::new();
+        args.set("page", correction.first_page);
+        args.set("label", printed(correction));
+        content = content.push(
+            row![
+                text(localizer.format("library-correction", &args)).size(font_size::SMALL),
+                space::horizontal(),
+                button(text(localizer.text("library-correction-remove")).size(font_size::SMALL))
+                    .padding([gap::XXS, gap::S])
+                    .style(style::ghost)
+                    .on_press(Message::RemoveCorrection(index)),
+            ]
+            .align_y(Vertical::Center),
+        );
+    }
+    let field = |label: &str, value: &'a str, on_input: fn(String) -> Message| {
+        column![
+            text(localizer.text(label))
+                .size(font_size::SMALL)
+                .style(style::muted),
+            text_input("", value)
+                .on_input(on_input)
+                .padding([gap::XS + gap::XXS, gap::S])
+                .style(style::field),
+        ]
+        .spacing(gap::XXS)
+        .width(YEAR_WIDTH)
+    };
+    let style_button = |label: &str, style: LabelStyle| {
+        button(text(localizer.text(label)).size(font_size::SMALL))
+            .padding([gap::XS, gap::S])
+            .style(style::tab(form.style == style))
+            .on_press(Message::CorrectionStyle(style))
+    };
+    content = content.push(
+        row![
+            field(
+                "library-correction-page",
+                &form.page,
+                Message::CorrectionPage
+            ),
+            field(
+                "library-correction-start",
+                &form.start,
+                Message::CorrectionStart
+            ),
+            style_button("library-style-arabic", LabelStyle::Arabic),
+            style_button("library-style-lower-roman", LabelStyle::LowerRoman),
+            style_button("library-style-upper-roman", LabelStyle::UpperRoman),
+            space::horizontal(),
+            button(text(localizer.text("library-correction-add")))
+                .padding([gap::XS + gap::XXS, gap::M])
+                .style(style::secondary)
+                .on_press_maybe(form.correction().map(|_| Message::AddCorrection)),
+        ]
+        .spacing(gap::S)
+        .align_y(Vertical::Bottom),
+    );
+    content = content.push(
+        row![
+            button(text(localizer.text("library-page-map-save")))
+                .padding([gap::XS + gap::XXS, gap::M])
+                .style(style::primary)
+                .on_press_maybe((!form.sending).then_some(Message::SavePageMap)),
+            button(text(localizer.text("library-form-cancel")))
+                .padding([gap::XS + gap::XXS, gap::M])
+                .style(style::secondary)
+                .on_press(Message::Cancel),
+        ]
+        .spacing(gap::S),
+    );
+    container(content)
+        .padding(gap::M)
+        .style(style::outline)
         .into()
 }
 
@@ -824,6 +1078,7 @@ mod tests {
             language: String::new(),
             translators: Vec::new(),
             standard,
+            corrections: Vec::new(),
             file,
         }
     }
@@ -887,6 +1142,7 @@ mod tests {
             key: "field-notes".to_owned(),
             title: "Field Notes".to_owned(),
             page: 3,
+            label: "iii".to_owned(),
             snippet: "The fine grain of the paper".to_owned(),
             standard,
         }
@@ -1125,7 +1381,7 @@ mod tests {
 
         let _ = view.update(Message::Found(Ok(vec![hit(true)])), &connection());
 
-        assert!(shows(&view, "Field Notes · p. 3"));
+        assert!(shows(&view, "Field Notes · p. iii"));
         assert!(shows(&view, "The fine grain of the paper"));
         let messages = clicks(&view, "Cite");
         assert!(
@@ -1137,6 +1393,60 @@ mod tests {
         assert!(!shows(&view, "Cite"));
         let _ = view.update(Message::Found(Ok(Vec::new())), &connection());
         assert!(shows(&view, "No page has all these words."));
+    }
+
+    #[test]
+    fn page_numbers_of_an_edition_get_corrections() {
+        let mut view = loaded();
+        assert!(matches!(
+            clicks(&view, "Page numbers…").as_slice(),
+            [Message::EditPageMap(NOTES_1455)]
+        ));
+        let _ = view.update(Message::EditPageMap(NOTES_1455), &connection());
+        assert!(shows(&view, "Page numbers of Field Notes"));
+        assert!(shows(&view, "The page numbers come from the PDF file."));
+
+        for message in [
+            Message::CorrectionPage("2".to_owned()),
+            Message::CorrectionStart("1".to_owned()),
+            Message::CorrectionStyle(LabelStyle::LowerRoman),
+            Message::AddCorrection,
+        ] {
+            let _ = view.update(message, &connection());
+        }
+
+        assert!(shows(&view, "PDF page 2 is printed page i"));
+        assert!(matches!(
+            clicks(&view, "Save").as_slice(),
+            [Message::SavePageMap]
+        ));
+        let mut corrected = work(NOTES, "field-notes", "Field Notes");
+        corrected.editions[0].corrections = vec![PageRange {
+            first_page: 2,
+            style: LabelStyle::LowerRoman,
+            prefix: String::new(),
+            start: 1,
+        }];
+        let _ = view.update(Message::SavePageMap, &connection());
+        let _ = view.update(Message::PageMapSaved(Ok(corrected)), &connection());
+        assert!(!shows(&view, "Page numbers of Field Notes"));
+        assert_eq!(view.works().unwrap()[0].editions[0].corrections.len(), 1);
+    }
+
+    #[test]
+    fn a_correction_needs_page_numbers() {
+        let mut view = loaded();
+        let _ = view.update(Message::EditPageMap(NOTES_1455), &connection());
+
+        let _ = view.update(Message::CorrectionPage("two".to_owned()), &connection());
+        let _ = view.update(Message::CorrectionStart("1".to_owned()), &connection());
+
+        assert!(clicks(&view, "Add correction").is_empty());
+        let _ = view.update(Message::CorrectionPage("3".to_owned()), &connection());
+        assert!(matches!(
+            clicks(&view, "Add correction").as_slice(),
+            [Message::AddCorrection]
+        ));
     }
 
     #[test]

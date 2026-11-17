@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use presswork_api::{
-    ApiError, Document, Edition, Membership, NewDocument, NewEdition, NewTask, NewWork, Project,
-    SearchHit, SignIn, SignedIn, Task, TaskChange, Work,
+    ApiError, Document, Edition, Membership, NewDocument, NewEdition, NewTask, NewWork, PageMap,
+    PageRange, Project, SearchHit, SignIn, SignedIn, Task, TaskChange, Work,
 };
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{RequestBuilder, Url};
@@ -153,6 +153,23 @@ impl Api {
         answer(self.http.post(self.url(&path)).bearer_auth(token)).await
     }
 
+    pub async fn set_page_map(
+        &self,
+        token: &str,
+        edition: Uuid,
+        corrections: Vec<PageRange>,
+    ) -> Result<Work, ClientError> {
+        let path = format!("/api/v1/editions/{edition}/page-map");
+        let request = PageMap { corrections };
+        answer(
+            self.http
+                .put(self.url(&path))
+                .bearer_auth(token)
+                .json(&request),
+        )
+        .await
+    }
+
     pub async fn upload_file(
         &self,
         token: &str,
@@ -213,9 +230,9 @@ mod tests {
     use axum::{Json, Router};
     use jiff::Timestamp;
     use presswork_api::{
-        ApiError, Document, Edition, FileState, LibraryFile, Membership, NewDocument, NewEdition,
-        NewTask, NewWork, Project, Role, SearchHit, Session, SignIn, SignedIn, Task, TaskChange,
-        TaskState, Work,
+        ApiError, Document, Edition, FileState, LabelStyle, LibraryFile, Membership, NewDocument,
+        NewEdition, NewTask, NewWork, PageMap, PageRange, Project, Role, SearchHit, Session,
+        SignIn, SignedIn, Task, TaskChange, TaskState, Work,
     };
     use tokio::net::TcpListener;
     use uuid::Uuid;
@@ -451,6 +468,7 @@ mod tests {
             language: String::new(),
             translators: Vec::new(),
             standard,
+            corrections: Vec::new(),
             file,
         }
     }
@@ -510,6 +528,7 @@ mod tests {
                             key: "field-notes".to_owned(),
                             title: "Field Notes".to_owned(),
                             page: 3,
+                            label: "iii".to_owned(),
                             snippet: query.get("q").cloned().unwrap_or_default(),
                             standard: true,
                         }]))
@@ -520,6 +539,24 @@ mod tests {
 
     fn edition_routes() -> Router {
         Router::new()
+            .route(
+                "/api/v1/editions/{id}/page-map",
+                put(
+                    |headers: HeaderMap, Path(id): Path<Uuid>, Json(map): Json<PageMap>| async move {
+                        if !signed_in(&headers) {
+                            return Err(refused());
+                        }
+                        let mut corrected = edition(id, true, None);
+                        corrected.corrections = map.corrections;
+                        Ok(Json(work(
+                            Uuid::from_u128(11),
+                            "atlas",
+                            "Atlas",
+                            vec![corrected],
+                        )))
+                    },
+                ),
+            )
             .route(
                 "/api/v1/works/{id}/editions",
                 post(
@@ -612,6 +649,16 @@ mod tests {
             .await
             .unwrap();
         let changed = api.set_standard("pws_ann", added.id).await.unwrap();
+        let correction = PageRange {
+            first_page: 15,
+            style: LabelStyle::Arabic,
+            prefix: String::new(),
+            start: 1,
+        };
+        let corrected = api
+            .set_page_map("pws_ann", added.id, vec![correction.clone()])
+            .await
+            .unwrap();
         let hits = api
             .search("pws_ann", PRESS, "good paper & ink")
             .await
@@ -631,6 +678,7 @@ mod tests {
         );
         assert_eq!((added.year, added.standard), (Some(1922), false));
         assert_eq!(changed.standard_edition().unwrap().id, added.id);
+        assert_eq!(corrected.editions[0].corrections, [correction]);
         assert_eq!(hits[0].page, 3);
         assert_eq!(hits[0].snippet, "good paper & ink");
     }

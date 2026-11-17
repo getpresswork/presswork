@@ -49,6 +49,7 @@ mod tests {
             language: String::new(),
             translators: Vec::new(),
             standard,
+            corrections: Vec::new(),
             file: None,
         }
     }

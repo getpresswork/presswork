@@ -27,7 +27,14 @@ pub struct Edition {
     pub language: String,
     pub translators: Vec<String>,
     pub standard: bool,
+    #[serde(default)]
+    pub corrections: Vec<PageRange>,
     pub file: Option<LibraryFile>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PageMap {
+    pub corrections: Vec<PageRange>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -150,6 +157,7 @@ pub struct SearchHit {
     pub key: String,
     pub title: String,
     pub page: u32,
+    pub label: String,
     pub snippet: String,
     pub standard: bool,
 }
@@ -169,6 +177,7 @@ mod tests {
             language: "ru".to_owned(),
             translators: Vec::new(),
             standard,
+            corrections: Vec::new(),
             file: None,
         }
     }
@@ -330,14 +339,39 @@ mod tests {
             "key": "field-notes",
             "title": "Field Notes",
             "page": 3,
+            "label": "iii",
             "snippet": "good paper",
             "standard": false,
         }))
         .unwrap();
 
-        assert_eq!(hit.page, 3);
+        assert_eq!((hit.page, hit.label.as_str()), (3, "iii"));
         assert_eq!(hit.key, "field-notes");
         assert_eq!(hit.edition_id, Uuid::from_u128(2));
         assert!(!hit.standard);
+    }
+
+    #[test]
+    fn an_edition_tells_the_corrections_of_its_page_map() {
+        let mut corrected = edition(1, 1869, true);
+        corrected.corrections = vec![PageRange {
+            first_page: 15,
+            style: LabelStyle::Arabic,
+            prefix: String::new(),
+            start: 1,
+        }];
+
+        let value = serde_json::to_value(&corrected).unwrap();
+
+        assert_eq!(
+            value["corrections"],
+            json!([{ "first_page": 15, "style": "arabic", "prefix": "", "start": 1 }])
+        );
+        assert_eq!(serde_json::from_value::<Edition>(value).unwrap(), corrected);
+        let page_map: PageMap = serde_json::from_value(json!({
+            "corrections": [{ "first_page": 1, "style": "lower_roman" }]
+        }))
+        .unwrap();
+        assert_eq!(page_map.corrections[0].style, LabelStyle::LowerRoman);
     }
 }

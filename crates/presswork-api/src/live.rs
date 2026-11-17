@@ -289,6 +289,7 @@ mod tests {
                         language: String::new(),
                         translators: Vec::new(),
                         standard: true,
+                        corrections: Vec::new(),
                         file: Some(crate::LibraryFile {
                             size: 12_470,
                             pages: 2,
