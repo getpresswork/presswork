@@ -203,13 +203,15 @@ When a server document is open, the Plan workspace shows the tasks of its projec
 
 ### Library
 
-When a server document is open, the Research workspace shows the library of its organization (D141). Refer to [Library](library.md). Each work shows its title, its creators, its year, its citation key, and the number of pages with text.
+When a server document is open, the Research workspace shows the library of its organization (D141). Refer to [Library](library.md). Each work shows its title, its creators, and its citation key. Below the work, each edition shows its year, its publisher, its language, its translators, and the number of pages with text. The standard edition shows "Standard edition".
 
-- To add a work, select **Add PDF…** and select a PDF file. Presswork proposes a title from the file name and a citation key from the title. Change the values if necessary, then select **Add**. Presswork uploads the file. The limit for one file is 64 MiB.
-- After the upload, the work shows "The server reads the text of the pages." When the server is ready, the list changes at once and shows the number of pages with text. If the server cannot read the file, the work shows the reason.
+- To add a work, select **Add PDF…** and select a PDF file. Presswork proposes a title from the file name and a citation key from the title. Type the data of the edition, change the values if necessary, then select **Add**. Presswork uploads the file. The limit for one file is 64 MiB.
+- To add an edition, for example a translation, select **Add edition…** next to the work and select its PDF file.
+- To change the standard edition, select **Make standard** next to an edition (D146).
+- After the upload, the edition shows "The server reads the text of the pages." When the server is ready, the list changes at once and shows the number of pages with text. If the server cannot read the file, the edition shows the reason.
 - To find a passage, type words in the search field. Then select **Find** or push Enter. The results show each page that has all the words, with the text around them.
-- To cite a page, select **Cite** next to a result. Presswork opens the Write workspace and puts `@key[p. N]` at the cursor. If the document has no `#bibliography`, Presswork adds `#bibliography("library.yml")` at the end.
-- Presswork gives the Typst engine the file `library.yml` with the works of the library. Thus the citations compile in the preview.
+- To cite a page, select **Cite** next to a result. Presswork opens the Write workspace and puts `@key[p. N]` at the cursor. If the document has no `#bibliography`, Presswork adds `#bibliography("library.yml")` at the end. A result from an edition that is not the standard edition shows "Not the standard edition" and has no **Cite**.
+- Presswork gives the Typst engine the file `library.yml` with the standard editions of the works. Thus the citations compile in the preview.
 
 ## Home dashboard
 

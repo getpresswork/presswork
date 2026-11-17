@@ -955,7 +955,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D136. A small library in milestone 1
 
-- **Status:** Accepted, 2026-11-16. **Origin:** Default.
+- **Status:** Accepted, 2026-11-16. Partially replaced by D146 and D147. **Origin:** Default.
 - **Decision:** In milestone 1, the library of an organization keeps works. Each work has one edition and one PDF file. To add a work, a member types the title, the creators, the year, and the citation key. Then the member uploads the PDF file. The edition is the standard edition of the work for all purposes. Page maps, more editions, purposes, scopes, annotations, and research notes come in milestone 4.
 - **Reason:** This is the thin slice of roadmap step 12. The tables follow D27 from the start. Thus milestone 4 adds editions and does not change the data.
 - **Other options:** A flat list of references in milestone 1. All forms for works and editions now.

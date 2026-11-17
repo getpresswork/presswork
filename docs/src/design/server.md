@@ -94,14 +94,18 @@ A project has text documents (D126). Each document has a path in the project, fo
 
 ### Library in milestone 1
 
-The library of an organization keeps works (D136). A work has a citation key, a title, a list of creators, and a year. A citation key is unique in its organization. It has 1 to 64 lowercase letters, digits, and single hyphens, and starts with a letter, for example `war-and-peace`. The `presswork-library` crate contains this rule, so that the desktop application can propose a valid key.
+The library of an organization keeps works (D136). A work has a citation key, a title, a list of creators, and editions. A citation key is unique in its organization. It has 1 to 64 lowercase letters, digits, and single hyphens, and starts with a letter, for example `war-and-peace`. The `presswork-library` crate contains this rule, so that the desktop application can propose a valid key.
+
+An edition has a year, a publisher, a language, translators, and one PDF file (D146). One edition of each work is its standard edition. A new work gets its first edition, which is the standard edition.
 
 | Operation | Use | Permission |
 | --- | --- | --- |
-| `GET /api/v1/organizations/{id}/works` | List the works, in the sequence of their titles. | Member |
-| `POST /api/v1/organizations/{id}/works` | Add a work without a file. | Member |
-| `PUT /api/v1/works/{id}/file` | Upload the PDF file of a work, 64 MiB or less (D140, D143). A new file takes the place of the old file. The answer is 202 with the file in the state `reading`. | Member |
-| `GET /api/v1/organizations/{id}/library/search?q=…` | Find the pages that have all the words. | Member |
+| `GET /api/v1/organizations/{id}/works` | List the works with their editions, in the sequence of their titles. | Member |
+| `POST /api/v1/organizations/{id}/works` | Add a work and its first edition, without a file. | Member |
+| `POST /api/v1/works/{id}/editions` | Add an edition to a work. | Member |
+| `POST /api/v1/editions/{id}/standard` | Make an edition the standard edition of its work. | Member |
+| `PUT /api/v1/editions/{id}/file` | Upload the PDF file of an edition, 64 MiB or less (D140, D143). A new file takes the place of the old file. The answer is 202 with the file in the state `reading`. | Member |
+| `GET /api/v1/organizations/{id}/library/search?q=…` | Find the pages that have all the words, in all editions. Each result tells if its edition is the standard edition. | Member |
 
 - The upload request opens the PDF file and counts its pages (D143). It refuses a file that is not a PDF file or that is encrypted.
 - A job then reads the text layer of each page with the `presswork-ocr` crate (D138) and sets the state `ready`. If the job cannot read the file, the state is `failed`, with a reason. Refer to "Jobs in milestone 1".

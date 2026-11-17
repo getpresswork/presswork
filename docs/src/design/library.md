@@ -8,14 +8,15 @@ The library keeps the texts that a team reads, quotes, and cites. All members us
 
 ## Library in milestone 1
 
-Milestone 1 has a small library of the organization (D136 to D141):
+Milestone 1 has a small library of the organization (D136 to D147):
 
-- Each work has one edition and one PDF file. The edition is the standard edition for all purposes.
-- To add a work, type the title, the creators, the year, and the citation key. Then upload the PDF file.
-- The server reads the text layer of each page. A page without a text layer has no text until OCR is available.
-- The search finds the pages of all works of the organization.
-- **Cite** puts `@key[p. N]` in the document. N is the page in the PDF file.
-- The desktop application makes the bibliography file `library.yml` from the works.
+- A work can have many editions, for example a translation or a reprint. Each edition has a year, a publisher, a language, translators, and one PDF file.
+- One edition of each work is the standard edition of the organization (D146). The first edition is the standard edition until a member selects a different one.
+- To add a work, type the title, the creators, the citation key, and the data of the first edition. Then upload the PDF file.
+- A job on the server reads the text layer of each page (D143). A page without a text layer has no text until OCR is available.
+- The search finds the pages of all editions of all works of the organization. Each result tells if its edition is the standard edition.
+- **Cite** puts `@key[p. N]` in the document. Only the pages of the standard edition can be cited, because the key refers to the standard edition.
+- The desktop application makes the bibliography file `library.yml` from the standard editions.
 
 ## Records
 
