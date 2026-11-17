@@ -62,6 +62,24 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo test --locked --package presswork-server
 
+  ocr:
+    name: OCR tests
+    runs-on: ubuntu-24.04
+    env:
+      PRESSWORK_TEST_OCRMYPDF: ocrmypdf
+      PRESSWORK_TEST_OCRS_MODELS: ${{ github.workspace }}/ocrs-models
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ocrmypdf tesseract-ocr-eng
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ocrs-models
+          key: ocrs-models-a917b23d-86c145c2
+      - run: bash .github/scripts/ocrs-models.sh ocrs-models
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo test --locked --package presswork-ocr
+
   dependencies:
     name: Dependencies
     runs-on: ubuntu-latest
