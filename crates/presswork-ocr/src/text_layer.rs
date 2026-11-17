@@ -14,7 +14,7 @@ const NEW_LINE: f64 = 0.5;
 const WORD_GAP: f64 = 0.2;
 const SAME_PLACE: f64 = 0.05;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ReadError {
     #[error("the file is not a PDF file that Presswork can read")]
     Invalid,
@@ -22,11 +22,20 @@ pub enum ReadError {
     Encrypted,
 }
 
-pub fn text_layer(pdf: impl AsRef<[u8]> + Send + Sync + 'static) -> Result<Vec<String>, ReadError> {
-    let pdf = Pdf::new(Arc::new(pdf)).map_err(|error| match error {
+fn open(pdf: impl AsRef<[u8]> + Send + Sync + 'static) -> Result<Pdf, ReadError> {
+    Pdf::new(Arc::new(pdf)).map_err(|error| match error {
         LoadPdfError::Decryption(_) => ReadError::Encrypted,
         LoadPdfError::Invalid => ReadError::Invalid,
-    })?;
+    })
+}
+
+pub fn page_count(pdf: impl AsRef<[u8]> + Send + Sync + 'static) -> Result<u32, ReadError> {
+    let pdf = open(pdf)?;
+    Ok(u32::try_from(pdf.pages().len()).unwrap_or(u32::MAX))
+}
+
+pub fn text_layer(pdf: impl AsRef<[u8]> + Send + Sync + 'static) -> Result<Vec<String>, ReadError> {
+    let pdf = open(pdf)?;
     let cache = InterpreterCache::new();
     let settings = InterpreterSettings {
         render_annotations: false,
@@ -275,6 +284,25 @@ mod tests {
             ]
         );
         assert!(pages[0].starts_with("Paper and ink\n"), "{:?}", pages[0]);
+    }
+
+    #[test]
+    fn the_page_count_includes_pages_without_text() {
+        let file = pdf(&[lines(&["One"]), String::new(), lines(&["Three"])]);
+
+        assert_eq!(page_count(file).unwrap(), 3);
+        assert_eq!(
+            page_count(include_bytes!("../fixtures/typst.pdf").as_slice()).unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_pdf_file_has_no_page_count() {
+        assert!(matches!(
+            page_count(b"Good paper".to_vec()),
+            Err(ReadError::Invalid)
+        ));
     }
 
     #[test]
