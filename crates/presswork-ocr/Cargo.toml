@@ -12,8 +12,21 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["ocrs"]
+ocrs = ["dep:hayro", "dep:ocrs", "dep:rten", "dep:sha2"]
+testing = []
+
 [dependencies]
+hayro = { workspace = true, optional = true }
 hayro-interpret.workspace = true
 kurbo.workspace = true
+ocrs = { workspace = true, optional = true }
 presswork-api.workspace = true
+rten = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+tempfile.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+hayro.workspace = true

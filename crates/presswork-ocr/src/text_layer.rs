@@ -25,7 +25,7 @@ pub enum ReadError {
     Encrypted,
 }
 
-fn open(pdf: impl AsRef<[u8]> + Send + Sync + 'static) -> Result<Pdf, ReadError> {
+pub(crate) fn open(pdf: impl AsRef<[u8]> + Send + Sync + 'static) -> Result<Pdf, ReadError> {
     Pdf::new(Arc::new(pdf)).map_err(|error| match error {
         LoadPdfError::Decryption(_) => ReadError::Encrypted,
         LoadPdfError::Invalid => ReadError::Invalid,
@@ -55,7 +55,7 @@ pub fn text_layer(pdf: impl AsRef<[u8]> + Send + Sync + 'static) -> Result<Vec<S
     Ok(texts(&open(pdf)?))
 }
 
-fn texts(pdf: &Pdf) -> Vec<String> {
+pub(crate) fn texts(pdf: &Pdf) -> Vec<String> {
     let cache = InterpreterCache::new();
     let settings = InterpreterSettings {
         render_annotations: false,
@@ -174,76 +174,10 @@ impl<'a> Device<'a> for TextDevice {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::Write as _;
-
     use presswork_api::LabelStyle;
 
     use super::*;
-
-    fn escaped(text: &str) -> String {
-        text.replace('\\', "\\\\")
-            .replace('(', "\\(")
-            .replace(')', "\\)")
-    }
-
-    fn lines(lines: &[&str]) -> String {
-        let mut content = String::from("BT /F1 12 Tf 14 TL 72 770 Td\n");
-        for line in lines {
-            writeln!(content, "({}) Tj T*", escaped(line)).unwrap();
-        }
-        content.push_str("ET");
-        content
-    }
-
-    fn pdf(pages: &[String]) -> Vec<u8> {
-        pdf_with_catalog(pages, "")
-    }
-
-    fn pdf_with_catalog(pages: &[String], catalog: &str) -> Vec<u8> {
-        let kids: Vec<String> = (0..pages.len())
-            .map(|index| format!("{} 0 R", 4 + 2 * index))
-            .collect();
-        let mut objects = vec![
-            format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>"),
-            format!(
-                "<< /Type /Pages /Kids [{}] /Count {} >>",
-                kids.join(" "),
-                pages.len()
-            ),
-            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
-                .to_owned(),
-        ];
-        for (index, content) in pages.iter().enumerate() {
-            objects.push(format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] \
-                 /Resources << /Font << /F1 3 0 R >> >> /Contents {} 0 R >>",
-                5 + 2 * index
-            ));
-            objects.push(format!(
-                "<< /Length {} >>\nstream\n{content}\nendstream",
-                content.len()
-            ));
-        }
-        let mut file = b"%PDF-1.7\n".to_vec();
-        let mut offsets = Vec::new();
-        for (index, object) in objects.iter().enumerate() {
-            offsets.push(file.len());
-            file.extend(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
-        }
-        let start = file.len();
-        file.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
-        for offset in offsets {
-            file.extend(format!("{offset:010} 00000 n \n").as_bytes());
-        }
-        file.extend(
-            format!(
-                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{start}\n%%EOF\n",
-                objects.len() + 1
-            )
-            .as_bytes(),
-        );
-        file
-    }
+    use crate::testing::{lines, pdf, pdf_with_catalog};
 
     #[test]
     fn each_page_gives_its_text() {

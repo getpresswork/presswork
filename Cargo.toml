@@ -18,7 +18,7 @@ presswork-domain = { path = "crates/presswork-domain" }
 presswork-editor = { path = "crates/presswork-editor" }
 presswork-library = { path = "crates/presswork-library" }
 presswork-log = { path = "crates/presswork-log" }
-presswork-ocr = { path = "crates/presswork-ocr" }
+presswork-ocr = { path = "crates/presswork-ocr", default-features = false }
 presswork-preview = { path = "crates/presswork-preview" }
 presswork-project = { path = "crates/presswork-project" }
 presswork-search = { path = "crates/presswork-search" }
@@ -37,6 +37,7 @@ fluent-bundle = "0.16.0"
 futures = "0.3.34"
 getrandom = "0.4.3"
 hayagriva = "0.10.1"
+hayro = "0.7.1"
 hayro-interpret = "0.7.0"
 http-body-util = "0.1.5"
 iced = "0.14.0"
@@ -48,12 +49,14 @@ loro = { version = "1.18.0", default-features = false }
 lzma-rust2 = { version = "0.25.0", default-features = false, features = ["std", "xz"] }
 lucide-icons = { version = "1.73.0", default-features = false }
 object_store = { version = "0.14.2", default-features = false, features = ["fs"] }
+ocrs = { version = "0.14.0", default-features = false, features = ["onnx"] }
 png = "0.18.1"
 proptest = "1.12.0"
 reqwest = "0.13.5"
 rfd = "0.18.0"
 rmp-serde = "1.3.1"
 ropey = "1.6.1"
+rten = { version = "0.28.0", default-features = false, features = ["onnx_format"] }
 rustls = { version = "0.23.46", default-features = false, features = ["std", "tls12"] }
 rustls-platform-verifier = "0.7.1"
 semver = "1.0.28"
