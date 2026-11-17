@@ -55,9 +55,18 @@ The API has these operations for accounts:
 | `POST /api/v1/password-resets/{token}` | Set a new password. | None |
 | `POST /api/v1/organizations/{id}/invites` | Make an invite link. | Session of an administrator |
 
-A request gives its session token in the `Authorization: Bearer` header. An error answer is JSON with a `code` and a `message`. The codes are `unauthenticated`, `wrong_credentials`, `invalid_request`, `conflict`, `forbidden`, `not_found`, `link_not_valid`, and `internal`. The desktop application shows a translated text for each code.
+A request gives its session token in the `Authorization: Bearer` header. An error answer is JSON with a `code` and a `message`. The codes are `unauthenticated`, `wrong_credentials`, `too_many_attempts`, `invalid_request`, `conflict`, `forbidden`, `not_found`, `link_not_valid`, and `internal`. The desktop application shows a translated text for each code.
 
-In milestone 1, the server does not limit the number of sign-in attempts. Personal access tokens are also not available yet.
+The server limits the sign-in attempts (D148, D150):
+
+- After 5 failed sign-ins for one email address in 15 minutes, the server refuses sign-ins for that email address for 15 minutes, also with the correct password. A correct sign-in before the limit removes the count of the failed sign-ins.
+- After 20 failed sign-ins from one client address in 15 minutes, the server refuses sign-ins from that address for 15 minutes. All IPv6 addresses of one /64 network count as one address.
+- A sign-in that is in progress also counts. Thus many sign-ins at the same time cannot go past the limit.
+- A refused sign-in gets the status 429, the code `too_many_attempts`, and the `Retry-After` header with the number of seconds to wait.
+- The server keeps the counts in memory. A restart removes them. The server keeps the count of an email address as a SHA-256 hash, and it keeps 100,000 counts or fewer of each type.
+- The client address is the address of the connection. Behind a reverse proxy, set `trust_forwarded`. Then the server uses the last address in the `X-Forwarded-For` header. Set it only if the reverse proxy adds this header to each request, because a client can send a false header.
+
+Personal access tokens are not available yet.
 
 ### Projects and tasks in milestone 1
 
@@ -175,6 +184,7 @@ The environment variable `PRESSWORK_CONFIG` gives the path of the settings file.
 | `listen` | `PRESSWORK_LISTEN` | `127.0.0.1:8080` | The address and the port of the API. |
 | `database_url` | `PRESSWORK_DATABASE_URL` | None. The setting is necessary. | The PostgreSQL connection URL. |
 | `data` | `PRESSWORK_DATA` | `data` in the working folder | The folder for the library files (`blobs`) and the search index (`index`). |
+| `trust_forwarded` | `PRESSWORK_TRUST_FORWARDED` | `false` | If `true`, the client address for the sign-in limits is the last address in the `X-Forwarded-For` header. Use `true` only behind a reverse proxy that adds this header. |
 
 The server refuses a settings file with an unknown key. Thus a key with a spelling error gives an error and is not ignored.
 

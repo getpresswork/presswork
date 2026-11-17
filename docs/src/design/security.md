@@ -10,7 +10,7 @@ This chapter tells how Presswork protects documents, accounts, and computers.
 ## Server
 
 - The server keeps password hashes with Argon2id, and token hashes with SHA-256.
-- The server limits how many times a user can try to sign in during a period.
+- The server limits the failed sign-ins for each email address and for each client address (D148). Refer to [Server](server.md).
 - Each request handler checks the permission before it does the operation. The default is no access.
 - Put the server behind a reverse proxy that uses TLS. Do not let clients connect to the server with plain HTTP.
 - The audit log records all changes.

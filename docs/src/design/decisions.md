@@ -1050,3 +1050,10 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** A user can make personal access tokens for scripts and CI. A token has a name and an optional expiry date, and it has the rights of the user. The server shows the token one time and keeps only its SHA-256 hash, as for sessions. The user can list and revoke the tokens. A token starts with `pwt_`, so that secret scanners can find it. The API comes first, and a screen in the desktop application comes later.
 - **Reason:** Scripts must not use a password or a session of the desktop application. A hash in the database is not useful to a thief.
 - **Other options:** Tokens with scopes. No tokens in milestone 1.
+
+## D150. Details of the sign-in limits
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Default.
+- **Decision:** The sign-in limits of D148 also count the sign-ins that are in progress. All IPv6 addresses of one /64 network count as one client address. The server keeps the count of an email address as a SHA-256 hash of the email address in lowercase. Each table keeps 100,000 counts or fewer. When a table is full of current counts, a new email address or client address has no count until old counts expire. A correct sign-in removes the failed sign-ins of its email address, but not of its client address.
+- **Reason:** Without the count of the sign-ins in progress, many requests at the same time can go past the limit, and each one uses much memory for Argon2. One IPv6 user frequently has a full /64 network. The hash and the maximum size keep the memory small when a client sends many long or different email addresses. An attacker who knows one password must not be able to remove the count of a client address.
+- **Other options:** A lock while a sign-in for the same email address is in progress. A full table that refuses all new sign-ins, which lets an attacker stop all sign-ins.
