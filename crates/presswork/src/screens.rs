@@ -269,17 +269,17 @@ fn render_library(app: &mut App) {
     let mut translation = edition(23, 1962, "Hauswedell", 248, FileState::Reading, false);
     translation.language = "de".to_owned();
     translation.translators = vec!["Bauer, Konrad".to_owned()];
+    let mut original = edition(21, 1683, "Moxon", 212, FileState::Recognizing, true);
+    if let Some(file) = &mut original.file {
+        file.pages_with_text = 12;
+    }
     let works = vec![
         work(
             12,
             "atlas-of-presses",
             "Atlas of Presses",
             "Moxon, Joseph",
-            vec![
-                edition(21, 1683, "Moxon", 212, FileState::Ready, true),
-                reprint,
-                translation,
-            ],
+            vec![original, reprint, translation],
         ),
         work(
             11,

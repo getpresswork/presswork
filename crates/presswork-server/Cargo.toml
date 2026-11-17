@@ -40,6 +40,7 @@ uuid.workspace = true
 [dev-dependencies]
 http-body-util.workspace = true
 presswork-client.workspace = true
+presswork-ocr = { workspace = true, features = ["testing"] }
 presswork-text.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

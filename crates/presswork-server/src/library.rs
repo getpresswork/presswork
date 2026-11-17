@@ -13,7 +13,7 @@ use presswork_api::{
     Edition, FileState, LabelStyle, LibraryFile, NewEdition, NewWork, PageRange, SearchHit, Work,
 };
 use presswork_library::{KeyError, page_labels, parse_key};
-use presswork_ocr::{ReadError, page_count, read_pages};
+use presswork_ocr::{OcrEngine, OcrError, ReadError, languages_for, page_count, read_pages};
 use presswork_search::{PageIndex, SearchError};
 use sha2::{Digest, Sha256};
 use sqlx::{PgConnection, PgPool};
@@ -36,6 +36,8 @@ const MAX_PREFIX_CHARACTERS: usize = 20;
 const MAX_START: u32 = 100_000;
 const PDF_SOURCE: &str = "pdf";
 const MEMBER_SOURCE: &str = "member";
+pub(crate) const OCR_FAILED: &str =
+    "OCR did not complete. The pages without a text layer have no text.";
 
 type WorkRow = (Uuid, Uuid, String, String, Vec<String>);
 
@@ -94,8 +96,22 @@ pub enum LibraryError {
     Folder(#[from] std::io::Error),
     #[error("a background job stopped: {0}")]
     Job(#[from] tokio::task::JoinError),
+    #[error("OCR failed: {0}")]
+    Ocr(#[from] OcrError),
+    #[error("the server has no OCR engine")]
+    NoOcr,
     #[error("the database failed: {0}")]
     Database(#[from] sqlx::Error),
+}
+
+impl LibraryError {
+    pub(crate) fn is_permanent(&self) -> bool {
+        match self {
+            Self::NotPdf | Self::Encrypted | Self::NoOcr => true,
+            Self::Ocr(error) => error.is_permanent(),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -370,6 +386,21 @@ pub(crate) async fn mark_failed(
     }
 }
 
+pub(crate) async fn end_ocr(pool: &PgPool, file_id: Uuid) -> Result<Option<Work>, LibraryError> {
+    sqlx::query(
+        "UPDATE library_files SET state = 'ready', problem = $2 \
+         WHERE id = $1 AND state = 'recognizing'",
+    )
+    .bind(file_id)
+    .bind(OCR_FAILED)
+    .execute(pool)
+    .await?;
+    match file_owner(pool, file_id).await? {
+        Some((_, work_id, _)) => work(pool, work_id).await,
+        None => Ok(None),
+    }
+}
+
 fn range_from((first_page, style, prefix, start): (i32, String, String, i32)) -> PageRange {
     PageRange {
         first_page: u32::try_from(first_page).unwrap_or(1),
@@ -454,13 +485,31 @@ async fn store_pages(
     pool: &PgPool,
     file_id: Uuid,
     pages: &[String],
-    pdf: &[PageRange],
+    pdf: Option<&[PageRange]>,
+    state: FileState,
 ) -> Result<(), LibraryError> {
     let mut transaction = pool.begin().await?;
-    replace_ranges(&mut transaction, file_id, PDF_SOURCE, pdf).await?;
+    let with_text = pages.iter().filter(|page| !page.trim().is_empty()).count();
+    let updated = sqlx::query(
+        "UPDATE library_files SET state = $2, problem = NULL, pages = $3, \
+         pages_with_text = $4 WHERE id = $1",
+    )
+    .bind(file_id)
+    .bind(state.as_str())
+    .bind(count(pages.len()))
+    .bind(count(with_text))
+    .execute(&mut *transaction)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(LibraryError::NotFound);
+    }
+    if let Some(pdf) = pdf {
+        replace_ranges(&mut transaction, file_id, PDF_SOURCE, pdf).await?;
+    }
+    let pdf = ranges_of(&mut transaction, file_id, PDF_SOURCE).await?;
     let corrections = ranges_of(&mut transaction, file_id, MEMBER_SOURCE).await?;
     let labels = page_labels(
-        pdf,
+        &pdf,
         &corrections,
         u32::try_from(pages.len()).unwrap_or(u32::MAX),
     );
@@ -480,16 +529,9 @@ async fn store_pages(
     .bind(&labels)
     .execute(&mut *transaction)
     .await?;
-    let with_text = pages.iter().filter(|page| !page.trim().is_empty()).count();
-    sqlx::query(
-        "UPDATE library_files SET state = 'ready', problem = NULL, pages = $2, \
-         pages_with_text = $3 WHERE id = $1",
-    )
-    .bind(file_id)
-    .bind(count(pages.len()))
-    .bind(count(with_text))
-    .execute(&mut *transaction)
-    .await?;
+    if state == FileState::Recognizing {
+        jobs::add(&mut transaction, jobs::OCR, file_id).await?;
+    }
     transaction.commit().await?;
     Ok(())
 }
@@ -569,7 +611,8 @@ pub async fn set_page_map(
     let (file_id, pages, work_id): (Uuid, i32, Uuid) = sqlx::query_as(
         "SELECT library_files.id, library_files.pages, editions.work_id FROM library_files \
          JOIN editions ON editions.id = library_files.edition_id \
-         WHERE library_files.edition_id = $1 AND library_files.state = 'ready'",
+         WHERE library_files.edition_id = $1 AND library_files.state IN ('ready', 'recognizing') \
+         FOR UPDATE OF library_files",
     )
     .bind(edition_id)
     .fetch_optional(&mut *transaction)
@@ -647,6 +690,10 @@ fn blob_path(file: Uuid) -> BlobPath {
     BlobPath::from(format!("library/{file}.pdf"))
 }
 
+fn ocr_path(file: Uuid) -> BlobPath {
+    BlobPath::from(format!("library/{file}.ocr.pdf"))
+}
+
 fn readable(pages: Vec<String>) -> Vec<String> {
     pages
         .into_iter()
@@ -658,6 +705,8 @@ fn readable(pages: Vec<String>) -> Vec<String> {
 pub struct Library {
     blobs: Arc<dyn ObjectStore>,
     index: Arc<PageIndex>,
+    ocr: Option<Arc<dyn OcrEngine>>,
+    ocr_languages: Vec<String>,
 }
 
 impl fmt::Debug for Library {
@@ -673,6 +722,8 @@ impl Library {
         Ok(Self {
             blobs: Arc::new(LocalFileSystem::new_with_prefix(blobs)?),
             index: Arc::new(PageIndex::open(&data.join("index"))?),
+            ocr: None,
+            ocr_languages: Vec::new(),
         })
     }
 
@@ -680,7 +731,18 @@ impl Library {
         Ok(Self {
             blobs: Arc::new(InMemory::new()),
             index: Arc::new(PageIndex::in_memory()?),
+            ocr: None,
+            ocr_languages: Vec::new(),
         })
+    }
+
+    #[must_use]
+    pub fn with_ocr(self, engine: Arc<dyn OcrEngine>, fallback: Vec<String>) -> Self {
+        Self {
+            ocr: Some(engine),
+            ocr_languages: fallback,
+            ..self
+        }
     }
 
     pub async fn add_file(
@@ -713,10 +775,13 @@ impl Library {
                 return Err(error);
             }
         };
-        if let Some(old) = replaced
-            && let Err(error) = self.blobs.delete(&blob_path(old)).await
-        {
-            tracing::warn!(%error, "An old library file was not deleted");
+        if let Some(old) = replaced {
+            for location in [blob_path(old), ocr_path(old)] {
+                match self.blobs.delete(&location).await {
+                    Ok(()) | Err(object_store::Error::NotFound { .. }) => {}
+                    Err(error) => tracing::warn!(%error, "An old library file was not deleted"),
+                }
+            }
         }
         let owner = (organization, work_id, edition);
         if let Err(error) = self.index_pages(owner, Vec::new()).await {
@@ -739,7 +804,44 @@ impl Library {
             .map_err(|_| LibraryError::NotPdf)?
             .map_err(read_error)?;
         let pages = readable(read.texts);
-        store_pages(pool, file_id, &pages, &pdf_ranges(read.labels)).await?;
+        let state = if self.ocr.is_some() && pages.iter().any(|page| page.trim().is_empty()) {
+            FileState::Recognizing
+        } else {
+            FileState::Ready
+        };
+        let ranges = pdf_ranges(read.labels);
+        store_pages(pool, file_id, &pages, Some(&ranges), state).await?;
+        self.index_pages(owner, pages).await?;
+        work(pool, owner.1).await
+    }
+
+    pub(crate) async fn recognize(
+        &self,
+        pool: &PgPool,
+        file_id: Uuid,
+    ) -> Result<Option<Work>, LibraryError> {
+        let Some(owner) = file_owner(pool, file_id).await? else {
+            return Ok(None);
+        };
+        let engine = self.ocr.clone().ok_or(LibraryError::NoOcr)?;
+        let language: String = sqlx::query_scalar("SELECT language FROM editions WHERE id = $1")
+            .bind(owner.2)
+            .fetch_one(pool)
+            .await?;
+        let languages = languages_for(&language, engine.languages(), &self.ocr_languages);
+        let bytes = self.blobs.get(&blob_path(file_id)).await?.bytes().await?;
+        let recognized =
+            tokio::task::spawn_blocking(move || engine.recognize(&bytes, &languages)).await??;
+        let pages = readable(recognized.texts);
+        store_pages(pool, file_id, &pages, None, FileState::Ready).await?;
+        if let Some(copy) = recognized.pdf
+            && let Err(error) = self
+                .blobs
+                .put(&ocr_path(file_id), PutPayload::from(copy))
+                .await
+        {
+            tracing::warn!(%error, "The copy of a library file with its OCR text was not kept");
+        }
         self.index_pages(owner, pages).await?;
         work(pool, owner.1).await
     }
@@ -865,6 +967,7 @@ impl Library {
 #[cfg(test)]
 mod tests {
     use presswork_api::Role;
+    use presswork_ocr::Recognized;
 
     use super::*;
     use crate::accounts::{User, create_user};
@@ -1048,6 +1151,18 @@ mod tests {
     }
 
     #[test]
+    fn only_problems_of_the_file_stop_a_job_at_once() {
+        assert!(LibraryError::NotPdf.is_permanent());
+        assert!(LibraryError::Encrypted.is_permanent());
+        assert!(LibraryError::NoOcr.is_permanent());
+        assert!(LibraryError::Ocr(OcrError::File("signed".to_owned())).is_permanent());
+        assert!(
+            !LibraryError::Ocr(OcrError::Engine("Tesseract stopped".to_owned())).is_permanent()
+        );
+        assert!(!LibraryError::NotFound.is_permanent());
+    }
+
+    #[test]
     fn page_texts_lose_null_characters() {
         assert_eq!(
             readable(vec!["Good\0 paper".to_owned()]),
@@ -1066,24 +1181,26 @@ mod tests {
         owner: (Uuid, Uuid, Uuid),
     }
 
-    async fn press_with_work(pool: &PgPool) -> Press {
+    async fn press_with(pool: &PgPool, library: Library, new: &NewWork) -> Press {
         let press = create_organization(pool, "Field Press").await.unwrap();
         let ann = member(pool, press.id, "ann@example.com").await;
-        let work = create_work(
-            pool,
-            press.id,
-            ann.id,
-            &new_work("field-notes", "Field Notes"),
-        )
-        .await
-        .unwrap();
+        let work = create_work(pool, press.id, ann.id, new).await.unwrap();
         let owner = (press.id, work.id, work.editions[0].id);
         Press {
-            state: AppState::new(pool.clone(), Library::in_memory().unwrap()),
+            state: AppState::new(pool.clone(), library),
             ann: ann.id,
             work,
             owner,
         }
+    }
+
+    async fn press_with_work(pool: &PgPool) -> Press {
+        press_with(
+            pool,
+            Library::in_memory().unwrap(),
+            &new_work("field-notes", "Field Notes"),
+        )
+        .await
     }
 
     fn state_of(work: &Work) -> Option<(FileState, u32, Option<&str>)> {
@@ -1092,6 +1209,203 @@ mod tests {
             .file
             .as_ref()
             .map(|file| (file.state, file.pages_with_text, file.problem.as_deref()))
+    }
+
+    struct FakeEngine {
+        installed: Vec<String>,
+        texts: Result<Vec<String>, String>,
+        calls: std::sync::Mutex<Vec<Vec<String>>>,
+    }
+
+    impl FakeEngine {
+        fn new(texts: Result<Vec<String>, String>) -> Arc<Self> {
+            Arc::new(Self {
+                installed: vec!["deu".to_owned(), "eng".to_owned()],
+                texts,
+                calls: std::sync::Mutex::default(),
+            })
+        }
+
+        fn reading(texts: &[&str]) -> Arc<Self> {
+            Self::new(Ok(texts.iter().map(|&text| text.to_owned()).collect()))
+        }
+
+        fn calls(&self) -> Vec<Vec<String>> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl OcrEngine for FakeEngine {
+        fn languages(&self) -> &[String] {
+            &self.installed
+        }
+
+        fn recognize(&self, pdf: &[u8], languages: &[String]) -> Result<Recognized, OcrError> {
+            self.calls.lock().unwrap().push(languages.to_vec());
+            match &self.texts {
+                Ok(texts) => Ok(Recognized {
+                    pdf: Some(pdf.to_vec()),
+                    texts: texts.clone(),
+                }),
+                Err(reason) => Err(OcrError::File(reason.clone())),
+            }
+        }
+    }
+
+    fn scan() -> Bytes {
+        Bytes::from(presswork_ocr::testing::pdf(&[
+            String::new(),
+            presswork_ocr::testing::lines(&["The ink must dry."]),
+        ]))
+    }
+
+    async fn press_with_ocr(pool: &PgPool, engine: &Arc<FakeEngine>, language: &str) -> Press {
+        let mut new = new_work("field-notes", "Field Notes");
+        new.edition.language = language.to_owned();
+        let library = Library::in_memory()
+            .unwrap()
+            .with_ocr(engine.clone(), vec!["eng".to_owned()]);
+        press_with(pool, library, &new).await
+    }
+
+    async fn ocr_jobs(pool: &PgPool) -> i64 {
+        sqlx::query_scalar("SELECT count(*) FROM jobs WHERE kind = 'ocr'")
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn ocr_gives_the_text_of_a_scanned_page_in_the_language_of_the_edition() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let engine = FakeEngine::reading(&["Good paper gives a good page.", "The ink must dry."]);
+        let press = press_with_ocr(pool, &engine, "de-AT").await;
+        let (organization, _, edition) = press.owner;
+        let library = &press.state.library;
+        library
+            .add_file(pool, press.owner, press.ann, scan())
+            .await
+            .unwrap();
+
+        assert!(jobs::run_one(&press.state).await.unwrap());
+        let recognizing = works(pool, organization).await.unwrap();
+        assert_eq!(
+            state_of(&recognizing[0]),
+            Some((FileState::Recognizing, 1, None))
+        );
+        assert_eq!(engine.calls(), Vec::<Vec<String>>::new());
+        set_page_map(pool, edition, &[correction(2, 7, "")])
+            .await
+            .unwrap();
+
+        run_all(&press.state).await;
+
+        let ready = works(pool, organization).await.unwrap();
+        assert_eq!(state_of(&ready[0]), Some((FileState::Ready, 2, None)));
+        assert_eq!(engine.calls(), [vec!["deu".to_owned()]]);
+        let hits = library.search(pool, organization, "paper").await.unwrap();
+        assert_eq!(
+            hits.iter()
+                .map(|hit| (hit.page, hit.label.as_str()))
+                .collect::<Vec<_>>(),
+            [(1, "1")]
+        );
+        let dry = library.search(pool, organization, "dry").await.unwrap();
+        assert_eq!(dry[0].label, "7");
+        let file: Uuid = sqlx::query_scalar("SELECT id FROM library_files")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        assert!(library.blobs.head(&ocr_path(file)).await.is_ok());
+        assert!(library.blobs.head(&blob_path(file)).await.is_ok());
+
+        library
+            .add_file(pool, press.owner, press.ann, Bytes::from_static(PDF))
+            .await
+            .unwrap();
+        assert!(library.blobs.head(&ocr_path(file)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_file_keeps_the_text_of_its_text_layer_when_ocr_fails() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let engine = FakeEngine::new(Err("the file has a digital signature".to_owned()));
+        let press = press_with_ocr(pool, &engine, "").await;
+        let (organization, _, _) = press.owner;
+        press
+            .state
+            .library
+            .add_file(pool, press.owner, press.ann, scan())
+            .await
+            .unwrap();
+
+        run_all(&press.state).await;
+
+        let ready = works(pool, organization).await.unwrap();
+        assert_eq!(
+            state_of(&ready[0]),
+            Some((FileState::Ready, 1, Some(OCR_FAILED)))
+        );
+        assert_eq!(engine.calls(), [vec!["eng".to_owned()]]);
+        let hits = press
+            .state
+            .library
+            .search(pool, organization, "dry")
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn without_an_ocr_engine_a_scanned_page_has_no_text() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let press = press_with_work(pool).await;
+        let (organization, _, _) = press.owner;
+        press
+            .state
+            .library
+            .add_file(pool, press.owner, press.ann, scan())
+            .await
+            .unwrap();
+
+        run_all(&press.state).await;
+
+        let ready = works(pool, organization).await.unwrap();
+        assert_eq!(state_of(&ready[0]), Some((FileState::Ready, 1, None)));
+        assert_eq!(ocr_jobs(pool).await, 0);
+    }
+
+    #[tokio::test]
+    async fn a_file_with_text_on_all_pages_gets_no_ocr() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let engine = FakeEngine::reading(&[]);
+        let press = press_with_ocr(pool, &engine, "en").await;
+        let (organization, _, _) = press.owner;
+        press
+            .state
+            .library
+            .add_file(pool, press.owner, press.ann, Bytes::from_static(PDF))
+            .await
+            .unwrap();
+
+        run_all(&press.state).await;
+
+        let ready = works(pool, organization).await.unwrap();
+        assert_eq!(state_of(&ready[0]), Some((FileState::Ready, 2, None)));
+        assert_eq!(engine.calls(), Vec::<Vec<String>>::new());
+        assert_eq!(ocr_jobs(pool).await, 0);
     }
 
     #[tokio::test]

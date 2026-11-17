@@ -7,8 +7,12 @@ const LISTEN_VARIABLE: &str = "PRESSWORK_LISTEN";
 const DATABASE_VARIABLE: &str = "PRESSWORK_DATABASE_URL";
 const DATA_VARIABLE: &str = "PRESSWORK_DATA";
 const TRUST_FORWARDED_VARIABLE: &str = "PRESSWORK_TRUST_FORWARDED";
+const OCRMYPDF_VARIABLE: &str = "PRESSWORK_OCRMYPDF";
+const OCR_LANGUAGES_VARIABLE: &str = "PRESSWORK_OCR_LANGUAGES";
 const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_DATA: &str = "data";
+const DEFAULT_OCRMYPDF: &str = "ocrmypdf";
+const DEFAULT_OCR_LANGUAGES: &str = "eng";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -27,6 +31,8 @@ pub struct Config {
     pub database_url: Option<String>,
     pub data: PathBuf,
     pub trust_forwarded: bool,
+    pub ocrmypdf: String,
+    pub ocr_languages: String,
 }
 
 impl Default for Config {
@@ -36,6 +42,8 @@ impl Default for Config {
             database_url: None,
             data: PathBuf::from(DEFAULT_DATA),
             trust_forwarded: false,
+            ocrmypdf: DEFAULT_OCRMYPDF.to_owned(),
+            ocr_languages: DEFAULT_OCR_LANGUAGES.to_owned(),
         }
     }
 }
@@ -65,7 +73,28 @@ impl Config {
                 value,
             })?;
         }
+        if let Some(program) = variable(OCRMYPDF_VARIABLE) {
+            config.ocrmypdf = program;
+        }
+        if let Some(languages) = variable(OCR_LANGUAGES_VARIABLE) {
+            config.ocr_languages = languages;
+        }
         Ok(config)
+    }
+
+    #[must_use]
+    pub fn ocr_program(&self) -> Option<&str> {
+        Some(self.ocrmypdf.trim()).filter(|program| !program.is_empty())
+    }
+
+    #[must_use]
+    pub fn fallback_languages(&self) -> Vec<String> {
+        self.ocr_languages
+            .split('+')
+            .map(str::trim)
+            .filter(|language| !language.is_empty())
+            .map(str::to_owned)
+            .collect()
     }
 }
 
@@ -150,6 +179,27 @@ mod tests {
         );
         let error = Config::parse("", trust("yes")).unwrap_err();
         assert!(error.to_string().contains("PRESSWORK_TRUST_FORWARDED"));
+    }
+
+    #[test]
+    fn the_file_and_the_environment_set_the_ocr_engine() {
+        let defaults = Config::parse("", none).unwrap();
+        assert_eq!(defaults.ocr_program(), Some("ocrmypdf"));
+        assert_eq!(defaults.fallback_languages(), ["eng"]);
+
+        let file = "ocrmypdf = \"/opt/ocrmypdf/bin/ocrmypdf\"\nocr_languages = \"eng + deu\"\n";
+        let config = Config::parse(file, none).unwrap();
+        assert_eq!(config.ocr_program(), Some("/opt/ocrmypdf/bin/ocrmypdf"));
+        assert_eq!(config.fallback_languages(), ["eng", "deu"]);
+
+        let config = Config::parse(file, |name| match name {
+            "PRESSWORK_OCRMYPDF" => Some(" ".to_owned()),
+            "PRESSWORK_OCR_LANGUAGES" => Some("lat".to_owned()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(config.ocr_program(), None);
+        assert_eq!(config.fallback_languages(), ["lat"]);
     }
 
     #[test]

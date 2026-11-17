@@ -194,6 +194,8 @@ impl From<LibraryError> for HttpError {
             | LibraryError::Search(_)
             | LibraryError::Folder(_)
             | LibraryError::Job(_)
+            | LibraryError::Ocr(_)
+            | LibraryError::NoOcr
             | LibraryError::Database(_) => Self::Internal(error.to_string()),
         }
     }

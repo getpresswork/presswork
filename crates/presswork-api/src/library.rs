@@ -63,6 +63,7 @@ pub struct LibraryFile {
 #[serde(rename_all = "snake_case")]
 pub enum FileState {
     Reading,
+    Recognizing,
     Ready,
     Failed,
 }
@@ -72,6 +73,7 @@ impl FileState {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Reading => "reading",
+            Self::Recognizing => "recognizing",
             Self::Ready => "ready",
             Self::Failed => "failed",
         }
@@ -81,6 +83,7 @@ impl FileState {
     pub fn parse(text: &str) -> Option<Self> {
         match text {
             "reading" => Some(Self::Reading),
+            "recognizing" => Some(Self::Recognizing),
             "ready" => Some(Self::Ready),
             "failed" => Some(Self::Failed),
             _ => None,
@@ -303,6 +306,7 @@ mod tests {
     fn file_states_have_snake_case_names() {
         for (state, name) in [
             (FileState::Reading, "reading"),
+            (FileState::Recognizing, "recognizing"),
             (FileState::Ready, "ready"),
             (FileState::Failed, "failed"),
         ] {

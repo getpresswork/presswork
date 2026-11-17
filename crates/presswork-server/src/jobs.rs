@@ -11,10 +11,12 @@ use crate::library::LibraryError;
 use crate::routes::AppState;
 
 pub(crate) const READ_TEXT: &str = "read_text";
+pub(crate) const OCR: &str = "ocr";
 pub(crate) const WORKERS: usize = 2;
 const MAX_ATTEMPTS: i32 = 3;
 const RETRY_WAITS: [Duration; 2] = [Duration::from_secs(10), Duration::from_secs(60)];
 const LEASE: Duration = Duration::from_secs(600);
+const HEARTBEAT: Duration = Duration::from_secs(200);
 const POLL: Duration = Duration::from_secs(5);
 const UNREADABLE: &str = "Presswork cannot read the pages of the file. Upload the file again.";
 
@@ -71,6 +73,35 @@ pub(crate) async fn claim(pool: &PgPool) -> Result<Option<Job>, sqlx::Error> {
         subject,
         attempts,
     }))
+}
+
+pub(crate) async fn extend(pool: &PgPool, job: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE jobs SET locked_until = now() + make_interval(secs => $2), updated_at = now() \
+         WHERE id = $1 AND state = 'running'",
+    )
+    .bind(job)
+    .bind(LEASE.as_secs_f64())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+struct Lease(tokio::task::JoinHandle<()>);
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn keep_lease(pool: PgPool, job: Uuid) {
+    loop {
+        tokio::time::sleep(HEARTBEAT).await;
+        if let Err(error) = extend(&pool, job).await {
+            tracing::warn!(%error, %job, "A job did not extend its lease");
+        }
+    }
 }
 
 pub(crate) async fn finish(pool: &PgPool, job: Uuid) -> Result<(), sqlx::Error> {
@@ -160,10 +191,13 @@ pub(crate) async fn run_one(state: &AppState) -> Result<bool, sqlx::Error> {
         give_up(state, &job).await;
         return Ok(true);
     }
+    let lease = Lease(tokio::spawn(keep_lease(state.database.clone(), job.id)));
     let result = match job.kind.as_str() {
         READ_TEXT => state.library.read_text(&state.database, job.subject).await,
+        OCR => state.library.recognize(&state.database, job.subject).await,
         _ => Err(LibraryError::NotFound),
     };
+    drop(lease);
     match result {
         Ok(work) => {
             finish(&state.database, job.id).await?;
@@ -174,8 +208,14 @@ pub(crate) async fn run_one(state: &AppState) -> Result<bool, sqlx::Error> {
         Err(LibraryError::NotFound) => finish(&state.database, job.id).await?,
         Err(error) => {
             tracing::warn!(%error, job = %job.id, kind = %job.kind, "A job failed");
-            let permanent = matches!(error, LibraryError::NotPdf | LibraryError::Encrypted);
-            if fail(&state.database, &job, &error.to_string(), permanent).await? {
+            if fail(
+                &state.database,
+                &job,
+                &error.to_string(),
+                error.is_permanent(),
+            )
+            .await?
+            {
                 give_up(state, &job).await;
             }
         }
@@ -184,13 +224,15 @@ pub(crate) async fn run_one(state: &AppState) -> Result<bool, sqlx::Error> {
 }
 
 async fn give_up(state: &AppState, job: &Job) {
-    if job.kind != READ_TEXT {
-        return;
-    }
-    match crate::library::mark_failed(&state.database, job.subject, UNREADABLE).await {
+    let result = match job.kind.as_str() {
+        READ_TEXT => crate::library::mark_failed(&state.database, job.subject, UNREADABLE).await,
+        OCR => crate::library::end_ocr(&state.database, job.subject).await,
+        _ => return,
+    };
+    match result {
         Ok(Some(work)) => tell(state, work).await,
         Ok(None) => {}
-        Err(error) => tracing::error!(%error, "A failed file did not get its state"),
+        Err(error) => tracing::error!(%error, "A file did not get its state after a failed job"),
     }
 }
 
@@ -317,6 +359,44 @@ mod tests {
 
         let again = claim(pool).await.unwrap().unwrap();
         assert_eq!((again.id, again.attempts), (id, 2));
+    }
+
+    async fn seconds_of_lease(pool: &PgPool, job: Uuid) -> Option<f64> {
+        sqlx::query_scalar(
+            "SELECT extract(epoch FROM locked_until - now())::float8 FROM jobs WHERE id = $1",
+        )
+        .bind(job)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_running_job_extends_its_lease() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        let pool = &database.pool;
+        let id = queued(pool).await;
+        claim(pool).await.unwrap().unwrap();
+        sqlx::query("UPDATE jobs SET locked_until = now() + interval '1 second' WHERE id = $1")
+            .bind(id)
+            .execute(pool)
+            .await
+            .unwrap();
+
+        extend(pool, id).await.unwrap();
+
+        assert!(seconds_of_lease(pool, id).await.unwrap() > 590.0);
+        finish(pool, id).await.unwrap();
+        extend(pool, id).await.unwrap();
+        assert_eq!(state_of(pool, id).await, "done");
+        assert_eq!(seconds_of_lease(pool, id).await, None);
+    }
+
+    #[test]
+    fn a_worker_extends_the_lease_before_it_ends() {
+        assert!(HEARTBEAT * 2 < LEASE);
     }
 
     #[tokio::test]

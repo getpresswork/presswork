@@ -889,7 +889,22 @@ fn edition_line<'a>(
             args.set("pages", file.pages);
             args.set("text", file.pages_with_text);
             match file.state {
-                FileState::Ready => parts.push(localizer.format("library-pages", &args)),
+                FileState::Ready => {
+                    parts.push(localizer.format("library-pages", &args));
+                    state = file.problem.clone().map(|problem| {
+                        text(problem)
+                            .size(font_size::SMALL)
+                            .style(style::tone(Tone::Warning))
+                    });
+                }
+                FileState::Recognizing => {
+                    parts.push(localizer.format("library-pages", &args));
+                    state = Some(
+                        text(localizer.text("library-recognizing"))
+                            .size(font_size::SMALL)
+                            .style(style::tone(Tone::Info)),
+                    );
+                }
                 FileState::Reading => {
                     parts.push(localizer.format("library-page-count", &args));
                     state = Some(
@@ -933,7 +948,7 @@ fn edition_line<'a>(
     let ready = edition
         .file
         .as_ref()
-        .is_some_and(|file| file.state == FileState::Ready);
+        .is_some_and(|file| matches!(file.state, FileState::Ready | FileState::Recognizing));
     let mut line = row![details.width(Fill)]
         .spacing(gap::M)
         .align_y(Vertical::Center)
@@ -1460,6 +1475,41 @@ mod tests {
 
         assert!(shows(&view, "1455 · 2 pages"));
         assert!(shows(&view, "The server reads the text of the pages."));
+    }
+
+    #[test]
+    fn a_file_in_ocr_shows_its_state_and_lets_a_member_correct_the_page_numbers() {
+        let mut view = LibraryView::new(PRESS, "Field Press".to_owned());
+        let mut recognizing = in_state(FileState::Recognizing, None);
+        if let Some(file) = &mut recognizing.editions[0].file {
+            file.pages_with_text = 1;
+        }
+
+        let _ = view.update(Message::Loaded(Ok(vec![recognizing])), &connection());
+
+        assert!(shows(&view, "1455 · 2 pages, 1 with text"));
+        assert!(shows(
+            &view,
+            "The server finds the text of the scanned pages with OCR."
+        ));
+        assert!(matches!(
+            clicks(&view, "Page numbers…").as_slice(),
+            [Message::EditPageMap(NOTES_1455)]
+        ));
+    }
+
+    #[test]
+    fn a_ready_file_shows_the_problem_of_its_ocr() {
+        let mut view = LibraryView::new(PRESS, "Field Press".to_owned());
+        let problem = "OCR did not complete. The pages without a text layer have no text.";
+
+        let _ = view.update(
+            Message::Loaded(Ok(vec![in_state(FileState::Ready, Some(problem))])),
+            &connection(),
+        );
+
+        assert!(shows(&view, "1455 · 2 pages, 0 with text"));
+        assert!(shows(&view, problem));
     }
 
     #[test]

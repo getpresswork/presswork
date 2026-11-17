@@ -74,6 +74,7 @@ library-page-count = { $pages ->
    *[other] { $pages } pages
 }
 library-reading = The server reads the text of the pages.
+library-recognizing = The server finds the text of the scanned pages with OCR.
 library-failed = The server cannot read the text of the file.
 library-no-file = No file
 library-form-title = Title
