@@ -1,7 +1,12 @@
+use std::convert::Infallible;
+use std::future::ready;
+use std::net::{IpAddr, SocketAddr};
+use std::time::Duration;
+
 use axum::Json;
-use axum::extract::FromRequestParts;
+use axum::extract::{ConnectInfo, FromRequestParts};
 use axum::http::StatusCode;
-use axum::http::header::AUTHORIZATION;
+use axum::http::header::{AUTHORIZATION, RETRY_AFTER};
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use presswork_api::ApiError;
@@ -9,6 +14,7 @@ use presswork_api::ApiError;
 use crate::accounts::AccountError;
 use crate::documents::DocumentError;
 use crate::library::LibraryError;
+use crate::limits;
 use crate::links::LinkError;
 use crate::routes::AppState;
 use crate::sessions::{self, SessionError, Signed};
@@ -20,6 +26,7 @@ const BEARER: &str = "Bearer ";
 pub(crate) enum HttpError {
     Unauthenticated,
     WrongCredentials,
+    TooManyAttempts(Duration),
     Invalid(String),
     Conflict(String),
     Forbidden,
@@ -41,6 +48,7 @@ impl IntoResponse for HttpError {
                 "wrong_credentials",
                 "The email address or the password is not correct.".to_owned(),
             ),
+            Self::TooManyAttempts(wait) => return too_many_attempts(wait),
             Self::Invalid(message) => (StatusCode::BAD_REQUEST, "invalid_request", message),
             Self::Conflict(message) => (StatusCode::CONFLICT, "conflict", message),
             Self::Forbidden => (
@@ -73,6 +81,22 @@ impl IntoResponse for HttpError {
         };
         (status, Json(body)).into_response()
     }
+}
+
+fn too_many_attempts(wait: Duration) -> Response {
+    let seconds = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
+    let minutes = seconds.div_ceil(60).max(1);
+    let unit = if minutes == 1 { "minute" } else { "minutes" };
+    let body = ApiError {
+        code: "too_many_attempts".to_owned(),
+        message: format!("Too many sign-ins failed. Try again in {minutes} {unit}."),
+    };
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [(RETRY_AFTER, seconds.to_string())],
+        Json(body),
+    )
+        .into_response()
 }
 
 impl From<AccountError> for HttpError {
@@ -176,6 +200,27 @@ impl FromRequestParts<AppState> for Caller {
             .await?
             .map(Caller)
             .ok_or(HttpError::Unauthenticated)
+    }
+}
+
+pub(crate) struct ClientAddress(pub(crate) Option<IpAddr>);
+
+impl FromRequestParts<AppState> for ClientAddress {
+    type Rejection = Infallible;
+
+    fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> impl Future<Output = Result<Self, Infallible>> + Send {
+        let connection = parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|info| info.0);
+        ready(Ok(Self(limits::client_address(
+            &parts.headers,
+            connection,
+            state.trust_forwarded,
+        ))))
     }
 }
 

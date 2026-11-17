@@ -6,6 +6,7 @@ use serde::Deserialize;
 const LISTEN_VARIABLE: &str = "PRESSWORK_LISTEN";
 const DATABASE_VARIABLE: &str = "PRESSWORK_DATABASE_URL";
 const DATA_VARIABLE: &str = "PRESSWORK_DATA";
+const TRUST_FORWARDED_VARIABLE: &str = "PRESSWORK_TRUST_FORWARDED";
 const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_DATA: &str = "data";
 
@@ -15,6 +16,8 @@ pub enum ConfigError {
     File(String),
     #[error("the environment variable {name} does not contain a valid address: {value}")]
     Address { name: &'static str, value: String },
+    #[error("the environment variable {name} must be true or false, not {value}")]
+    Flag { name: &'static str, value: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -23,6 +26,7 @@ pub struct Config {
     pub listen: SocketAddr,
     pub database_url: Option<String>,
     pub data: PathBuf,
+    pub trust_forwarded: bool,
 }
 
 impl Default for Config {
@@ -31,6 +35,7 @@ impl Default for Config {
             listen: SocketAddr::from((Ipv4Addr::LOCALHOST, DEFAULT_PORT)),
             database_url: None,
             data: PathBuf::from(DEFAULT_DATA),
+            trust_forwarded: false,
         }
     }
 }
@@ -53,6 +58,12 @@ impl Config {
         }
         if let Some(data) = variable(DATA_VARIABLE) {
             config.data = PathBuf::from(data);
+        }
+        if let Some(value) = variable(TRUST_FORWARDED_VARIABLE) {
+            config.trust_forwarded = value.parse().map_err(|_| ConfigError::Flag {
+                name: TRUST_FORWARDED_VARIABLE,
+                value,
+            })?;
         }
         Ok(config)
     }
@@ -117,6 +128,28 @@ mod tests {
             config.database_url.as_deref(),
             Some("postgres://other/presswork")
         );
+    }
+
+    #[test]
+    fn the_file_and_the_environment_set_trust_forwarded() {
+        let trust = |value: &'static str| {
+            move |name: &str| (name == "PRESSWORK_TRUST_FORWARDED").then(|| value.to_owned())
+        };
+
+        assert!(!Config::parse("", none).unwrap().trust_forwarded);
+        assert!(
+            Config::parse("trust_forwarded = true\n", none)
+                .unwrap()
+                .trust_forwarded
+        );
+        assert!(Config::parse("", trust("true")).unwrap().trust_forwarded);
+        assert!(
+            !Config::parse("trust_forwarded = true\n", trust("false"))
+                .unwrap()
+                .trust_forwarded
+        );
+        let error = Config::parse("", trust("yes")).unwrap_err();
+        assert!(error.to_string().contains("PRESSWORK_TRUST_FORWARDED"));
     }
 
     #[test]

@@ -8,6 +8,7 @@ mod http;
 mod hub;
 mod jobs;
 pub mod library;
+mod limits;
 pub mod links;
 mod live;
 mod routes;
@@ -15,6 +16,8 @@ pub mod sessions;
 #[cfg(test)]
 mod testing;
 pub mod work;
+
+use std::net::SocketAddr;
 
 pub use config::{Config, ConfigError};
 pub use routes::{AppState, router};
@@ -70,12 +73,15 @@ pub async fn run(config: Config) -> Result<(), ServerError> {
         .await
         .map_err(ServerError::Listen)?;
     tracing::info!(address = %config.listen, "Presswork server started");
-    let state = AppState::new(pool, library);
+    let state = AppState::new(pool, library).with_trust_forwarded(config.trust_forwarded);
     state.start_workers();
-    axum::serve(listener, router(state))
-        .with_graceful_shutdown(shutdown())
-        .await
-        .map_err(ServerError::Listen)
+    axum::serve(
+        listener,
+        router(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown())
+    .await
+    .map_err(ServerError::Listen)
 }
 
 async fn shutdown() {

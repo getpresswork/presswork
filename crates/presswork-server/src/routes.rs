@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
@@ -19,10 +20,12 @@ use uuid::Uuid;
 
 use presswork_domain::{Action, allowed};
 
-use crate::http::{Caller, HttpError};
+use crate::accounts::AccountError;
+use crate::http::{Caller, ClientAddress, HttpError};
 use crate::hub::Hub;
 use crate::jobs::Jobs;
 use crate::library::{self, Library};
+use crate::limits::SignInLimits;
 use crate::{accounts, database, documents, links, sessions, work};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -116,6 +119,8 @@ pub struct AppState {
     pub(crate) hub: Arc<Hub>,
     pub(crate) library: Library,
     pub(crate) jobs: Jobs,
+    pub(crate) limits: Arc<SignInLimits>,
+    pub(crate) trust_forwarded: bool,
 }
 
 impl AppState {
@@ -126,6 +131,16 @@ impl AppState {
             hub: Arc::default(),
             library,
             jobs: Jobs::default(),
+            limits: Arc::default(),
+            trust_forwarded: false,
+        }
+    }
+
+    #[must_use]
+    pub fn with_trust_forwarded(self, trust_forwarded: bool) -> Self {
+        Self {
+            trust_forwarded,
+            ..self
         }
     }
 
@@ -736,14 +751,29 @@ async fn create_invite(
     responses(
         (status = 201, description = "The sign-in made a session for this device.", body = SignedIn),
         (status = 400, description = "The request is not valid.", body = ApiError),
-        (status = 401, description = "The email address or the password is not correct.", body = ApiError)
+        (status = 401, description = "The email address or the password is not correct.", body = ApiError),
+        (status = 429, description = "Too many sign-ins failed. The Retry-After header gives the seconds to wait.", body = ApiError)
     )
 )]
 async fn sign_in(
     State(state): State<AppState>,
+    ClientAddress(address): ClientAddress,
     Json(request): Json<SignIn>,
 ) -> Result<(StatusCode, Json<SignedIn>), HttpError> {
-    let user = accounts::authenticate(&state.database, &request.email, &request.password).await?;
+    let attempt = state
+        .limits
+        .start(&request.email, address, Instant::now())
+        .map_err(HttpError::TooManyAttempts)?;
+    let user =
+        match accounts::authenticate(&state.database, &request.email, &request.password).await {
+            Ok(user) => user,
+            Err(AccountError::WrongCredentials) => {
+                attempt.failed(Instant::now());
+                return Err(HttpError::WrongCredentials);
+            }
+            Err(error) => return Err(error.into()),
+        };
+    attempt.succeeded();
     let (token, session) = sessions::start(&state.database, user.id, &request.device).await?;
     tracing::info!(user = %user.id, session = %session.id, "Signed in");
     Ok((StatusCode::CREATED, Json(SignedIn { token, session })))
@@ -1005,6 +1035,92 @@ mod tests {
 
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["code"], "wrong_credentials");
+    }
+
+    fn sign_in_request(password: &str, forwarded: Option<&str>) -> Request<Body> {
+        let mut request =
+            Request::post("/api/v1/sessions").header("content-type", "application/json");
+        if let Some(forwarded) = forwarded {
+            request = request.header("x-forwarded-for", forwarded);
+        }
+        let body = json!({ "email": "ann@example.com", "password": password, "device": "Phone" });
+        request.body(Body::from(body.to_string())).unwrap()
+    }
+
+    fn fail_from(state: &AppState, email: &str, address: Option<&str>, times: usize) {
+        let now = std::time::Instant::now();
+        let address = address.map(|address| address.parse().unwrap());
+        for _ in 0..times {
+            state.limits.start(email, address, now).unwrap().failed(now);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_after_too_many_failures_tells_the_time_to_wait() {
+        let state = state(unreachable());
+        fail_from(&state, "ann@example.com", None, 5);
+
+        let response = router(state)
+            .oneshot(sign_in_request(PASSWORD, None))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()["retry-after"], "900");
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["code"], "too_many_attempts");
+        assert_eq!(
+            body["message"],
+            "Too many sign-ins failed. Try again in 15 minutes."
+        );
+    }
+
+    #[tokio::test]
+    async fn behind_a_trusted_proxy_the_forwarded_address_counts() {
+        let trusting = state(unreachable()).with_trust_forwarded(true);
+        let direct = state(unreachable());
+        for state in [&trusting, &direct] {
+            for index in 0..20 {
+                let email = format!("user{index}@example.com");
+                fail_from(state, &email, Some("203.0.113.9"), 1);
+            }
+        }
+
+        let response = router(trusting)
+            .oneshot(sign_in_request(PASSWORD, Some("203.0.113.9")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        let response = router(direct)
+            .oneshot(sign_in_request(PASSWORD, Some("203.0.113.9")))
+            .await
+            .unwrap();
+        assert_ne!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn five_wrong_passwords_refuse_the_sign_in_for_a_time() {
+        let Some(database) = test_database().await else {
+            return;
+        };
+        crate::accounts::create_user(&database.pool, "ann@example.com", "Ann", PASSWORD)
+            .await
+            .unwrap();
+        let app = app(&database.pool);
+        for _ in 0..5 {
+            let response = app
+                .clone()
+                .oneshot(sign_in_request("a wrong password", None))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+
+        let response = app.oneshot(sign_in_request(PASSWORD, None)).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[tokio::test]
