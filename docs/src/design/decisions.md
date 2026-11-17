@@ -1022,3 +1022,31 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** When the state of a library file changes, the server sends `WorkChanged` with the work to all clients that joined the organization (D134). The desktop application updates its list of works at once. The protocol version becomes 2.
 - **Reason:** One connection carries all live data (D14). The desktop does not have to ask again.
 - **Other options:** The desktop gets the list every 3 seconds. The list changes only when the user opens the Research workspace again.
+
+## D146. Many editions with one standard edition
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Project owner.
+- **Decision:** A work can have many editions. An edition has a year, a publisher, a language, translators, and its own PDF file. One edition of each work is the standard edition of the organization. The bibliography and **Cite** use the standard edition. The first edition of a work is its standard edition until a member selects a different one. Purposes, and the scopes of collections and publications (D28), come later. This replaces the part of D136 with one edition for each work.
+- **Reason:** Teams have translations and reprints of one work now. The organization is the only scope that exists in milestone 1.
+- **Other options:** Standard editions with purposes and scopes now (D28). Page maps only, with one edition for each work.
+
+## D147. Page maps from the page labels of the PDF file
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Project owner.
+- **Decision:** When the server reads a file, it also reads the page labels of the PDF file, for example `xii` or `412`, and keeps them as the page map of the edition. A member can correct a range of pages, for example "PDF page 15 is printed page 1", with Arabic or Roman numbers. Search results and **Cite** use the printed page numbers. A page without a label uses its PDF page number.
+- **Reason:** Many PDF files from publishers contain page labels. A correction repairs the files that do not.
+- **Other options:** A page map by hand only. Page numbers from OCR of the headers and footers.
+
+## D148. Limits for sign-in attempts
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Project owner.
+- **Decision:** After 5 failed sign-ins for one email address in 15 minutes, the server refuses sign-ins for that address for 15 minutes. One client address can make 20 failed sign-ins in 15 minutes. A refused sign-in gets the status 429 and the time to wait. The server keeps the counts in memory, because milestone 1 has one server process (D127). The client address is the address of the connection. Behind a reverse proxy, the setting `trust_forwarded` makes the server use the last address in the `X-Forwarded-For` header.
+- **Reason:** This stops password guessing on one account and from one address. A wrong password of the real user does not lock the account for a long time.
+- **Other options:** The counts in PostgreSQL for many server processes. A delay that doubles after each failed sign-in.
+
+## D149. Personal access tokens
+
+- **Status:** Accepted, 2026-11-16. **Origin:** Project owner.
+- **Decision:** A user can make personal access tokens for scripts and CI. A token has a name and an optional expiry date, and it has the rights of the user. The server shows the token one time and keeps only its SHA-256 hash, as for sessions. The user can list and revoke the tokens. A token starts with `pwt_`, so that secret scanners can find it. The API comes first, and a screen in the desktop application comes later.
+- **Reason:** Scripts must not use a password or a session of the desktop application. A hash in the database is not useful to a thief.
+- **Other options:** Tokens with scopes. No tokens in milestone 1.
