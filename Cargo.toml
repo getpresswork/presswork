@@ -72,7 +72,7 @@ tar = { version = "0.4.46", default-features = false }
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tokio = "1.54.1"
-tokio-tungstenite = { version = "0.29.0", default-features = false }
+tokio-tungstenite = { version = "0.30.0", default-features = false }
 tower = "0.5.3"
 toml = "1.2.1"
 toml_edit = "0.25.19"
