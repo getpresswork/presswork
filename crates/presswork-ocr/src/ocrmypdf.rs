@@ -66,15 +66,16 @@ impl OcrEngine for OcrMyPdf {
         let output = folder.path().join("output.pdf");
         let log = folder.path().join("ocrmypdf.log");
         std::fs::write(&input, pdf)?;
-        let child = Command::new(&self.program)
-            .args(arguments(languages, self.jobs))
-            .arg(&input)
-            .arg(&output)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(File::create(&log)?)
-            .spawn()
-            .map_err(|error| OcrError::Engine(error.to_string()))?;
+        let child = start(
+            Command::new(&self.program)
+                .args(arguments(languages, self.jobs))
+                .arg(&input)
+                .arg(&output)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(File::create(&log)?),
+        )
+        .map_err(|error| OcrError::Engine(error.to_string()))?;
         let status = wait(child, self.time_limit)?;
         if !status.success() {
             let log = std::fs::read_to_string(&log).unwrap_or_default();
@@ -153,6 +154,25 @@ fn failure(code: Option<i32>, log: &str) -> OcrError {
     }
 }
 
+fn start(command: &mut Command) -> std::io::Result<Child> {
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(command, 0);
+    command.spawn()
+}
+
+fn stop(child: &mut Child) {
+    #[cfg(unix)]
+    let _ = Command::new("sh")
+        .arg("-c")
+        .arg("kill -9 -\"$0\"")
+        .arg(child.id().to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = child.kill();
+}
+
 fn wait(mut child: Child, limit: Duration) -> Result<ExitStatus, OcrError> {
     let started = Instant::now();
     loop {
@@ -160,7 +180,7 @@ fn wait(mut child: Child, limit: Duration) -> Result<ExitStatus, OcrError> {
             return Ok(status);
         }
         if started.elapsed() >= limit {
-            let _ = child.kill();
+            stop(&mut child);
             child.wait()?;
             return Err(OcrError::TimeLimit(limit));
         }
@@ -255,6 +275,50 @@ mod tests {
 
         assert!(matches!(result, Err(OcrError::TimeLimit(_))), "{result:?}");
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[cfg(unix)]
+    fn within_five_seconds(mut condition: impl FnMut() -> bool) -> bool {
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(5) {
+            if condition() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_time_limit_also_stops_the_child_processes() {
+        let folder = tempfile::tempdir().unwrap();
+        let pid_file = folder.path().join("child.pid");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("sleep 30 & echo $! > \"$0\"; wait")
+            .arg(&pid_file);
+        let child = start(&mut command).unwrap();
+        let mut pid = String::new();
+        assert!(within_five_seconds(|| {
+            pid = std::fs::read_to_string(&pid_file).unwrap_or_default();
+            pid.ends_with('\n')
+        }));
+
+        let result = wait(child, Duration::from_millis(300));
+
+        assert!(matches!(result, Err(OcrError::TimeLimit(_))), "{result:?}");
+        let stopped = within_five_seconds(|| {
+            !Command::new("sh")
+                .arg("-c")
+                .arg("kill -0 \"$0\" 2> /dev/null")
+                .arg(pid.trim())
+                .status()
+                .unwrap()
+                .success()
+        });
+        assert!(stopped, "the child process {} still runs", pid.trim());
     }
 
     #[test]
