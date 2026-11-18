@@ -178,7 +178,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D25. Archives first, then installers
 
-- **Status:** Accepted, 2026-11-14. **Origin:** Default.
+- **Status:** Accepted, 2026-11-14. Partially replaced by D157. **Origin:** Default.
 - **Decision:** The first release builds make archives. `cargo-packager` makes the installers before release 0.1.0. The first releases have no digital signatures.
 - **Reason:** The pipeline operates from the first commit. Installers must have icons, and digital signatures must have certificates.
 - **Other options:** Installers from the first commit.
@@ -1099,3 +1099,44 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** OCRmyPDF runs with `--output-type pdf` and `--optimize 0`, so that the copy keeps the images and the structure of the original file. Each run has a time limit of one hour. A worker extends the lease of its job (D142) while the job runs, so that a long OCR job does not start two times. Each run uses the processors of the server divided by the number of workers. A problem of the file, for example an encrypted or signed file, stops OCR at once. Other problems get three attempts (D144). After OCR fails, the file shows the problem, and its pages keep the text of the text layer. A member can correct the page map while OCR runs. `tesseract` must be on the `PATH` of the server. The setting `ocrmypdf` gives the OCRmyPDF program, and an empty value turns OCR off.
 - **Reason:** A library file is a reference copy, so OCR must not change its images. A scan of many hundreds of pages can take more than the lease of ten minutes.
 - **Other options:** PDF/A output. Optimized images. A time limit for each page only.
+
+## D157. Installers from the standard tool of each platform
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Project owner.
+- **Decision:** Scripts in `.github/scripts` and templates in `packaging` make the installers with the standard tool of each platform. WiX 6 makes the MSI files for x64 and Arm64. `hdiutil` makes the DMG files. `dpkg-deb` and `rpmbuild` make the DEB and RPM packages. `appimagetool` makes the AppImage files. This decision replaces the `cargo-packager` part of D25.
+- **Reason:** `cargo-packager` 0.11.8 uses WiX 3.11. WiX 3.11 cannot make Arm64 MSI files, and WiX 3 got its last security correction in 2025-02. `cargo-packager` makes no RPM packages, and it downloads the AppImage tools without a check of their digests.
+- **Other options:** `cargo-packager` without changes, with only a ZIP archive for Windows on Arm and no RPM packages. `cargo-packager` with pinned tools in its cache folder, and `cargo-generate-rpm` for the RPM packages.
+
+## D158. Downloads of the installer tools in CI
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Project owner.
+- **Decision:** Only CI downloads the installer tools. WiX 6.0.2 and its UI extension come from NuGet. The script compares each package with the SHA-512 digest that NuGet publishes. `appimagetool` 1.9.1 and the AppImage runtime 20251108 come from their GitHub releases. The script compares each file with the SHA-256 digest that GitHub shows for the release file. `rpmbuild` comes from the Ubuntu archive. A file with a different digest stops the build.
+- **Reason:** The tools run in the release workflow, so a changed tool could change the packages. WiX 6 asks projects that earn money with WiX to pay its Open Source Maintenance Fee. WiX 7 makes this a condition of use.
+- **Other options:** No AppImage files. NSIS installers in place of MSI files, with NSIS 3.10 from the Windows images of the runners.
+
+## D159. An MSI installation for all users
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Project owner.
+- **Decision:** The MSI file installs Presswork for all users of the computer, in the `Program Files` folder. The installation asks for administrator rights.
+- **Reason:** This is the usual scope of MSI files. Administrators can deploy the MSI file to many computers.
+- **Other options:** An installation for the current user in `AppData\Local\Programs`, without administrator rights.
+
+## D160. The pilcrow icon
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Project owner.
+- **Decision:** The application icon is a claret pilcrow on a paper tile with a claret outline. The source is `crates/presswork/icons/presswork.svg`. The pilcrow is optically centered: it is 20 units right of the geometric center and 28 units below it. The ignored test `render_icons` writes the PNG, ICO, and ICNS files from the SVG file. A test compares these files with new renders.
+- **Reason:** The pilcrow is a known sign of typesetting. The colors are the accent color and the page color of the design system.
+- **Other options:** A slab-serif P on a claret tile. A page with a claret drop cap and lines of text.
+
+## D161. Details of the installers
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Default.
+- **Decision:**
+  - The application ID is `io.github.getpresswork.Presswork`. It is the name of the desktop file on Linux, the Wayland application ID and the X11 class of the windows, and the bundle identifier on macOS. It agrees with the data folders of the application.
+  - The MSI file shows the Apache License in the WixUI_Minimal dialogs. It has a fixed upgrade code, and an installation of the same version replaces the earlier one, because nightly builds have the version of the next release. A Start menu shortcut opens Presswork.
+  - The macOS app has an ad hoc signature. The DMG file has a link to the Applications folder. The macOS icon is smaller than the other icons, as the macOS icon grid tells (824 of 1024 pixels).
+  - `dpkg-shlibdeps` finds the dependencies of the DEB package. The RPM package has no debug package. The AppImage file has no AppStream data.
+  - The windows show the 64-pixel icon. The Windows program file has no icon resource yet.
+  - The build workflow checks each package on the runner that made it. It installs and removes the MSI file and the DEB package, opens the DMG file, lists the files of the RPM package, and unpacks the AppImage file.
+- **Reason:** These are the usual settings of the platforms. The checks find a broken package before a release.
+- **Other options:** A Developer ID signature, which needs a certificate (D25). AppStream data, which needs a review of its text.

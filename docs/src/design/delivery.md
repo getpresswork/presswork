@@ -11,7 +11,32 @@ This chapter tells how a commit becomes a release.
 | Desktop | Linux | x86_64, aarch64 | AppImage, DEB, RPM, archive |
 | Server | Linux | x86_64, aarch64 | Container image, archive |
 
-The first releases contain only the archives. The installers and the container image come before release 0.1.0.
+Each release contains the archives and the installers of the desktop application. The container image and the archive of the server come before release 0.1.0.
+
+## Installers
+
+The build workflow makes the installers with the standard tool of each platform (D157):
+
+| Package | Tool | Contents |
+| --- | --- | --- |
+| MSI | WiX 6 | `presswork.exe`, `LICENSE.txt`, and `NOTICE.txt` in `Program Files\Presswork`, and a Start menu shortcut. The installation is for all users (D159). |
+| DMG | `hdiutil` | `Presswork.app`, and a link to the Applications folder. |
+| DEB and RPM | `dpkg-deb` and `rpmbuild` | `/usr/bin/presswork`, the desktop file, the icons in the `hicolor` theme, and the license files. |
+| AppImage | `appimagetool` | The files of the DEB package in one file, which runs without an installation. |
+
+The templates are in the `packaging` folder. The scripts are in `.github/scripts`:
+
+- `package-tools.sh` downloads WiX or the AppImage tools and checks their digests (D158).
+- `package-linux.sh`, `package-macos.sh`, and `package-windows.ps1` make the packages in the `dist` folder.
+- `check-linux-packages.sh`, `check-macos-package.sh`, and `check-windows-package.ps1` install and remove the packages, and examine their files.
+
+A maintainer can start the build workflow by hand. It then makes all packages without a release.
+
+The application icon comes from `crates/presswork/icons/presswork.svg` (D160). After a change to the SVG file, write the PNG, ICO, and ICNS files again with the ignored test `render_icons`:
+
+```sh
+cargo test --workspace --lib -- --ignored render_icons
+```
 
 ## Continuous integration
 
@@ -75,6 +100,8 @@ Users can turn off the update check. Installations from package managers do not 
 ## Digital signatures of packages
 
 The first releases have no digital signatures. When the project has certificates, the release workflow will sign the Windows installer. It will also sign and notarize the macOS app.
+
+Until then, Windows SmartScreen shows a warning before the installation. The macOS app has only an ad hoc signature, so macOS does not open it until the user approves it in System Settings, in Privacy & Security.
 
 ## Documentation site
 

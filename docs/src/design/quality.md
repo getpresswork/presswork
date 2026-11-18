@@ -23,6 +23,7 @@ A change in behavior must come with tests for that behavior.
 | Interface tests | Application flows without a window | `iced_test` |
 | Database tests | Server repositories and API handlers | PostgreSQL, with one database for each test |
 | OCR tests | The OCR engines in `presswork-ocr` | OCRmyPDF with Tesseract, and ocrs with its models |
+| Package checks | The installers, in the build workflow | `msiexec`, `hdiutil`, `dpkg`, `rpm`, and the AppImage runtime |
 | End-to-end tests | Two clients and one server in one process | All of the above |
 
 ## OCR tests
@@ -35,6 +36,10 @@ The OCR tests run the real engines on an image of a page (D155). They run only w
 | `PRESSWORK_TEST_OCRS_MODELS` | A folder with the ocrs models `text-detection.onnx` and `text-recognition.onnx`. The test checks their SHA-256 digests. |
 
 In CI, the "OCR tests" job installs the tools, downloads the models, and sets both variables.
+
+## Package checks
+
+The build workflow checks each installer on the runner that made it (D161). The check installs the MSI file and the DEB package, examines the installed files and the version, and removes the package again. It opens the DMG file and examines the bundle identifier, the version, the architecture, and the signature of the app. It lists the files of the RPM package and unpacks the AppImage file. The nightly builds run these checks each night.
 
 ## Interface tests
 

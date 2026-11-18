@@ -62,6 +62,7 @@ Before release 1.0, an external security audit examines the encryption design an
 - The toolchain manager compares the SHA-256 digest of each file with the published digest before it unpacks the file.
 - The toolchain manager does not unpack paths outside of the target folder.
 - The two model files of the ocrs engine have fixed SHA-256 digests in the `presswork-ocr` crate. The engine does not load a model file with a different digest (D154).
+- The release workflow downloads WiX and the AppImage tools at fixed versions. `package-tools.sh` compares each file with a fixed digest, and a different digest stops the build (D158).
 
 ## Updates
 
