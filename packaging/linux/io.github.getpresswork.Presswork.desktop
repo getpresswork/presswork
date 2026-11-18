@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Presswork
+GenericName=Typesetting Workbench
+Comment=Write, typeset, and publish with Typst
+Exec=presswork
+Icon=io.github.getpresswork.Presswork
+Terminal=false
+Categories=Office;Publishing;
+Keywords=Typst;typesetting;book;publication;
+StartupNotify=true
+StartupWMClass=io.github.getpresswork.Presswork

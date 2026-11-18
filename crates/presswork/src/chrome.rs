@@ -94,6 +94,7 @@ pub(crate) fn settings(size: Size, controls: Controls) -> window::Settings {
         min_size: Some(MINIMUM_SIZE),
         decorations: controls == Controls::Native,
         exit_on_close_request: false,
+        icon: crate::icons::window_icon(),
         platform_specific: platform(),
         ..window::Settings::default()
     }
@@ -119,7 +120,10 @@ fn platform() -> window::settings::PlatformSpecific {
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn platform() -> window::settings::PlatformSpecific {
-    window::settings::PlatformSpecific::default()
+    window::settings::PlatformSpecific {
+        application_id: crate::APPLICATION_ID.to_owned(),
+        ..window::settings::PlatformSpecific::default()
+    }
 }
 
 pub(crate) fn perform(id: window::Id, action: Action) -> Task<Message> {
@@ -531,6 +535,26 @@ mod tests {
         assert_eq!(custom.min_size, Some(MINIMUM_SIZE));
         assert!(!custom.exit_on_close_request);
         assert!(!native.exit_on_close_request);
+    }
+
+    #[test]
+    fn windows_show_the_icon_of_the_application() {
+        let settings = settings(Size::new(900.0, 700.0), Controls::Custom);
+
+        let (pixels, size) = settings.icon.unwrap().into_raw();
+        assert_eq!(size, Size::new(64, 64));
+        assert_eq!(pixels.len(), 64 * 64 * 4);
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[test]
+    fn linux_windows_have_the_application_id() {
+        let settings = settings(Size::new(900.0, 700.0), Controls::Custom);
+
+        assert_eq!(
+            settings.platform_specific.application_id,
+            crate::APPLICATION_ID
+        );
     }
 
     #[test]

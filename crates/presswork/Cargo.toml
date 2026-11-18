@@ -31,6 +31,7 @@ fluent-bundle.workspace = true
 futures.workspace = true
 iced = { workspace = true, features = ["tokio"] }
 jiff.workspace = true
+png.workspace = true
 rfd.workspace = true
 tokio = { workspace = true, features = ["macros", "time"] }
 tracing.workspace = true
@@ -39,4 +40,5 @@ unic-langid = { workspace = true, features = ["macros"] }
 
 [dev-dependencies]
 iced_test.workspace = true
+resvg.workspace = true
 tempfile.workspace = true
