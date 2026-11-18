@@ -17,6 +17,7 @@ fail() {
   failures=$((failures + 1))
 }
 
+repository="$(pwd)"
 work="$(mktemp -d)"
 finish() {
   local status=$?
@@ -78,6 +79,12 @@ fi
 logs="$(sudo journalctl --unit presswork-server --no-pager)"
 if ! grep -q "OCR uses OCRmyPDF" <<< "${logs}"; then
   fail "the service does not use OCRmyPDF"
+fi
+gs -q -dSAFER -dBATCH -dNOPAUSE -sDEVICE=pdfimage24 -r200 -sOutputFile="${work}/scan.pdf" \
+  "${repository}/crates/presswork-ocr/fixtures/typst.pdf"
+token="$(grep -o 'pwi_[^[:space:]]*' <<< "${invite}" || true)"
+if ! bash "${repository}/.github/scripts/check-server-library.sh" http://127.0.0.1:8080/api/v1 "${token}" "${work}/scan.pdf"; then
+  fail "OCR in the service does not give the text of a scanned page"
 fi
 
 sudo systemctl stop presswork-server

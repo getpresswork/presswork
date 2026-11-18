@@ -36,12 +36,14 @@ if ! grep -qx eng <<< "${languages}"; then
   fail "Tesseract has no English data in the image"
 fi
 
+work="$(mktemp -d)"
 finish() {
   local status=$?
   if [[ "${status}" -ne 0 ]]; then
     "${compose[@]}" logs || true
   fi
   "${compose[@]}" down --volumes > /dev/null 2>&1 || true
+  rm -rf "${work}"
 }
 
 export PRESSWORK_IMAGE="${image}"
@@ -70,6 +72,13 @@ fi
 logs="$("${compose[@]}" logs server)"
 if ! grep -q "OCR uses OCRmyPDF" <<< "${logs}"; then
   fail "the server in the image does not use OCRmyPDF"
+fi
+docker run --rm --user "$(id -u):$(id -g)" --entrypoint gs \
+  --volume "${PWD}/crates/presswork-ocr/fixtures:/fixtures:ro" --volume "${work}:/work" "${image}" \
+  -q -dSAFER -dBATCH -dNOPAUSE -sDEVICE=pdfimage24 -r200 -sOutputFile=/work/scan.pdf /fixtures/typst.pdf
+token="$(grep -o 'pwi_[^[:space:]]*' <<< "${invite}" || true)"
+if ! bash "$(dirname "$0")/check-server-library.sh" http://127.0.0.1:18080/api/v1 "${token}" "${work}/scan.pdf"; then
+  fail "OCR in the image does not give the text of a scanned page"
 fi
 
 container="$("${compose[@]}" ps --quiet server)"
