@@ -37,8 +37,29 @@ jobs:
     needs: check
     if: needs.check.outputs.changed == 'true'
     uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      packages: write
     with:
       label: nightly
+      publish: true
+
+  image:
+    name: Publish the nightly server image
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Join the images of the two architectures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "${GH_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          bash .github/scripts/publish-server-image.sh nightly
 
   publish:
     name: Publish nightly build

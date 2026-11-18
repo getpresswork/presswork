@@ -7,6 +7,10 @@ on:
         description: The label in the archive names, for example v0.2.0 or nightly.
         type: string
         required: true
+      publish:
+        description: Push the server images of the two architectures to GHCR.
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       label:
@@ -40,6 +44,9 @@ jobs:
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      packages: write
     env:
       TARGET: ${{ matrix.target }}
       LABEL: ${{ inputs.label }}
@@ -85,6 +92,28 @@ jobs:
           bash .github/scripts/package-tools.sh "appimage-${TARGET%%-*}" "${tools}"
           bash .github/scripts/package-linux.sh "${TARGET}" "${LABEL}" "${VERSION}" "${tools}"
           bash .github/scripts/check-linux-packages.sh "${TARGET}" "${LABEL}" "${VERSION}"
+
+      - name: Build the server
+        if: runner.os == 'Linux'
+        run: cargo build --release --locked --package presswork-server --target ${{ matrix.target }}
+
+      - name: Make the server archive and image
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          bash .github/scripts/package-server.sh "${TARGET}" "${LABEL}"
+          bash .github/scripts/check-server-archive.sh "${TARGET}" "${LABEL}" "${VERSION}"
+          bash .github/scripts/server-image.sh "${TARGET}" "${VERSION}" presswork-server:check
+          bash .github/scripts/check-server-image.sh presswork-server:check "${VERSION}"
+
+      - name: Push the server image
+        if: runner.os == 'Linux' && inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "${GH_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          bash .github/scripts/push-server-image.sh presswork-server:check "${TARGET}" "${LABEL}"
 
       - name: Make the DMG file
         if: runner.os == 'macOS'

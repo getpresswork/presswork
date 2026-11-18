@@ -99,6 +99,7 @@ jobs:
       - run: bash .github/scripts/next-version-test.sh
       - run: bash .github/scripts/typst-digests-test.sh
       - run: bash .github/scripts/package-tools-test.sh
+      - run: bash .github/scripts/server-image-test.sh
 
   documentation:
     name: Documentation

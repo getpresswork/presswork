@@ -11,8 +11,31 @@ permissions:
 jobs:
   build:
     uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      packages: write
     with:
       label: ${{ github.ref_name }}
+      publish: ${{ startsWith(github.ref, 'refs/tags/v') }}
+
+  image:
+    name: Publish the server image
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Join the images of the two architectures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LABEL: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          echo "${GH_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          bash .github/scripts/publish-server-image.sh "${LABEL}"
 
   notes:
     name: Release notes
