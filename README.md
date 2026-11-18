@@ -24,6 +24,18 @@ Presswork is a typesetting and publication workbench for [Typst](https://typst.a
 
 Read the documentation at <https://getpresswork.github.io/presswork/>. It contains the design and the contribution guide.
 
+## Install
+
+Download a package of the desktop application from the [releases](https://github.com/getpresswork/presswork/releases):
+
+| Platform | Packages |
+| --- | --- |
+| Windows 10 and 11 | MSI installer, ZIP archive |
+| macOS 13 or later | DMG file, archive |
+| Linux | AppImage, DEB package, RPM package, archive |
+
+Use the `x86_64` packages for Intel and AMD processors, and the `aarch64` packages for Arm processors, for example Apple silicon. The packages have no digital signatures yet. Windows shows a SmartScreen warning before the installation. macOS opens the app only after you approve it in System Settings, in Privacy & Security.
+
 ## Build from source
 
 1. Install Rust with [rustup](https://rustup.rs).
