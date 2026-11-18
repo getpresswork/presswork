@@ -178,7 +178,7 @@ Milestone 1 has the job queue without routines (D142 to D144). There are two kin
 The server runs OCRmyPDF with Tesseract on the pages without a text layer (D152 to D156).
 
 - At the start, the server runs `ocrmypdf --version` and `tesseract --list-langs`. If one of them fails, the server writes a warning in the log and operates without OCR.
-- The `ocr` job runs `ocrmypdf --skip-text --output-type pdf --optimize 0` on the file, in a temporary folder. Each run has a time limit of one hour.
+- The `ocr` job runs `ocrmypdf --skip-text --output-type pdf --optimize 0` on the file, in a temporary folder. Each run has a time limit of one hour. At the time limit, the server stops OCRmyPDF and its child processes, for example Tesseract (D167).
 - The language of the edition gives the Tesseract language, for example `de` gives `deu` (D153). If the server has no data for that language, OCR uses the setting `ocr_languages`.
 - The server keeps the copy with the text layer as `library/{file}.ocr.pdf` in the `blobs` folder. The original file does not change.
 - The job reads the text of each page from the copy, keeps it in `library_pages`, adds it to the search index, and sets the state `ready`.

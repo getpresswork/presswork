@@ -1180,3 +1180,10 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The build workflow checks the archive and the image on the runner that made them. The image check starts the image with PostgreSQL through the Compose file.
 - **Reason:** These are the usual settings of container images and systemd services. The checks find a broken image before a release.
 - **Other options:** The port of the server on all addresses of the host. A Compose file with a reverse proxy and TLS.
+
+## D167. A process group for each OCR run
+
+- **Status:** Accepted, 2026-11-18. **Origin:** Default.
+- **Decision:** On Linux and macOS, the server starts OCRmyPDF in a new process group. At the time limit (D156), it stops all processes of the group with `SIGKILL`. A `kill` command of `sh` sends the signal, because the workspace forbids `unsafe` code. On Windows, the server stops only the OCRmyPDF process. In a terminal, Ctrl+C stops the server, but an OCR run that has started continues until it ends. A container or a systemd service stops all processes of the server.
+- **Reason:** OCRmyPDF starts worker processes, and the workers start Tesseract and Ghostscript. Before this decision, only the OCRmyPDF process stopped at the time limit. The other processes continued with a hostile file and used the processors of the server.
+- **Other options:** A list of the child processes from `/proc`, which is only for Linux. The `rustix` crate for the signal, which is a new direct dependency.
