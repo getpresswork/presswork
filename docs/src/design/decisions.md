@@ -1140,3 +1140,43 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The build workflow checks each package on the runner that made it. It installs and removes the MSI file and the DEB package, opens the DMG file, lists the files of the RPM package, and unpacks the AppImage file.
 - **Reason:** These are the usual settings of the platforms. The checks find a broken package before a release.
 - **Other options:** A Developer ID signature, which needs a certificate (D25). AppStream data, which needs a review of its text.
+
+## D162. A container image and an archive for the server
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Project owner.
+- **Decision:** The server has a container image and an archive for Linux on x86_64 and aarch64. The image uses Ubuntu 24.04 at a fixed digest, with OCRmyPDF and Tesseract from the Ubuntu archive. The archive contains the program, an example settings file, a systemd unit, and the Docker Compose file. Dependabot opens update requests for the base image and for the PostgreSQL image of the Compose file.
+- **Reason:** The CI jobs that build the server and test OCR use Ubuntu 24.04 (D155). Thus the image has the same glibc and the same versions of OCRmyPDF, Tesseract, and Ghostscript as the tests.
+- **Other options:** Debian 13 slim, with a newer OCRmyPDF than the version that CI tests. A distroless image without OCR.
+
+## D163. Server images in GHCR
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Project owner.
+- **Decision:** The release workflow and the nightly workflow publish the image `ghcr.io/getpresswork/presswork-server`. A release gets the tags of its version, of its minor version, and `latest`, for example `0.1.0`, `0.1`, and `latest`. A prerelease version gets only its version tag. The nightly workflow uses the tag `nightly`. Each Linux runner of the build workflow builds and checks the image of its architecture, and pushes it with the architecture in the tag. Then a job joins the two images into one image for the two platforms.
+- **Reason:** GHCR is with the repository and the releases, and the workflow token can push to it. Thus no new secret is necessary. The native runners need no emulation, and the published images are the images that the checks used.
+- **Other options:** GHCR with images only for releases. Docker Hub too, which needs an account and a token as a repository secret.
+
+## D164. Only English OCR data in the server image
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Project owner.
+- **Decision:** The server image contains the Tesseract data only for English. For more languages, an administrator makes an image from the Presswork image. The deployment section of the server chapter shows an example for German.
+- **Reason:** This keeps the image small. A library uses only some languages.
+- **Other options:** Eight common languages, which add approximately 100 MB. All languages from `tesseract-ocr-all`, which make the image much larger.
+
+## D165. Downloads for the server image in CI
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Project owner.
+- **Decision:** Only CI downloads the images and the packages for the server image. The Dockerfile gets Ubuntu 24.04 by its digest. apt gets OCRmyPDF and the English Tesseract data from the Ubuntu archive, and checks the signatures of the archive. The check of the image starts PostgreSQL 17 at the digest of the CI database tests. The computer of the project owner downloads nothing for the image.
+- **Reason:** The image goes into the releases. Thus its sources must be fixed and checked, as the sources of the installer tools are (D158).
+- **Other options:** The same downloads also on the computer of the project owner, to test the image with Docker Desktop.
+
+## D166. Details of the server packages
+
+- **Status:** Accepted, 2026-11-17. **Origin:** Default.
+- **Decision:**
+  - The image starts `presswork-server serve` as the user `presswork`, with the user ID and the group ID 10001. In the container, the server listens on port 8080 on all addresses, and keeps its data in the volume `/var/lib/presswork`.
+  - The server stops on `SIGTERM` as it does on Ctrl+C. Without this, the server is the first process of the container and ignores `SIGTERM`, and `docker stop` kills it after 10 seconds.
+  - The Compose file gets the database password from the file `.env`. It publishes the port of the server only on `127.0.0.1` of the host, for a reverse proxy. Its default image has the tag `latest`.
+  - The systemd unit starts the server as the user `presswork`. The system folders are read-only for the server, and it has a private temporary folder. systemd makes the data folder.
+  - The build workflow checks the archive and the image on the runner that made them. The image check starts the image with PostgreSQL through the Compose file.
+- **Reason:** These are the usual settings of container images and systemd services. The checks find a broken image before a release.
+- **Other options:** The port of the server on all addresses of the host. A Compose file with a reverse proxy and TLS.

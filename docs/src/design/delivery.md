@@ -11,7 +11,7 @@ This chapter tells how a commit becomes a release.
 | Desktop | Linux | x86_64, aarch64 | AppImage, DEB, RPM, archive |
 | Server | Linux | x86_64, aarch64 | Container image, archive |
 
-Each release contains the archives and the installers of the desktop application. The container image and the archive of the server come before release 0.1.0.
+Each release contains the archives and the installers of the desktop application, and the archives of the server. The release workflow also publishes the container image of the server. Refer to [Deployment](server.md#deployment).
 
 ## Installers
 
@@ -38,6 +38,14 @@ The application icon comes from `crates/presswork/icons/presswork.svg` (D160). A
 cargo test --workspace --lib -- --ignored render_icons
 ```
 
+## Server packages
+
+On the two Linux runners, the build workflow also builds the server (D162 and D163):
+
+- `package-server.sh` makes the server archive. `check-server-archive.sh` examines its files and the version, and examines the systemd unit with `systemd-analyze verify`.
+- `server-image.sh` builds the container image from `packaging/server/Dockerfile`. `check-server-image.sh` starts the image and PostgreSQL with the Compose file. It examines the version, the user, the OCR tools, the ready check, the `create-organization` command, and the stop with `SIGTERM`.
+- In the release workflow and the nightly workflow, `push-server-image.sh` pushes the checked image of each architecture to GHCR. Then `publish-server-image.sh` joins the two images under the tags of the release. `server-image-tags.sh` gives these tags.
+
 ## Continuous integration
 
 Each push to `main` and each pull request runs these jobs:
@@ -46,7 +54,10 @@ Each push to `main` and each pull request runs these jobs:
 | --- | --- | --- |
 | Format | Linux | `cargo fmt --all --check` |
 | Lint and test | Windows, Linux, macOS | `cargo clippy` with all warnings as errors, then `cargo test --workspace` |
+| Database tests | Linux | `cargo test --package presswork-server` with PostgreSQL |
+| OCR tests | Linux | `cargo test --package presswork-ocr` with OCRmyPDF and the ocrs models |
 | Dependencies | Linux | `cargo deny check` |
+| Scripts | Linux | The tests of the scripts in `.github/scripts` |
 | Documentation | Linux | `mdbook build docs` |
 
 ## Release train
@@ -65,7 +76,7 @@ A maintainer can start the release train by hand, for example for an urgent corr
 
 ## Nightly builds
 
-Each night, the nightly workflow looks for new commits on `main`. If there are new commits, it builds the packages for all platforms. It puts them into the `nightly` prerelease on GitHub, in place of the previous nightly packages. Testers use the nightly builds. The updater does not install them unless the user selects the nightly builds.
+Each night, the nightly workflow looks for new commits on `main`. If there are new commits, it builds the packages for all platforms. It puts them into the `nightly` prerelease on GitHub, in place of the previous nightly packages. It also publishes the server image with the tag `nightly`. Testers use the nightly builds. The updater does not install them unless the user selects the nightly builds.
 
 ## Versions
 

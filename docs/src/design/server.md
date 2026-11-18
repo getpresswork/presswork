@@ -201,10 +201,146 @@ Install one `tesseract-ocr-*` package for each language of the library, for exam
 
 ## Deployment
 
-- The release workflow publishes a container image for each release.
-- The repository contains a Docker Compose file with the server and PostgreSQL.
-- The server reads its settings from a TOML file. An environment variable can replace each setting.
-- The server has health endpoints for load balancers and container platforms.
+Operate the server in one of two ways (D162):
+
+- The container image with Docker Compose. The image contains the server, OCRmyPDF, and the English data of Tesseract.
+- The server archive with systemd. You install PostgreSQL and the OCR tools.
+
+The server has no TLS. Put a reverse proxy, for example Caddy or nginx, in front of the server for HTTPS. If the proxy adds the `X-Forwarded-For` header, set `trust_forwarded` to `true`. CI tests the server with PostgreSQL 17.
+
+### Container image
+
+The release workflow and the nightly workflow publish the image `ghcr.io/getpresswork/presswork-server` for `linux/amd64` and `linux/arm64` (D163).
+
+| Tag | Image |
+| --- | --- |
+| `0.1.0` | The release 0.1.0. |
+| `0.1` | The last release of version 0.1. |
+| `latest` | The last release. |
+| `nightly` | The last nightly build. Use it only for tests. |
+
+A prerelease version, for example `1.0.0-rc.1`, gets only its version tag. The tags that end with `-amd64` or `-arm64` contain the image of one architecture. The workflows use them to make the image for the two platforms.
+
+The image:
+
+- Starts `presswork-server serve` as the user `presswork`, with the user ID and the group ID 10001.
+- Listens on `0.0.0.0:8080` in the container.
+- Keeps the library files and the search index in the volume `/var/lib/presswork`.
+- Stops correctly when it gets `SIGTERM`, for example from `docker stop`.
+
+### Docker Compose
+
+The file `packaging/server/compose.yaml` starts PostgreSQL 17 and the server. The server archive also contains this file.
+
+1. Put `compose.yaml` in an empty folder.
+2. In the same folder, make the file `.env` with a password for the database:
+
+   ```sh
+   PRESSWORK_DATABASE_PASSWORD=<password>
+   ```
+
+   Use only letters and digits, because the password is part of the database URL. The command `openssl rand -hex 24` gives a good password.
+
+3. Start the database and the server:
+
+   ```sh
+   docker compose up --detach
+   ```
+
+4. Make the first organization. The command writes an invite link for the administrator.
+
+   ```sh
+   docker compose exec server presswork-server create-organization --name "Example Press" --administrator ann@example.com
+   ```
+
+The file `.env` can also set these variables:
+
+| Variable | Default | Use |
+| --- | --- | --- |
+| `PRESSWORK_IMAGE` | `ghcr.io/getpresswork/presswork-server:latest` | The server image, for example `ghcr.io/getpresswork/presswork-server:0.1`. |
+| `PRESSWORK_PORT` | `127.0.0.1:8080` | The address and the port of the server on the host. |
+| `PRESSWORK_TRUST_FORWARDED` | `false` | The setting `trust_forwarded`. |
+
+To install a new release, get the new image and start the server again. At the start, the server applies the new database migrations.
+
+```sh
+docker compose pull
+docker compose up --detach
+```
+
+Make backups of the two volumes. The volume `database` contains the PostgreSQL data. The volume `data` contains the library files in `blobs` and the search index in `index`. If the search index is empty, the server makes it again at the start. For a backup of the database, use `pg_dump`:
+
+```sh
+docker compose exec -T database pg_dump --username presswork presswork > presswork.sql
+```
+
+### More OCR languages
+
+The image contains only the English data of Tesseract (D164). For more languages, make an image from the Presswork image. This example adds German:
+
+```dockerfile
+FROM ghcr.io/getpresswork/presswork-server:0.1
+USER root
+RUN apt-get update && apt-get install --yes --no-install-recommends tesseract-ocr-deu && rm -rf /var/lib/apt/lists/*
+USER presswork
+```
+
+Build the image, for example with `docker build --tag presswork-server-deu .`. Then set `PRESSWORK_IMAGE=presswork-server-deu` in the file `.env`.
+
+### Server archive
+
+The release workflow and the nightly workflow also publish the server archive `presswork-server-<label>-<target>.tar.gz` for Linux on x86_64 and aarch64. The archive contains:
+
+- `presswork-server`, the program.
+- `server.toml`, an example settings file.
+- `presswork-server.service`, a systemd unit.
+- `compose.yaml`, the Docker Compose file.
+- `LICENSE` and `NOTICE`.
+
+CI builds and tests the program on Ubuntu 24.04. To install the server with systemd on Debian or Ubuntu:
+
+1. Install PostgreSQL and the OCR tools:
+
+   ```sh
+   sudo apt-get install postgresql ocrmypdf tesseract-ocr-eng
+   ```
+
+2. Make a database user and a database. The first command asks for a password.
+
+   ```sh
+   sudo -u postgres createuser --pwprompt presswork
+   sudo -u postgres createdb --owner presswork presswork
+   ```
+
+3. Make a system user for the server:
+
+   ```sh
+   sudo useradd --system --user-group --home-dir /var/lib/presswork --no-create-home --shell /usr/sbin/nologin presswork
+   ```
+
+4. Install the program, the settings file, and the unit:
+
+   ```sh
+   sudo install --mode 755 presswork-server /usr/local/bin/
+   sudo install -D --mode 640 --group presswork server.toml /etc/presswork/server.toml
+   sudo install --mode 644 presswork-server.service /etc/systemd/system/
+   ```
+
+5. In `/etc/presswork/server.toml`, replace `change-this-password` with the password from step 2.
+6. Start the server:
+
+   ```sh
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now presswork-server
+   ```
+
+7. Make the first organization:
+
+   ```sh
+   sudo -u presswork PRESSWORK_CONFIG=/etc/presswork/server.toml presswork-server create-organization --name "Example Press" --administrator ann@example.com
+   ```
+
+The unit starts the server as the user `presswork`, with the settings file `/etc/presswork/server.toml`. systemd makes the data folder `/var/lib/presswork`. The unit gives the server write access only to this folder and to a private temporary folder. To read the logs, use `journalctl --unit presswork-server`.
 
 ## Settings
 

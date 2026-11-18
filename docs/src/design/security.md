@@ -13,7 +13,7 @@ This chapter tells how Presswork protects documents, accounts, and computers.
 - The server limits the failed sign-ins for each email address and for each client address (D148). Refer to [Server](server.md).
 - Each request handler checks the permission before it does the operation. The default is no access.
 - Put the server behind a reverse proxy that uses TLS. Do not let clients connect to the server with plain HTTP.
-- OCR runs OCRmyPDF, Tesseract, and Ghostscript on the files that members upload (D152). These programs are not in Rust, and a hostile PDF file can attack them. Run the server in a container, or with a user that can write only to the `data` folder. Each OCR run has a time limit of one hour.
+- OCR runs OCRmyPDF, Tesseract, and Ghostscript on the files that members upload (D152). These programs are not in Rust, and a hostile PDF file can attack them. Run the server in a container, or with a user that can write only to the `data` folder. The container image and the systemd unit of the server archive do this (D166). Each OCR run has a time limit of one hour.
 - The audit log records all changes.
 
 ## Two-factor sign-in
@@ -63,6 +63,7 @@ Before release 1.0, an external security audit examines the encryption design an
 - The toolchain manager does not unpack paths outside of the target folder.
 - The two model files of the ocrs engine have fixed SHA-256 digests in the `presswork-ocr` crate. The engine does not load a model file with a different digest (D154).
 - The release workflow downloads WiX and the AppImage tools at fixed versions. `package-tools.sh` compares each file with a fixed digest, and a different digest stops the build (D158).
+- The server image uses Ubuntu 24.04 at a fixed digest. OCRmyPDF and Tesseract come from the Ubuntu archive, and apt checks the signatures of the archive. The Compose file uses PostgreSQL 17 at a fixed digest. Dependabot opens update requests for the two images (D165).
 
 ## Updates
 
