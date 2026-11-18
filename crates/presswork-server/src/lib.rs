@@ -98,6 +98,7 @@ async fn ocr_engine(config: &Config) -> Option<Arc<dyn OcrEngine>> {
 }
 
 pub async fn run(config: Config) -> Result<(), ServerError> {
+    let stop = stop_signal();
     let pool = prepare(&config).await?;
     let mut library = library::Library::open(&config.data).map_err(ServerError::Library)?;
     if let Some(engine) = ocr_engine(&config).await {
@@ -120,12 +121,58 @@ pub async fn run(config: Config) -> Result<(), ServerError> {
         listener,
         router(state).into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown())
+    .with_graceful_shutdown(stop)
     .await
     .map_err(ServerError::Listen)
 }
 
-async fn shutdown() {
+#[cfg(unix)]
+fn stop_signal() -> impl Future<Output = ()> {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let terminate = signal(SignalKind::terminate());
+    async move {
+        match terminate {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = terminate.recv() => {}
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "The server cannot receive SIGTERM. Only Ctrl+C stops it");
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+        tracing::info!("Presswork server stops");
+    }
+}
+
+#[cfg(not(unix))]
+async fn stop_signal() {
     let _ = tokio::signal::ctrl_c().await;
     tracing::info!("Presswork server stops");
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::process::Command;
+    use std::time::Duration;
+
+    use super::stop_signal;
+
+    #[tokio::test]
+    async fn a_terminate_signal_stops_the_server() {
+        let stop = stop_signal();
+
+        let status = Command::new("kill")
+            .args(["-TERM", &std::process::id().to_string()])
+            .status()
+            .unwrap();
+
+        assert!(status.success());
+        tokio::time::timeout(Duration::from_secs(5), stop)
+            .await
+            .unwrap();
+    }
 }
