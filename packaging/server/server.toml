@@ -1,0 +1,8 @@
+# Settings of the Presswork server.
+# Refer to https://getpresswork.github.io/presswork/design/server.html#settings.
+listen = "127.0.0.1:8080"
+database_url = "postgres://presswork:change-this-password@localhost:5432/presswork"
+data = "/var/lib/presswork"
+trust_forwarded = false
+ocrmypdf = "ocrmypdf"
+ocr_languages = "eng"

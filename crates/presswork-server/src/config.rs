@@ -203,6 +203,17 @@ mod tests {
     }
 
     #[test]
+    fn the_example_settings_file_is_valid() {
+        let example = include_str!("../../../packaging/server/server.toml");
+
+        let config = Config::parse(example, none).unwrap();
+
+        assert_eq!(config.data, PathBuf::from("/var/lib/presswork"));
+        assert!(config.database_url.is_some());
+        assert_eq!(config.ocr_program(), Some("ocrmypdf"));
+    }
+
+    #[test]
     fn an_unknown_key_is_an_error() {
         let error = Config::parse("databse_url = \"postgres://db\"\n", none).unwrap_err();
 

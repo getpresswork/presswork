@@ -1,0 +1,27 @@
+[Unit]
+Description=Presswork server
+Documentation=https://getpresswork.github.io/presswork/design/server.html
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=presswork
+Group=presswork
+Environment=PRESSWORK_CONFIG=/etc/presswork/server.toml
+ExecStart=/usr/local/bin/presswork-server serve
+StateDirectory=presswork
+WorkingDirectory=/var/lib/presswork
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

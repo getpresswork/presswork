@@ -21,3 +21,17 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /packaging/server
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+
+  - package-ecosystem: docker-compose
+    directory: /packaging/server
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build

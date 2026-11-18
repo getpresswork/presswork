@@ -1,0 +1,35 @@
+name: presswork
+
+services:
+  database:
+    image: postgres:17-alpine@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7
+    environment:
+      POSTGRES_USER: presswork
+      POSTGRES_PASSWORD: ${PRESSWORK_DATABASE_PASSWORD:?Set PRESSWORK_DATABASE_PASSWORD in the .env file}
+      POSTGRES_DB: presswork
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "--username", "presswork", "--dbname", "presswork"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  server:
+    image: ${PRESSWORK_IMAGE:-ghcr.io/getpresswork/presswork-server:latest}
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      PRESSWORK_DATABASE_URL: postgres://presswork:${PRESSWORK_DATABASE_PASSWORD}@database:5432/presswork
+      PRESSWORK_TRUST_FORWARDED: ${PRESSWORK_TRUST_FORWARDED:-false}
+    ports:
+      - ${PRESSWORK_PORT:-127.0.0.1:8080}:8080
+    volumes:
+      - data:/var/lib/presswork
+    restart: unless-stopped
+
+volumes:
+  database:
+  data:
