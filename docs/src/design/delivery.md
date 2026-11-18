@@ -45,8 +45,9 @@ cargo test --workspace --lib -- --ignored render_icons
 On the two Linux runners, the build workflow also builds the server (D162 and D163):
 
 - `package-server.sh` makes the server archive. `check-server-archive.sh` examines its files and the version, and examines the systemd unit with `systemd-analyze verify`.
-- On the x86_64 runner, `check-server-service.sh` installs the server archive with systemd, as the [server chapter](server.md#server-archive) tells. It uses the PostgreSQL of the runner. It examines the ready check, the user of the service, the data folder, the `create-organization` command, and the stop.
+- On the x86_64 runner, `check-server-service.sh` installs the server archive with systemd, as the [server chapter](server.md#server-archive) tells. It uses the PostgreSQL of the runner. It examines the ready check, the user of the service, the data folder, the `create-organization` command, OCR, and the stop.
 - `server-image.sh` builds the container image from `packaging/server/Dockerfile`. `check-server-image.sh` starts the image and PostgreSQL with the Compose file. It examines the version, the user, the OCR tools, the ready check, the `create-organization` command, and the stop with `SIGTERM`.
+- For OCR, `check-server-library.sh` accepts the invite, uploads a scanned page, and finds its text with the library search. Ghostscript makes the scanned page from `crates/presswork-ocr/fixtures/typst.pdf`.
 - In the release workflow and the nightly workflow, `push-server-image.sh` pushes the checked image of each architecture to GHCR. Then `publish-server-image.sh` joins the two images under the tags of the release. `server-image-tags.sh` gives these tags.
 
 ## Continuous integration
