@@ -28,6 +28,9 @@ updates:
       interval: weekly
     commit-message:
       prefix: build
+    ignore:
+      - dependency-name: ubuntu
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: docker-compose
     directory: /packaging/server
@@ -35,3 +38,6 @@ updates:
       interval: weekly
     commit-message:
       prefix: build
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
