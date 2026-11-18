@@ -36,6 +36,8 @@ Download a package of the desktop application from the [releases](https://github
 
 Use the `x86_64` packages for Intel and AMD processors, and the `aarch64` packages for Arm processors, for example Apple silicon. The packages have no digital signatures yet. Windows shows a SmartScreen warning before the installation. macOS opens the app only after you approve it in System Settings, in Privacy & Security.
 
+For the server, use the container image `ghcr.io/getpresswork/presswork-server` or the server archive from the releases. Refer to [Deployment](https://getpresswork.github.io/presswork/design/server.html#deployment).
+
 ## Build from source
 
 1. Install Rust with [rustup](https://rustup.rs).
