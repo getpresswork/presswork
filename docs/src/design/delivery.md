@@ -11,6 +11,8 @@ This chapter tells how a commit becomes a release.
 | Desktop | Linux | x86_64, aarch64 | AppImage, DEB, RPM, archive |
 | Server | Linux | x86_64, aarch64 | Container image, archive |
 
+The Linux packages come from Ubuntu 24.04 runners. Thus they need glibc 2.39 or later.
+
 Each release contains the archives and the installers of the desktop application, and the archives of the server. The release workflow also publishes the container image of the server. Refer to [Deployment](server.md#deployment).
 
 ## Installers

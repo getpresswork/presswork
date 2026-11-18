@@ -1178,6 +1178,7 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The Compose file gets the database password from the file `.env`. It publishes the port of the server only on `127.0.0.1` of the host, for a reverse proxy. Its default image has the tag `latest`.
   - The systemd unit starts the server as the user `presswork`. The system folders are read-only for the server, and it has a private temporary folder. systemd makes the data folder.
   - The build workflow checks the archive and the image on the runner that made them. The image check starts the image with PostgreSQL through the Compose file.
+  - The build workflow builds all Linux packages on Ubuntu 24.04, not on `ubuntu-latest`. A program that is built on a newer system needs a newer glibc. For example, the x86_64 server from `ubuntu-latest` needed glibc 2.43 and did not start in the image.
 - **Reason:** These are the usual settings of container images and systemd services. The checks find a broken image before a release.
 - **Other options:** The port of the server on all addresses of the host. A Compose file with a reverse proxy and TLS.
 
