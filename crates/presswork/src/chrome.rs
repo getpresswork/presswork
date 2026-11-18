@@ -10,6 +10,7 @@ use crate::app::Message;
 use crate::i18n::{FluentArgs, Localizer};
 
 pub(crate) const MINIMUM_SIZE: Size = Size::new(720.0, 480.0);
+pub(crate) const TOP_BAR: &str = "top-bar";
 const TRAFFIC_LIGHTS: f32 = 76.0;
 const OUTLINE: bool = cfg!(target_os = "linux");
 const TIP_DELAY: Duration = Duration::from_millis(500);
@@ -154,6 +155,7 @@ pub(crate) fn bar<'a>(
     let id = frame.id;
     let area = mouse_area(
         container(bar.height(size::TOP_BAR))
+            .id(TOP_BAR)
             .width(Fill)
             .style(style::chrome),
     )

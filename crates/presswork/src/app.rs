@@ -1020,6 +1020,7 @@ impl App {
             open
         ]
         .spacing(gap::S)
+        .height(Fill)
         .align_y(Vertical::Center)
         .into()
     }
@@ -2124,6 +2125,24 @@ mod tests {
         assert!(narrow.find("Research").is_err());
         assert!(narrow.find("Open folder").is_err());
         assert!(narrow.find(research).is_ok());
+    }
+
+    #[test]
+    fn the_top_bar_centers_its_content_vertically() {
+        let app = app();
+        let mut ui = sized(app.view(), 1280.0);
+
+        let bar = ui
+            .find(iced_test::selector::id(chrome::TOP_BAR))
+            .unwrap()
+            .bounds();
+        for label in ["Write", "Open folder"] {
+            let bounds = ui.find(label).unwrap().bounds();
+            assert!(
+                (bounds.center_y() - bar.center_y()).abs() < 0.5,
+                "{label}: {bounds:?} in {bar:?}"
+            );
+        }
     }
 
     #[test]
