@@ -63,7 +63,7 @@ Before release 1.0, an external security audit examines the encryption design an
 - The toolchain manager does not unpack paths outside of the target folder.
 - The two model files of the ocrs engine have fixed SHA-256 digests in the `presswork-ocr` crate. The engine does not load a model file with a different digest (D154).
 - The release workflow downloads WiX and the AppImage tools at fixed versions. `package-tools.sh` compares each file with a fixed digest, and a different digest stops the build (D158).
-- The server image uses Ubuntu 24.04 at a fixed digest. OCRmyPDF and Tesseract come from the Ubuntu archive, and apt checks the signatures of the archive. The Compose file uses PostgreSQL 17 at a fixed digest. Dependabot opens update requests for the two images (D165).
+- The server image uses Ubuntu 24.04 at a fixed digest. OCRmyPDF and Tesseract come from the Ubuntu archive, and apt checks the signatures of the archive. The Compose file uses PostgreSQL 17 at a fixed digest. Dependabot opens update requests for new digests of the two images (D165 and D168).
 
 ## Updates
 

@@ -1188,3 +1188,10 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** On Linux and macOS, the server starts OCRmyPDF in a new process group. At the time limit (D156), it stops all processes of the group with `SIGKILL`. A `kill` command of `sh` sends the signal, because the workspace forbids `unsafe` code. On Windows, the server stops only the OCRmyPDF process. In a terminal, Ctrl+C stops the server, but an OCR run that has started continues until it ends. A container or a systemd service stops all processes of the server.
 - **Reason:** OCRmyPDF starts worker processes, and the workers start Tesseract and Ghostscript. Before this decision, only the OCRmyPDF process stopped at the time limit. The other processes continued with a hostile file and used the processors of the server.
 - **Other options:** A list of the child processes from `/proc`, which is only for Linux. The `rustix` crate for the signal, which is a new direct dependency.
+
+## D168. Dependabot updates only the digests of the server images
+
+- **Status:** Accepted, 2026-11-18. **Origin:** Default.
+- **Decision:** Dependabot opens update requests for new digests of `ubuntu:24.04` in the Dockerfile and of `postgres:17-alpine` in the Compose file. It ignores new Ubuntu releases and new major versions of PostgreSQL.
+- **Reason:** The image uses the Ubuntu release of the CI jobs (D162). A new major version of PostgreSQL cannot open the data folder of the previous version. Thus a change of the Compose file to a new major version needs a migration procedure first.
+- **Other options:** All version updates, with a review of each request.
