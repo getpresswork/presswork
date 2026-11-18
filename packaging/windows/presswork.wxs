@@ -1,0 +1,55 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package
+      Name="Presswork"
+      Manufacturer="The Presswork Authors"
+      Version="$(var.Version)"
+      UpgradeCode="F5D56018-BD65-44D6-B6BB-D4C69D88A81B"
+      Scope="perMachine"
+      Compressed="yes">
+    <MajorUpgrade
+        AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A later version of Presswork is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="presswork.ico" SourceFile="$(var.Icon)" />
+    <Property Id="ARPPRODUCTICON" Value="presswork.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://getpresswork.github.io/presswork/" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/getpresswork/presswork/issues" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Presswork" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main">
+      <Component Directory="INSTALLFOLDER">
+        <File Id="presswork.exe" Source="$(var.Binary)" Name="presswork.exe" KeyPath="yes" />
+      </Component>
+      <Component Directory="INSTALLFOLDER">
+        <File Source="$(var.License)" Name="LICENSE.txt" KeyPath="yes" />
+      </Component>
+      <Component Directory="INSTALLFOLDER">
+        <File Source="$(var.Notice)" Name="NOTICE.txt" KeyPath="yes" />
+      </Component>
+      <Component Directory="ProgramMenuFolder">
+        <Shortcut
+            Id="StartMenuShortcut"
+            Name="Presswork"
+            Description="Write, typeset, and publish with Typst"
+            Target="[#presswork.exe]"
+            WorkingDirectory="INSTALLFOLDER"
+            Icon="presswork.ico" />
+        <RegistryValue
+            Root="HKCU"
+            Key="Software\The Presswork Authors\Presswork"
+            Name="StartMenuShortcut"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+      </Component>
+    </Feature>
+
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+  </Package>
+</Wix>
