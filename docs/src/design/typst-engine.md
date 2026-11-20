@@ -122,7 +122,7 @@ HTML export is experimental in Typst. Presswork shows it only if you turn on exp
 
 In milestone 2, a profile has a name, a format (PDF, PNG, or SVG), PDF standards, an output path, the resolution of PNG files, and the lowest resolution of images. Inputs and HTML export come later. The keys of the manifest are in [Interface](interface.md).
 
-An export runs on its own thread. It compiles the text of the editor without page images, does the preflight checks, and writes the files. `typst-pdf` makes the PDF files, `typst-render` the PNG files, and `typst-svg` the SVG files. A PDF/A file must have a creation date, so the export gives the current time in UTC (D182).
+An export runs on its own thread. It compiles the text of the editor without page images, does the preflight checks, and writes the files. `typst-pdf` makes the PDF files, `typst-render` the PNG files, and `typst-svg` the SVG files. A PDF/A file must have a creation date, so the export gives the current time in UTC (D182). Then the export writes a build report next to the files (D184).
 
 ## Preflight
 
@@ -134,7 +134,15 @@ Preflight finds problems before an export. The engine examines the compiled docu
 - Colors in a color space that the profile does not allow, for example RGB colors in a CMYK print profile.
 - Pages with a size that is different from the profile.
 
-In milestone 2, preflight finds the first two problems. The resolution of a raster image is its number of pixels for each inch of its size on the page. Scales and other transformations of the image count. If the resolutions across and down are different, preflight uses the lower one. Vector images have no resolution. Each problem has its page and, if possible, the source of the image. Problems do not stop an export.
+In milestone 2, preflight finds all these problems, with the rules of the export profile (D184):
+
+- The resolution of a raster image is its number of pixels for each inch of its size on the page. Scales and other transformations of the image count. If the resolutions across and down are different, preflight uses the lower one. Vector images have no resolution.
+- A font family is not available when Typst gives the warning "unknown font family". Preflight shows one problem for each family. The text then uses a different font.
+- A glyph is missing when no font has the character. Typst then shows an empty box (glyph 0). Preflight shows one problem for each page, with the first ten characters.
+- The page size is the trim size of the page, without the bleed. It must agree with `page-size` of the profile to 0.1 mm.
+- Preflight examines the fill and the stroke of text and shapes, and the content of tilings. With `colors = "cmyk"`, the profile accepts CMYK, gray (`luma`), and spot colors. With `colors = "gray"`, it accepts only gray colors. Preflight shows one problem for each color, at its first use. A gradient must have an accepted color space, because Typst converts its stops into that space. Preflight does not examine the colors in images yet.
+
+Each problem has its page, if it has one, and if possible its source. Problems do not stop an export.
 
 After an export, veraPDF can validate PDF/A and PDF/UA files. Refer to [Toolchains](toolchains.md).
 

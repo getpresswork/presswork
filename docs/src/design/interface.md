@@ -181,6 +181,8 @@ The manifest can also have `[[export]]` tables. Each table is an export profile:
 | `output` | The path of the file, relative to the project folder. For PNG and SVG, `{p}` is the page number. `{0p}` is the page number with zeros at the start, so that all names have the same length. | The name of the main file next to the main file, with the extension of the format. For PNG and SVG, `-{p}` comes before the extension. |
 | `ppi` | The resolution of PNG files. | `144` |
 | `image-ppi` | The lowest resolution of images that preflight accepts. | No check |
+| `page-size` | The trim size of each page, as width x height with a unit: `mm`, `cm`, `in`, or `pt`. For example `"148mm x 210mm"` or `"6in x 9in"`. | No check |
+| `colors` | The colors that preflight accepts: `cmyk` for CMYK, gray, and spot colors, or `gray` for gray colors only. | No check |
 
 The names of the standards are `1.4`, `1.5`, `1.6`, `1.7`, `2.0`, `a-1b`, `a-1a`, `a-2b`, `a-2u`, `a-2a`, `a-3b`, `a-3u`, `a-3a`, `a-4`, `a-4f`, `a-4e`, and `ua-1`.
 
@@ -192,6 +194,8 @@ name = "Field Notes"
 name = "print"
 standards = ["a-2b"]
 image-ppi = 300
+page-size = "148mm x 210mm"
+colors = "cmyk"
 output = "out/field-notes-print.pdf"
 
 [[export]]
@@ -206,10 +210,12 @@ The Publish workspace shows the export profiles of the project. If the manifest 
 
 1. Select the **Publish** workspace.
 2. Click **Export** next to the profile.
-3. Read the result below the profile. It gives the files and the preflight problems.
-4. To see the source of a problem, click the problem. The Write workspace opens and selects the image in the editor.
+3. Read the result below the profile. It gives the files, the build report, and the preflight problems.
+4. To see the source of a problem, click the problem. The Write workspace opens and selects the source in the editor.
 
 The export uses the text in the editor, also the changes that you did not save. Presswork writes export files only in the project folder. In milestone 2, only the built-in Typst engine can export (D182).
+
+Each export also writes a build report, `<profile name>.report.json`, in the folder of the export files. Refer to [Logs and diagnostics](logs.md) (D184).
 
 ## Server documents
 

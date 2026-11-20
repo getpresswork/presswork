@@ -34,6 +34,20 @@ Presswork keeps a build report for each compilation and each export. A build rep
 
 You can compare two build reports. Presswork shows the differences in fonts, packages, inputs, and pages. Each release export keeps its build report with its revision.
 
+In milestone 2, each export writes its build report as a JSON file, `<profile name>.report.json`, in the folder of the export files (D184). The next export with the same profile writes over it. The report contains:
+
+- `presswork`, `typst`, and `engine`: the versions and the engine.
+- `profile`: the export profile, with the keys of the manifest.
+- `created`: the time of the export in UTC. The PDF file has the same creation time.
+- `pages`: the number of pages.
+- `times`: the compile time and the export time, in milliseconds.
+- `fonts`: the family, the style, and the weight of each font that the document uses, and its source. All fonts are built in now.
+- `warnings`: the Typst warnings, with the file and the byte range of each.
+- `problems`: the preflight problems, with the page, the kind, and the source of each.
+- `files`: the path, the size in bytes, and the SHA-256 digest of each export file.
+
+The report has no packages and no inputs yet, because Presswork does not load packages and has no inputs at this time.
+
 ## Support bundle
 
 - The command "Make support bundle" collects the logs, the versions, the settings, and the system data.

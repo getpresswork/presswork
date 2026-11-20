@@ -1352,7 +1352,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D183. Details of the command-line tool
 
-- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Status:** Accepted, 2026-11-20. The preflight rule is replaced by D184. **Origin:** Default.
 - **Decision:**
   - In milestone 2, `presswork-cli` has two commands: `build` and `check`. Each command takes the project folder (the current folder by default) and `--profile NAME`, which you can give more than one time.
   - The program uses the built-in Typst engine and the fonts of Presswork, as the desktop application does. If the Typst pin of the project does not accept the built-in version, the program stops with a message.
@@ -1364,3 +1364,18 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The release packages do not contain the program yet. You can install it with `cargo install --path crates/presswork-cli`. The packages get it after the release of 0.1.0.
 - **Reason:** CI systems need a command that fails on problems and messages in a form that their tools can read. One preflight run gives each problem one time. A change to the release workflow just before the first release can stop that release.
 - **Other options:** Preflight for each profile, with the same problem one time for each profile. JSON output. Exports with managed toolchains through `typst compile`. The commands in the desktop program. The program in the release packages now.
+
+## D184. Details of the full preflight and of build reports
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - Export profiles get two keys. `page-size` gives the trim size as width x height with a unit: `mm`, `cm`, `in`, or `pt`. `colors` is `cmyk` or `gray`.
+  - A font family is missing when Typst gives the warning "unknown font family". The problem has no page and shows one time for each family.
+  - A glyph is missing when the output has glyph 0, the empty box of Typst. Preflight shows one problem for each page, with the first ten characters. Spaces do not count.
+  - The page size is the trim size without the bleed. A difference of more than 0.1 mm in the width or the height is a problem. The problem gives the sizes in the unit of the profile.
+  - The color check examines the fill and the stroke of text and shapes, and the content of tilings. `cmyk` accepts CMYK, gray, and spot colors. `gray` accepts only gray colors. Each color is one problem, at its first use. A gradient is a problem when its color space is not accepted, because Typst converts its stops into that space. Images are not examined yet.
+  - The command-line tool runs preflight for each selected profile. A problem of the document (a missing font, missing glyphs, or missing alternative text) shows one time. A problem of a profile (the resolution, the page size, or a color) shows for each profile, with the name of the profile. This replaces the preflight rule of D183.
+  - Each export writes a build report as JSON in the folder of the export files. Its name is the profile name with `.report.json`. In the name, each character other than a letter, a digit, `-`, or `_` becomes `-`. The report contains the versions, the profile, the time, the number of pages, the times of the steps, the fonts, the warnings, the problems, and the size and the SHA-256 digest of each file. The next export with the same profile writes over it.
+  - The PDF creation date and the time in the report are the same moment.
+- **Reason:** Printers reject files with missing glyphs, a wrong trim size, or RGB colors in a CMYK job. The Typst warning is the only record of a missing font family. A report next to the files goes with them into archives and CI artifacts, and the digests show if a file changed.
+- **Other options:** Color checks for images. Paper names such as `a5` for `page-size`. A check of the page count. Reports in the data folder of the application. A `--report` option of the command-line tool. Reports only on request. A history of reports.
