@@ -50,23 +50,24 @@ impl ExportProfile {
     }
 
     #[must_use]
+    pub fn template(&self, main: &Path) -> PathBuf {
+        if let Some(output) = &self.output {
+            return output.clone();
+        }
+        let stem = main.file_stem().map_or_else(
+            || "main".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
+        main.with_file_name(match self.format {
+            ExportFormat::Pdf => format!("{stem}.pdf"),
+            ExportFormat::Png => format!("{stem}-{{p}}.png"),
+            ExportFormat::Svg => format!("{stem}-{{p}}.svg"),
+        })
+    }
+
+    #[must_use]
     pub fn files(&self, main: &Path, pages: usize) -> Vec<PathBuf> {
-        let extension = match self.format {
-            ExportFormat::Pdf => "pdf",
-            ExportFormat::Png => "png",
-            ExportFormat::Svg => "svg",
-        };
-        let template = self.output.clone().unwrap_or_else(|| {
-            let stem = main.file_stem().map_or_else(
-                || "main".to_owned(),
-                |stem| stem.to_string_lossy().into_owned(),
-            );
-            let name = match self.format {
-                ExportFormat::Pdf => format!("{stem}.{extension}"),
-                ExportFormat::Png | ExportFormat::Svg => format!("{stem}-{{p}}.{extension}"),
-            };
-            main.with_file_name(name)
-        });
+        let template = self.template(main);
         if self.format == ExportFormat::Pdf {
             return vec![template];
         }
@@ -273,6 +274,19 @@ mod tests {
                 PathBuf::from("chapters/book-2.png")
             ]
         );
+    }
+
+    #[test]
+    fn the_template_keeps_the_page_number_pattern() {
+        let mut profile = ExportProfile::named("Pages", ExportFormat::Png);
+        let main = Path::new("chapters/book.typ");
+
+        assert_eq!(
+            profile.template(main),
+            PathBuf::from("chapters/book-{p}.png")
+        );
+        profile.output = Some(PathBuf::from("out/page-{0p}.png"));
+        assert_eq!(profile.template(main), PathBuf::from("out/page-{0p}.png"));
     }
 
     #[test]
