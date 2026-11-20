@@ -5,8 +5,8 @@ use iced::widget::scrollable::{AbsoluteOffset, Direction, Scrollbar};
 use iced::widget::{
     button, column, container, image, operation, responsive, row, rule, scrollable, space, text,
 };
-use iced::{Element, Fill, Point, Size, Task};
-use presswork_typst::{Output, PagePoint};
+use iced::{Element, Fill, Point, Rectangle, Size, Task};
+use presswork_typst::{Insets, Output, PagePoint};
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::{font, font_size, size, space as gap};
@@ -47,6 +47,7 @@ pub enum Action {
     ZoomOut,
     FitWidth,
     Spreads,
+    Guides,
     Thumbnails,
     GoToPage(usize),
     ShowProblem,
@@ -79,6 +80,7 @@ struct Page {
     handle: image::Handle,
     width: f32,
     height: f32,
+    bleed: Insets,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -93,6 +95,7 @@ pub struct Preview {
     zoom: Zoom,
     arrangement: Arrangement,
     thumbnails: bool,
+    guides: bool,
     problem: Option<String>,
     detached: bool,
     viewport: Option<Viewport>,
@@ -108,6 +111,7 @@ impl Preview {
                     handle: image::Handle::from_rgba(page.width, page.height, page.rgba.clone()),
                     width: pixels(page.width) / pixel_per_pt,
                     height: pixels(page.height) / pixel_per_pt,
+                    bleed: page.bleed,
                 })
                 .collect();
         }
@@ -139,6 +143,27 @@ impl Preview {
     #[must_use]
     pub fn arrangement(&self) -> Arrangement {
         self.arrangement
+    }
+
+    #[must_use]
+    pub fn guides(&self) -> bool {
+        self.guides
+    }
+
+    fn trim_on(&self, page: usize, scale: f32) -> Option<Rectangle> {
+        let page = self.pages.get(page).filter(|_| self.guides)?;
+        let bleed = page.bleed;
+        if bleed == Insets::default() {
+            return None;
+        }
+        let ratio = PX_PER_PT * scale;
+        Some(Rectangle::new(
+            Point::new(bleed.left * ratio, bleed.top * ratio),
+            Size::new(
+                (page.width - bleed.left - bleed.right) * ratio,
+                (page.height - bleed.top - bleed.bottom) * ratio,
+            ),
+        ))
     }
 
     fn rows(&self) -> Vec<std::ops::Range<usize>> {
@@ -233,6 +258,10 @@ impl Preview {
                 self.thumbnails = !self.thumbnails;
                 return;
             }
+            Action::Guides => {
+                self.guides = !self.guides;
+                return;
+            }
             Action::GoToPage(_)
             | Action::ShowProblem
             | Action::Detach
@@ -271,7 +300,8 @@ impl Preview {
     fn scroll_target(&self, point: PagePoint) -> Option<f32> {
         let viewport = self.viewport?;
         let Frame { scale, .. } = self.frame(viewport.width);
-        let y = self.row_top(point.page, scale)? + to_f32(point.y) * PX_PER_PT * scale;
+        let top = self.pages.get(point.page)?.bleed.top;
+        let y = self.row_top(point.page, scale)? + (to_f32(point.y) + top) * PX_PER_PT * scale;
         let margin = viewport.height * SHOWN_MARGIN;
         if y >= viewport.top + margin && y <= viewport.top + viewport.height - margin {
             return None;
@@ -281,10 +311,14 @@ impl Preview {
 
     fn mark_on(&self, page: usize, scale: f32) -> Option<(Point, Instant)> {
         let (point, since) = self.mark?;
+        let bleed = self.pages.get(page)?.bleed;
         (point.page == page).then(|| {
             let ratio = PX_PER_PT * scale;
             (
-                Point::new(to_f32(point.x) * ratio, to_f32(point.y) * ratio),
+                Point::new(
+                    (to_f32(point.x) + bleed.left) * ratio,
+                    (to_f32(point.y) + bleed.top) * ratio,
+                ),
                 since,
             )
         })
@@ -368,6 +402,7 @@ impl Preview {
                 self.arrangement == Arrangement::Spreads,
                 on_action(Action::Spreads)
             ),
+            tool(Icon::Frame, self.guides, on_action(Action::Guides)),
             space().width(gap::S),
             tool(Icon::ZoomOut, false, on_action(Action::ZoomOut)),
             text(format!("{percent:.0}%"))
@@ -494,11 +529,12 @@ impl Preview {
         page_area(content, move |point| {
             on_action(Action::Click(PagePoint {
                 page: index,
-                x: f64::from(point.x / (PX_PER_PT * scale)),
-                y: f64::from(point.y / (PX_PER_PT * scale)),
+                x: f64::from(point.x / (PX_PER_PT * scale) - page.bleed.left),
+                y: f64::from(point.y / (PX_PER_PT * scale) - page.bleed.top),
             }))
         })
         .mark(self.mark_on(index, scale))
+        .trim(self.trim_on(index, scale))
         .into()
     }
 }
@@ -926,6 +962,120 @@ mod tests {
         assert_eq!(preview.current_page(), Some(0));
         preview.perform(scrolled(PADDING + page, 200.0, 640.0));
         assert_eq!(preview.current_page(), Some(1));
+    }
+
+    const BLEED: presswork_typst::Insets = presswork_typst::Insets {
+        left: 10.0,
+        top: 10.0,
+        right: 10.0,
+        bottom: 10.0,
+    };
+
+    fn a5_pages_with_bleed(count: usize) -> Output {
+        Output {
+            pages: Some(
+                (0..count)
+                    .map(|_| PageImage {
+                        width: 840,
+                        height: 1190,
+                        rgba: vec![255; 840 * 1190 * 4],
+                        bleed: BLEED,
+                    })
+                    .collect(),
+            ),
+            ..Output::default()
+        }
+    }
+
+    #[test]
+    fn the_toolbar_switches_the_guides() {
+        let mut preview = Preview::default();
+        preview.show(&output(1), 2.0);
+
+        assert_eq!(clicked(&preview, Icon::Frame), [Action::Guides]);
+        preview.perform(Action::Guides);
+        assert!(preview.guides());
+    }
+
+    #[test]
+    fn a_click_on_a_page_with_bleed_gives_the_point_on_the_trimmed_page() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages_with_bleed(1), 2.0);
+        for _ in 0..20 {
+            preview.perform(Action::ZoomOut);
+        }
+        let mut ui = simulator(preview.view(EMPTY.to_owned(), |action| action));
+
+        ui.click(iced::widget::Id::from("page-0".to_owned()))
+            .unwrap();
+
+        let clicks: Vec<PagePoint> = ui
+            .into_messages()
+            .filter_map(|action| match action {
+                Action::Click(point) => Some(point),
+                _ => None,
+            })
+            .collect();
+        assert!((clicks[0].x - 200.0).abs() < 1.0, "{clicks:?}");
+        assert!((clicks[0].y - 287.5).abs() < 1.0, "{clicks:?}");
+    }
+
+    #[test]
+    fn the_trim_line_is_inside_the_bleed() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages_with_bleed(1), 2.0);
+        preview.perform(Action::Guides);
+
+        let trim = preview.trim_on(0, 1.0).unwrap();
+
+        let expected = Rectangle::new(
+            Point::new(10.0 * PX_PER_PT, 10.0 * PX_PER_PT),
+            Size::new(400.0 * PX_PER_PT, 575.0 * PX_PER_PT),
+        );
+        assert!(
+            (trim.x - expected.x).abs() < 0.01
+                && (trim.y - expected.y).abs() < 0.01
+                && (trim.width - expected.width).abs() < 0.01
+                && (trim.height - expected.height).abs() < 0.01,
+            "{trim:?}"
+        );
+    }
+
+    #[test]
+    fn there_is_no_trim_line_without_guides_or_without_bleed() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages_with_bleed(1), 2.0);
+        assert_eq!(preview.trim_on(0, 1.0), None);
+
+        preview.show(&output(1), 2.0);
+        preview.perform(Action::Guides);
+        assert_eq!(preview.trim_on(0, 1.0), None);
+    }
+
+    #[test]
+    fn a_mark_on_a_page_with_bleed_is_inside_the_bleed() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages_with_bleed(1), 2.0);
+        let now = Instant::now();
+
+        let _ = preview.show_point::<Action>(point(0, 30.0, 60.0), now);
+
+        let (mark, _) = preview.mark_on(0, 1.0).unwrap();
+        assert!((mark.x - 40.0 * PX_PER_PT).abs() < 0.01, "{mark:?}");
+        assert!((mark.y - 70.0 * PX_PER_PT).abs() < 0.01, "{mark:?}");
+    }
+
+    #[test]
+    fn the_scroll_target_counts_the_bleed() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages_with_bleed(3), 2.0);
+        preview.perform(scrolled(0.0, 600.0, 640.0));
+        let scale = preview.frame(640.0).scale;
+        let y = PADDING + 595.0 * PX_PER_PT * scale + PAGE_GAP + 110.0 * PX_PER_PT * scale;
+
+        let target = preview.scroll_target(point(1, 50.0, 100.0)).unwrap();
+
+        assert!((target - (y - 200.0)).abs() < 0.5, "{target} {y}");
     }
 
     #[test]

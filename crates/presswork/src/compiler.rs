@@ -24,6 +24,7 @@ pub(crate) struct Compiler {
     scheduler: Scheduler,
     generation: u64,
     stop: Stop,
+    bleed: bool,
 }
 
 impl Compiler {
@@ -35,6 +36,7 @@ impl Compiler {
             scheduler: Scheduler::default(),
             generation: 0,
             stop: Stop::new(PROGRAM_TIME_LIMIT),
+            bleed: false,
         }
     }
 
@@ -55,6 +57,12 @@ impl Compiler {
 
     pub(crate) fn backend(&self) -> &Backend {
         &self.backend
+    }
+
+    pub(crate) fn set_bleed(&mut self, bleed: bool) -> bool {
+        let changed = self.bleed != bleed;
+        self.bleed = bleed;
+        changed
     }
 
     pub(crate) fn set_file(&mut self, path: &Path, text: &str) {
@@ -124,8 +132,9 @@ impl Compiler {
         let root = self.root.clone().unwrap_or_default();
         let backend = self.backend.clone();
         let stop = self.stop.clone();
+        let bleed = self.bleed;
         move |text| match backend {
-            Backend::Embedded => Ok(presswork_typst::run(&engine, text, SCALE, false)),
+            Backend::Embedded => Ok(presswork_typst::run(&engine, text, SCALE, bleed)),
             Backend::Program(program) => program
                 .run(&root, text, &stop)
                 .map_err(|error| error.to_string()),
@@ -154,6 +163,18 @@ mod tests {
         let output = futures::executor::block_on(compiler.job("Hello.".to_owned())).unwrap();
 
         assert_eq!(output.pages.map(|pages| pages.len()), Some(1));
+    }
+
+    #[test]
+    fn the_bleed_setting_renders_the_bleed_of_the_pages() {
+        let mut compiler = Compiler::new();
+        let text = "#set page(width: 100pt, height: 50pt, bleed: 5pt)\nText.";
+
+        assert!(compiler.set_bleed(true));
+        assert!(!compiler.set_bleed(true));
+        let output = compiler.run_now(text).unwrap();
+
+        assert_eq!(output.pages.unwrap()[0].width, 220);
     }
 
     #[test]

@@ -12,11 +12,13 @@ pub(crate) const MARK_TIME: Duration = Duration::from_millis(1500);
 const MARK_RADIUS: f32 = 9.0;
 const MARK_BORDER: f32 = 2.0;
 const MARK_FILL_ALPHA: f32 = 0.2;
+const TRIM_WIDTH: f32 = 1.0;
 
 pub(crate) struct PageArea<'a, Message> {
     content: Element<'a, Message>,
     on_click: Box<dyn Fn(Point) -> Message + 'a>,
     mark: Option<(Point, Instant)>,
+    trim: Option<Rectangle>,
 }
 
 pub(crate) fn page_area<'a, Message>(
@@ -27,12 +29,18 @@ pub(crate) fn page_area<'a, Message>(
         content: content.into(),
         on_click: Box::new(on_click),
         mark: None,
+        trim: None,
     }
 }
 
 impl<Message> PageArea<'_, Message> {
     pub(crate) fn mark(mut self, mark: Option<(Point, Instant)>) -> Self {
         self.mark = mark;
+        self
+    }
+
+    pub(crate) fn trim(mut self, trim: Option<Rectangle>) -> Self {
+        self.trim = trim;
         self
     }
 }
@@ -156,16 +164,34 @@ impl<Message> Widget<Message, Theme, Renderer> for PageArea<'_, Message> {
             viewport,
         );
         let bounds = layout.bounds();
-        if let Some((point, since)) = self.mark
-            && shows(since, Instant::now())
-            && let Some(clip) = bounds.intersection(viewport)
-        {
-            let colors = presswork_ui::theme::colors(theme);
-            let corner = Point::new(
-                bounds.x + point.x - MARK_RADIUS,
-                bounds.y + point.y - MARK_RADIUS,
-            );
-            renderer.with_layer(clip, |renderer| {
+        let mark = self.mark.filter(|(_, since)| shows(*since, Instant::now()));
+        if mark.is_none() && self.trim.is_none() {
+            return;
+        }
+        let Some(clip) = bounds.intersection(viewport) else {
+            return;
+        };
+        let colors = presswork_ui::theme::colors(theme);
+        renderer.with_layer(clip, |renderer| {
+            if let Some(trim) = self.trim {
+                renderer.fill_quad(
+                    Quad {
+                        bounds: trim + Vector::new(bounds.x, bounds.y),
+                        border: Border {
+                            color: colors.guide,
+                            width: TRIM_WIDTH,
+                            radius: 0.0.into(),
+                        },
+                        ..Quad::default()
+                    },
+                    Color::TRANSPARENT,
+                );
+            }
+            if let Some((point, _)) = mark {
+                let corner = Point::new(
+                    bounds.x + point.x - MARK_RADIUS,
+                    bounds.y + point.y - MARK_RADIUS,
+                );
                 renderer.fill_quad(
                     Quad {
                         bounds: Rectangle::new(
@@ -184,8 +210,8 @@ impl<Message> Widget<Message, Theme, Renderer> for PageArea<'_, Message> {
                         ..colors.accent
                     },
                 );
-            });
-        }
+            }
+        });
     }
 
     fn overlay<'b>(
@@ -305,6 +331,37 @@ mod tests {
         let snapshot = ui.snapshot(&theme).unwrap();
         snapshot.matches_image(folder.path().join("mark")).unwrap();
         pixel(folder.path(), 40, 40)
+    }
+
+    #[test]
+    fn the_trim_line_shows_over_the_page_image() {
+        let page = iced::widget::image(iced::widget::image::Handle::from_rgba(
+            40,
+            40,
+            vec![255; 40 * 40 * 4],
+        ))
+        .width(40)
+        .height(40);
+        let trim = Rectangle::new(Point::new(10.0, 10.0), Size::new(20.0, 20.0));
+        let area = page_area(page, |point| point).trim(Some(trim));
+        let mut ui = simulator(area);
+        let folder = tempfile::tempdir().unwrap();
+        let theme = presswork_ui::theme::light();
+        let _ = ui.snapshot(&theme).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        ui.snapshot(&theme)
+            .unwrap()
+            .matches_image(folder.path().join("trim"))
+            .unwrap();
+
+        let [red, green, blue, _] = pixel(folder.path(), 20, 40);
+        let guide = presswork_ui::color::LIGHT.guide.into_rgba8();
+        let near = |a: u8, b: u8| a.abs_diff(b) < 40;
+        assert!(
+            near(red, guide[0]) && near(green, guide[1]) && near(blue, guide[2]),
+            "{:?}",
+            [red, green, blue]
+        );
     }
 
     #[test]

@@ -504,6 +504,12 @@ impl App {
             presswork_preview::Action::ShowProblem => self.show_problem(),
             presswork_preview::Action::Click(point) => return self.jump_to_source(point),
             presswork_preview::Action::GoToPage(page) => return self.preview.go_to_page(page),
+            presswork_preview::Action::Guides => {
+                self.preview.perform(action);
+                if self.compiler.set_bleed(self.preview.guides()) {
+                    return self.request_compile();
+                }
+            }
             presswork_preview::Action::Detach => return self.detach_preview(),
             presswork_preview::Action::Attach => {
                 return self.preview_window.map_or_else(Task::none, window::close);
@@ -2055,6 +2061,19 @@ mod tests {
 
         assert_eq!(app.cursor(), Position::new(offset));
         assert!(task.units() > 0);
+    }
+
+    #[test]
+    fn the_guides_compile_the_pages_again_with_the_bleed() {
+        let text = "#set page(width: 100pt, height: 50pt, bleed: 5pt)\nText.";
+        let mut app = compiled_app(text);
+
+        let task = app.update(Message::Preview(presswork_preview::Action::Guides));
+
+        assert!(app.preview.guides());
+        assert!(task.units() > 0);
+        let page = &app.compiler.run_now(text).unwrap().pages.unwrap()[0];
+        assert_eq!(page.width, 220);
     }
 
     #[test]

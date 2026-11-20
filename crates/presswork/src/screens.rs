@@ -267,6 +267,24 @@ fn render_spreads(app: &mut App) {
     send(app, Message::Preview(PreviewAction::Spreads));
     send(app, Message::Preview(PreviewAction::Thumbnails));
     render(app, "thumbnails");
+    send(app, Message::Preview(PreviewAction::Thumbnails));
+    render_guides(app);
+}
+
+fn render_guides(app: &mut App) {
+    let text = "#set page(paper: \"a5\", bleed: 3mm, background: place(top, \
+                rect(width: 100%, height: 4cm, fill: rgb(\"#8C2F39\"))))\n\
+                #set text(font: \"Libertinus Serif\")\n\
+                #v(4cm)\n= A cover band in the bleed\n\nThe colored band goes over the trim \
+                line into the bleed, so the printer can cut the page without a white edge.";
+    let book = folder(&[
+        ("presswork.toml", "[project]\nname = \"Guides\"\n"),
+        ("main.typ", text),
+    ]);
+    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    send(app, Message::Preview(PreviewAction::Guides));
+    app.compile_now();
+    render(app, "guides");
 }
 
 fn render_find(app: &mut App) {

@@ -21,6 +21,7 @@ pub struct Colors {
     pub info: Color,
     pub close: Color,
     pub on_close: Color,
+    pub guide: Color,
     pub editor: EditorColors,
 }
 
@@ -60,6 +61,7 @@ pub const LIGHT: Colors = Colors {
     info: rgb(0x1D, 0x4E, 0x89),
     close: rgb(0xC4, 0x2B, 0x1C),
     on_close: rgb(0xFF, 0xFF, 0xFF),
+    guide: rgb(0xD6, 0x24, 0x9F),
     editor: EditorColors {
         current_line: rgb(0xF4, 0xF1, 0xEB),
         selection: rgb(0xF2, 0xE3, 0xE4),
@@ -96,6 +98,7 @@ pub const DARK: Colors = Colors {
     info: rgb(0x7F, 0xB0, 0xE8),
     close: rgb(0xC4, 0x2B, 0x1C),
     on_close: rgb(0xFF, 0xFF, 0xFF),
+    guide: rgb(0xD6, 0x24, 0x9F),
     editor: EditorColors {
         current_line: rgb(0x21, 0x1F, 0x1D),
         selection: rgb(0x3B, 0x25, 0x28),
@@ -194,6 +197,13 @@ pub(crate) mod tests {
         let middle = mix(rgb(0x00, 0x00, 0x00), rgb(0xFF, 0xFF, 0xFF), 0.5);
 
         assert!((middle.r - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_guide_color_stands_out_on_white_paper() {
+        for colors in [&LIGHT, &DARK] {
+            assert!(contrast(colors.guide, rgb(0xFF, 0xFF, 0xFF)) >= 3.0);
+        }
     }
 
     #[test]
