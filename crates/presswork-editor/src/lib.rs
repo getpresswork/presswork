@@ -2,6 +2,7 @@ mod action;
 mod boundary;
 mod complete;
 mod editor;
+mod fold;
 mod highlight;
 mod layout;
 mod view;

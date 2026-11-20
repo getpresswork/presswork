@@ -15,11 +15,13 @@ use iced::{
 use presswork_text::{Position, Unit};
 use presswork_ui::color::Colors;
 use presswork_ui::font;
+use presswork_ui::icon::Icon;
 
 use crate::action::{Action, Deletion, Motion};
 use crate::boundary;
 use crate::complete::{self, CompletionEvent, CompletionList};
 use crate::editor::Editor;
+use crate::fold;
 use crate::highlight::Highlighter;
 use crate::layout::{LINE_HEIGHT, Layout, TEXT_SIZE, row_height};
 
@@ -34,6 +36,10 @@ const CARET_WIDTH: f32 = 2.0;
 const BLINK: Duration = Duration::from_millis(500);
 const WHEEL_LINES: f32 = 3.0;
 const SELECTION_RADIUS: f32 = 2.0;
+const FOLD_ICON_SIZE: f32 = 12.0;
+const FOLD_MARK_GAP: f32 = 6.0;
+const FOLD_MARK_WIDTH: f32 = 24.0;
+const FOLD_MARK_INSET: f32 = 3.0;
 const MARK_THICKNESS: f32 = 1.5;
 const MARK_OFFSET: f32 = 4.0;
 const EMPTY_MARK_WIDTH: f32 = 6.0;
@@ -265,6 +271,11 @@ impl<'a, Message> EditorView<'a, Message> {
         {
             shell.publish((self.on_action)(Action::SingleCursor));
             shell.capture_event();
+        } else if let Some(folding) = fold_key(physical_key, modifiers) {
+            if let Some(action) = self.fold_at_cursor(state, folding) {
+                shell.publish((self.on_action)(action));
+            }
+            shell.capture_event();
         } else if let Some(command) = command(key, physical_key, modifiers, text) {
             self.run(command, state, clipboard, shell);
             if let Some(focus) = &mut state.focus {
@@ -289,6 +300,11 @@ impl<'a, Message> EditorView<'a, Message> {
             }
             return;
         };
+        if let Some(action) = self.fold_click(state, bounds, point) {
+            shell.publish((self.on_action)(action));
+            shell.capture_event();
+            return;
+        }
         if state.modifiers.command()
             && let Some(on_definition) = &self.on_definition
         {
@@ -320,6 +336,106 @@ impl<'a, Message> EditorView<'a, Message> {
         state.focus = Some(Focus::new());
         shell.publish((self.on_action)(action));
         shell.capture_event();
+    }
+
+    fn fold_at_cursor(&self, state: &State, folding: bool) -> Option<Action> {
+        let buffer = self.editor.document().buffer();
+        let head = self.editor.document().selection().primary().head;
+        let folds = self.editor.folds();
+        if folding {
+            return fold::innermost(&state.regions, buffer, head.offset(), folds)
+                .map(|region| Action::Fold(region.positions()));
+        }
+        let line = buffer.line_of(head);
+        folds
+            .iter()
+            .find(|fold| fold::header_line(buffer, fold) == line)
+            .map(|fold| Action::Unfold(fold.clone()))
+    }
+
+    fn fold_click(&self, state: &State, bounds: Rectangle, point: Point) -> Option<Action> {
+        let buffer = self.editor.document().buffer();
+        let origin = state.origin(bounds);
+        let folds = self.editor.folds();
+        if let Some(fold) = folds.iter().find(|fold| {
+            fold_mark(state, origin, fold::header_line(buffer, fold))
+                .is_some_and(|mark| mark.contains(point))
+        }) {
+            return Some(Action::Unfold(fold.clone()));
+        }
+        let arrows = bounds.x + state.gutter - GUTTER_GAP..bounds.x + state.gutter;
+        if !arrows.contains(&point.x) {
+            return None;
+        }
+        let line = buffer.line_of(state.layout.hit(Point::new(0.0, point.y - origin.y)));
+        if let Some(fold) = folds
+            .iter()
+            .find(|fold| fold::header_line(buffer, fold) == line)
+        {
+            return Some(Action::Unfold(fold.clone()));
+        }
+        fold::region_at(&state.regions, line).map(|region| Action::Fold(region.positions()))
+    }
+
+    fn draw_folds(
+        &self,
+        state: &State,
+        renderer: &mut Renderer,
+        bounds: Rectangle,
+        visible: &std::ops::Range<f32>,
+    ) {
+        let origin = state.origin(bounds);
+        let buffer = self.editor.document().buffer();
+        let folded: Vec<usize> = self
+            .editor
+            .folds()
+            .iter()
+            .map(|fold| fold::header_line(buffer, fold))
+            .collect();
+        for (index, line) in state.layout.visible(visible.clone()) {
+            let is_folded = folded.contains(&index);
+            let foldable = fold::region_at(&state.regions, index).is_some();
+            let shown = is_folded || (foldable && state.gutter_hover);
+            if !shown {
+                continue;
+            }
+            let symbol = if is_folded {
+                Icon::ChevronRight
+            } else {
+                Icon::ChevronDown
+            };
+            renderer.fill_text(
+                icon_text(symbol),
+                Point::new(
+                    bounds.x + state.gutter - GUTTER_GAP + (GUTTER_GAP - FOLD_ICON_SIZE) / 2.0,
+                    origin.y + line.top + (row_height() - FOLD_ICON_SIZE) / 2.0,
+                ),
+                self.colors.editor.line_number,
+                bounds,
+            );
+            if let Some(mark) = is_folded.then(|| fold_mark(state, origin, index)).flatten() {
+                renderer.fill_quad(
+                    Quad {
+                        bounds: mark,
+                        border: Border {
+                            radius: 4.0.into(),
+                            ..Border::default()
+                        },
+                        ..Quad::default()
+                    },
+                    self.colors.hover,
+                );
+                renderer.fill_text(
+                    icon_text(Icon::Ellipsis),
+                    Point::new(
+                        mark.x + (mark.width - FOLD_ICON_SIZE) / 2.0,
+                        mark.y + (mark.height - FOLD_ICON_SIZE) / 2.0,
+                    ),
+                    self.colors.ink_muted,
+                    bounds,
+                );
+            }
+        }
     }
 
     fn list_area(
@@ -478,6 +594,12 @@ impl<'a, Message> EditorView<'a, Message> {
         point: Option<Point>,
         shell: &mut Shell<'_, Message>,
     ) {
+        let over_gutter =
+            point.is_some_and(|point| bounds.contains(point) && point.x < bounds.x + state.gutter);
+        if over_gutter != state.gutter_hover {
+            state.gutter_hover = over_gutter;
+            shell.request_redraw();
+        }
         if self.on_hover.is_none() {
             return;
         }
@@ -778,6 +900,9 @@ struct State {
     modifiers: keyboard::Modifiers,
     revealed: Option<(u64, u64, Position)>,
     hover: Option<Hover>,
+    regions: Vec<fold::Region>,
+    regions_of: Option<(u64, u64)>,
+    gutter_hover: bool,
 }
 
 impl State {
@@ -873,6 +998,47 @@ fn fill_box(renderer: &mut Renderer, bounds: Rectangle, colors: &Colors) {
     );
 }
 
+fn fold_mark(state: &State, origin: Point, header: usize) -> Option<Rectangle> {
+    let line = state
+        .layout
+        .lines()
+        .get(header)
+        .filter(|line| !line.hidden)?;
+    let caret = state.layout.caret(Position::new(line.start + line.len));
+    Some(Rectangle::new(
+        Point::new(
+            origin.x + caret.x + FOLD_MARK_GAP,
+            origin.y + caret.y + FOLD_MARK_INSET,
+        ),
+        Size::new(FOLD_MARK_WIDTH, caret.height - 2.0 * FOLD_MARK_INSET),
+    ))
+}
+
+fn fold_key(physical_key: Physical, modifiers: keyboard::Modifiers) -> Option<bool> {
+    if !modifiers.command() || !(modifiers.shift() || modifiers.alt()) {
+        return None;
+    }
+    match physical_key {
+        Physical::Code(keyboard::key::Code::BracketLeft) => Some(true),
+        Physical::Code(keyboard::key::Code::BracketRight) => Some(false),
+        _ => None,
+    }
+}
+
+fn icon_text(symbol: Icon) -> Text<String> {
+    Text {
+        content: symbol.unicode().to_string(),
+        bounds: Size::new(FOLD_ICON_SIZE, FOLD_ICON_SIZE),
+        size: Pixels(FOLD_ICON_SIZE),
+        line_height: text::LineHeight::Relative(1.0),
+        font: font::ICONS,
+        align_x: text::Alignment::Left,
+        align_y: Vertical::Top,
+        shaping: text::Shaping::Basic,
+        wrapping: text::Wrapping::None,
+    }
+}
+
 fn number_text<Content>(content: Content, width: f32) -> Text<Content> {
     Text {
         content,
@@ -917,6 +1083,11 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
         state
             .layout
             .update(self.editor, &mut state.highlighter, self.colors, width);
+        let version = Some((self.editor.id(), self.editor.revision()));
+        if state.regions_of != version {
+            state.regions = fold::regions(state.highlighter.source());
+            state.regions_of = version;
+        }
         state.reveal(self.editor);
         layout::Node::new(size)
     }
@@ -998,6 +1169,7 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
                     bounds,
                 );
             }
+            self.draw_folds(state, renderer, bounds, &visible);
             self.draw_marks(state, renderer, origin, &visible);
             if state.focus.is_some_and(|focus| focus.caret_visible()) {
                 for range in selection.ranges() {
@@ -1287,6 +1459,82 @@ mod tests {
                 extend: false
             }]
         );
+    }
+
+    const SECTION: &str = "= A\ntext\nmore";
+
+    fn section() -> std::ops::Range<Position> {
+        Position::new(4)..Position::new(13)
+    }
+
+    fn folded_section() -> Editor {
+        let mut editor = Editor::new(SECTION);
+        editor
+            .perform(Action::Fold(section()), Instant::now())
+            .unwrap();
+        editor
+    }
+
+    fn arrow_gap() -> Point {
+        load_fonts();
+        let numbers = Paragraph::with_text(number_text("000", 0.0)).min_width();
+        Point::new(
+            GUTTER_LEFT + numbers + GUTTER_GAP / 2.0,
+            PADDING_TOP + row_height() / 2.0,
+        )
+    }
+
+    #[test]
+    fn control_shift_bracket_folds_the_part_at_the_cursor() {
+        let actions = actions(SECTION, |ui| {
+            ui.simulate([shortcut(
+                "[",
+                Code::BracketLeft,
+                Modifiers::COMMAND | Modifiers::SHIFT,
+            )]);
+        });
+
+        assert_eq!(actions, [Action::Fold(section())]);
+    }
+
+    #[test]
+    fn control_shift_closing_bracket_unfolds_the_line_of_the_cursor() {
+        let editor = folded_section();
+
+        let actions = actions_on(&editor, |ui| {
+            ui.simulate([shortcut(
+                "]",
+                Code::BracketRight,
+                Modifiers::COMMAND | Modifiers::SHIFT,
+            )]);
+        });
+
+        assert_eq!(actions, [Action::Unfold(section())]);
+    }
+
+    #[test]
+    fn a_click_on_the_arrow_of_a_heading_folds_it() {
+        let actions = actions(SECTION, press(arrow_gap()));
+
+        assert_eq!(actions, [Action::Fold(section())]);
+    }
+
+    #[test]
+    fn a_click_on_the_arrow_of_a_folded_line_unfolds_it() {
+        let editor = folded_section();
+
+        let actions = actions_on(&editor, press(arrow_gap()));
+
+        assert_eq!(actions, [Action::Unfold(section())]);
+    }
+
+    #[test]
+    fn a_folded_editor_draws() {
+        load_fonts();
+        let editor = folded_section();
+        let mut ui = simulator(view(&editor, &LIGHT, |action| action));
+
+        assert!(ui.snapshot(&presswork_ui::theme::light()).is_ok());
     }
 
     fn shortcut(letter: &str, code: Code, modifiers: Modifiers) -> Event {

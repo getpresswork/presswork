@@ -272,6 +272,12 @@ fn render_find(app: &mut App) {
     send(app, Message::Editor(EditorAction::SelectEvery));
     render(app, "many-cursors");
     send(app, Message::Editor(EditorAction::SingleCursor));
+    let start = BOOK.find("== Weights\n").unwrap() + "== Weights\n".len();
+    let end = BOOK.find(")\n\n== Ink").unwrap() + 2;
+    let section = Position::new(start)..Position::new(end);
+    send(app, Message::Editor(EditorAction::Fold(section.clone())));
+    render(app, "folding");
+    send(app, Message::Editor(EditorAction::Unfold(section)));
 }
 
 fn render_library(app: &mut App) {

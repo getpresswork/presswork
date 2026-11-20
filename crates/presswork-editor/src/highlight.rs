@@ -80,6 +80,10 @@ impl Highlighter {
         }
     }
 
+    pub(crate) fn source(&self) -> &Source {
+        &self.source
+    }
+
     #[must_use]
     pub fn spans(&self, range: Range<usize>) -> Vec<(Range<usize>, Style)> {
         let mut spans = Vec::new();
