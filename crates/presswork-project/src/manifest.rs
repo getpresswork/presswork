@@ -17,7 +17,7 @@ pub struct Manifest {
     pub exports: Vec<ExportProfile>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFormat {
     #[default]
@@ -26,7 +26,7 @@ pub enum ExportFormat {
     Svg,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ExportProfile {
     pub name: String,
