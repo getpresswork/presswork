@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ops::Range;
 use std::path::PathBuf;
 
@@ -6,6 +7,7 @@ use typst::syntax::Side;
 use typst::{World as _, WorldExt as _};
 
 use crate::ide::{Analysis, project_path};
+use crate::outline::LabelTarget;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tooltip {
@@ -34,6 +36,7 @@ pub struct Completion {
     pub detail: Option<String>,
     pub text: String,
     pub select: Range<usize>,
+    pub target: Option<LabelTarget>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,9 +72,29 @@ impl Analysis {
         if items.is_empty() {
             return None;
         }
+        let mut targets: HashMap<String, LabelTarget> = if items
+            .iter()
+            .any(|item| item.kind == typst_ide::CompletionKind::Label)
+        {
+            self.labels()
+                .into_iter()
+                .map(|target| (target.name.clone(), target))
+                .collect()
+        } else {
+            HashMap::new()
+        };
         Some(Completions {
             from,
-            items: items.into_iter().map(completion).collect(),
+            items: items
+                .into_iter()
+                .map(|item| {
+                    let mut found = completion(item);
+                    if found.kind == CompletionKind::Label {
+                        found.target = targets.remove(&found.label);
+                    }
+                    found
+                })
+                .collect(),
         })
     }
 
@@ -109,6 +132,7 @@ fn completion(completion: typst_ide::Completion) -> Completion {
         detail: completion.detail.map(|detail| detail.to_string()),
         text,
         select,
+        target: None,
     }
 }
 
@@ -244,6 +268,37 @@ mod tests {
             completions.is_some_and(|completions| !completions.items.is_empty()),
             "no completions"
         );
+    }
+
+    #[test]
+    fn a_label_completion_gives_the_kind_and_the_page_of_its_element() {
+        let compiled = "= Start <start>\n#pagebreak()\n= End <end>\nSee .";
+        let typed = "= Start <start>\n#pagebreak()\n= End <end>\nSee @";
+
+        let completions = analysis(compiled)
+            .completions(typed, typed.len(), false)
+            .unwrap();
+
+        let end = completions
+            .items
+            .iter()
+            .find(|item| item.label == "end")
+            .unwrap();
+        assert_eq!(
+            end.target
+                .as_ref()
+                .map(|target| (target.kind, target.page.as_deref())),
+            Some((crate::LabelKind::Heading, Some("2")))
+        );
+    }
+
+    #[test]
+    fn other_completions_have_no_label_target() {
+        let text = "#te";
+
+        let completions = analysis(text).completions(text, text.len(), false).unwrap();
+
+        assert!(completions.items.iter().all(|item| item.target.is_none()));
     }
 
     #[test]

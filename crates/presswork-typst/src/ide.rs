@@ -54,6 +54,10 @@ impl Analysis {
         world
     }
 
+    pub(crate) fn world(&self) -> &World {
+        &self.world
+    }
+
     pub(crate) fn document(&self) -> Option<&PagedDocument> {
         self.document.as_deref()
     }

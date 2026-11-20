@@ -1942,6 +1942,7 @@ mod tests {
             detail: None,
             text: text.to_owned(),
             select,
+            target: None,
         }
     }
 
