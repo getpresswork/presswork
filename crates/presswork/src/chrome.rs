@@ -180,11 +180,11 @@ pub(crate) fn shortcut(localizer: &Localizer, key: char) -> String {
     localizer.format(id, &args)
 }
 
-pub(crate) fn tip<'a>(
-    content: impl Into<Element<'a, Message>>,
+pub(crate) fn tip<'a, M: 'a>(
+    content: impl Into<Element<'a, M>>,
     words: String,
     position: tooltip::Position,
-) -> Element<'a, Message> {
+) -> Element<'a, M> {
     let card = container(text(words).size(font_size::CAPTION))
         .padding([gap::XXS, gap::S])
         .style(style::popup);

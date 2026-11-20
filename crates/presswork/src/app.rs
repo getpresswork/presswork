@@ -36,6 +36,7 @@ use crate::chat_panel::{self, ChatPanel};
 use crate::chrome::{self, Controls, Frame};
 use crate::compiler::{self, Backend, Compiler};
 use crate::files;
+use crate::find_bar::{self, FindBar};
 use crate::i18n::{FluentArgs, Localizer};
 use crate::library_view::{self, LibraryView};
 use crate::live_session::{self, LiveSession};
@@ -72,6 +73,8 @@ pub(crate) struct App {
     compiled_revision: Option<u64>,
     pages_analysis: Option<Analysis>,
     outline: OutlinePanel,
+    find: FindBar,
+    modifiers: keyboard::Modifiers,
     hovered: Option<Position>,
     tooltip: Option<presswork_editor::Tooltip>,
     completions: Option<presswork_editor::CompletionList>,
@@ -128,6 +131,7 @@ pub(crate) enum Message {
     },
     Preview(presswork_preview::Action),
     Outline(outline_panel::Message),
+    Find(find_bar::Message),
     OpenFolder,
     FolderPicked(Option<PathBuf>),
     Save,
@@ -171,6 +175,8 @@ impl App {
             compiled_revision: None,
             pages_analysis: None,
             outline: OutlinePanel::default(),
+            find: FindBar::default(),
+            modifiers: keyboard::Modifiers::default(),
             hovered: None,
             tooltip: None,
             completions: None,
@@ -269,6 +275,17 @@ impl App {
     }
 
     pub(crate) fn marks(&self) -> Vec<Mark> {
+        let mut marks = self.diagnostic_marks();
+        if self.find.is_open() {
+            marks.extend(self.find.matches().iter().map(|found| Mark {
+                range: Position::new(found.start)..Position::new(found.end),
+                kind: MarkKind::Match,
+            }));
+        }
+        marks
+    }
+
+    fn diagnostic_marks(&self) -> Vec<Mark> {
         let Some(output) = &self.compiled else {
             return Vec::new();
         };
@@ -495,6 +512,154 @@ impl App {
         Task::none()
     }
 
+    fn key(&mut self, event: keyboard::Event) -> Task<Message> {
+        let keyboard::Event::KeyPressed {
+            key,
+            physical_key,
+            modifiers,
+            ..
+        } = event
+        else {
+            if let keyboard::Event::ModifiersChanged(modifiers) = event {
+                self.modifiers = modifiers;
+            }
+            return Task::none();
+        };
+        if key == keyboard::Key::Named(keyboard::key::Named::F3) {
+            return self.find_message(if modifiers.shift() {
+                find_bar::Message::Previous
+            } else {
+                find_bar::Message::Next
+            });
+        }
+        if !modifiers.command() {
+            return Task::none();
+        }
+        match key.to_latin(physical_key) {
+            Some('s') => self.save(),
+            Some('o') => return self.open_folder(),
+            Some('q') => return self.quit(),
+            Some('f') => return self.open_find(cfg!(target_os = "macos") && modifiers.alt()),
+            Some('h') if !cfg!(target_os = "macos") => return self.open_find(true),
+            _ => {}
+        }
+        Task::none()
+    }
+
+    fn open_find(&mut self, replacing: bool) -> Task<Message> {
+        if self.workspace != Workspace::Write {
+            return Task::none();
+        }
+        let selected = self.editor.selected_text();
+        let selected =
+            (!selected.is_empty() && !selected.contains(['\n', '\r'])).then_some(selected);
+        self.find.open(replacing, selected);
+        self.find.refresh(&self.editor);
+        operation::focus(find_bar::FIND_INPUT).chain(operation::select_all(find_bar::FIND_INPUT))
+    }
+
+    fn find_message(&mut self, message: find_bar::Message) -> Task<Message> {
+        self.find.refresh(&self.editor);
+        let message = match message {
+            find_bar::Message::Submit if self.modifiers.shift() => find_bar::Message::Previous,
+            find_bar::Message::Submit => find_bar::Message::Next,
+            message => message,
+        };
+        match message {
+            find_bar::Message::Next => self.find_next(),
+            find_bar::Message::Previous => self.find_previous(),
+            find_bar::Message::Replace => self.replace_match(),
+            find_bar::Message::ReplaceAll => self.replace_matches(),
+            find_bar::Message::Close => {
+                self.find.close();
+                operation::focus(EDITOR)
+            }
+            message => {
+                let searching = !matches!(
+                    message,
+                    find_bar::Message::Replacement(_) | find_bar::Message::ToggleReplace
+                );
+                self.find.update(message);
+                self.find.refresh(&self.editor);
+                if searching {
+                    self.find_from(self.selection_bounds().0)
+                } else {
+                    Task::none()
+                }
+            }
+        }
+    }
+
+    fn find_from(&mut self, from: usize) -> Task<Message> {
+        match self.find.next(from) {
+            Some(found) => self.select_range(found.start, found.end),
+            None => Task::none(),
+        }
+    }
+
+    fn find_next(&mut self) -> Task<Message> {
+        self.find_from(self.selection_bounds().1)
+    }
+
+    fn find_previous(&mut self) -> Task<Message> {
+        match self.find.previous(self.selection_bounds().0) {
+            Some(found) => self.select_range(found.start, found.end),
+            None => Task::none(),
+        }
+    }
+
+    fn replace_match(&mut self) -> Task<Message> {
+        let (start, end) = self.selection_bounds();
+        if self.find.index_of(&(start..end)).is_none() {
+            return self.find_next();
+        }
+        let text = self.editor.document().buffer().to_string();
+        let replacement = self.find.replacement_for(&text, start..end);
+        let length = replacement.len();
+        let replaced = self.edit(presswork_editor::Action::Replace {
+            range: Position::new(start)..Position::new(end),
+            text: replacement,
+            select: length..length,
+        });
+        self.find.refresh(&self.editor);
+        Task::batch([replaced, self.find_next()])
+    }
+
+    fn replace_matches(&mut self) -> Task<Message> {
+        let text = self.editor.document().buffer().to_string();
+        let replacements: Vec<_> = self
+            .find
+            .replacements(&text)
+            .into_iter()
+            .map(|(range, with)| (Position::new(range.start)..Position::new(range.end), with))
+            .collect();
+        if replacements.is_empty() {
+            return Task::none();
+        }
+        self.edit(presswork_editor::Action::ReplaceAll(replacements))
+    }
+
+    fn selection_bounds(&self) -> (usize, usize) {
+        let range = self.editor.document().selection().primary();
+        (range.start().offset(), range.end().offset())
+    }
+
+    fn select_range(&mut self, start: usize, end: usize) -> Task<Message> {
+        let start = self.snapped(start);
+        let end = self.snapped(end);
+        let at_start = self.edit(presswork_editor::Action::MoveTo {
+            position: start,
+            extend: false,
+            goal: None,
+        });
+        let to_end = self.edit(presswork_editor::Action::MoveTo {
+            position: end,
+            extend: true,
+            goal: None,
+        });
+        Task::batch([at_start, to_end])
+    }
+
     fn outline_message(&mut self, message: outline_panel::Message) -> Task<Message> {
         match message {
             outline_panel::Message::Toggle => {
@@ -578,19 +743,7 @@ impl App {
         }
         match definition {
             Some(presswork_typst::Definition::Main(range)) => {
-                let start = self.snapped(range.start);
-                let end = self.snapped(range.end);
-                let at_start = self.edit(presswork_editor::Action::MoveTo {
-                    position: start,
-                    extend: false,
-                    goal: None,
-                });
-                let to_end = self.edit(presswork_editor::Action::MoveTo {
-                    position: end,
-                    extend: true,
-                    goal: None,
-                });
-                Task::batch([at_start, to_end])
+                self.select_range(range.start, range.end)
             }
             Some(presswork_typst::Definition::File(path, _)) => {
                 let mut args = FluentArgs::new();
@@ -1104,6 +1257,12 @@ impl App {
     }
 
     pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.handle(message);
+        self.find.refresh(&self.editor);
+        task
+    }
+
+    fn handle(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::SelectWorkspace(workspace) => return self.select_workspace(workspace),
             Message::Logs(message) => {
@@ -1160,6 +1319,7 @@ impl App {
             }
             Message::Preview(action) => return self.preview_action(action),
             Message::Outline(message) => return self.outline_message(message),
+            Message::Find(message) => return self.find_message(message),
             Message::ToggleMenu => self.menu_open = !self.menu_open,
             Message::CloseMenu => self.menu_open = false,
             Message::MenuItem(item) => {
@@ -1187,18 +1347,8 @@ impl App {
             Message::OpenFolder => return self.open_folder(),
             Message::FolderPicked(Some(root)) => return self.open_project(&root),
             Message::Save => self.save(),
-            Message::Key(keyboard::Event::KeyPressed {
-                key,
-                physical_key,
-                modifiers,
-                ..
-            }) if modifiers.command() => match key.to_latin(physical_key) {
-                Some('s') => self.save(),
-                Some('o') => return self.open_folder(),
-                Some('q') => return self.quit(),
-                _ => {}
-            },
-            Message::FolderPicked(None) | Message::Key(_) => {}
+            Message::Key(event) => return self.key(event),
+            Message::FolderPicked(None) => {}
             Message::DismissNotice => self.notice = None,
         }
         Task::none()
@@ -1220,6 +1370,15 @@ impl App {
         let live = self.live.as_ref().map_or_else(Subscription::none, |live| {
             live.subscription().map(Message::Live)
         });
+        let find = if self.find.is_open()
+            && !self.menu_open
+            && !self.quitting
+            && !self.server_dialog.is_open()
+        {
+            event::listen_with(find_key)
+        } else {
+            Subscription::none()
+        };
         Subscription::batch([
             self.logs.subscription().map(Message::Logs),
             system::theme_changes().map(Message::SystemTheme),
@@ -1228,6 +1387,7 @@ impl App {
             menu,
             dialog,
             live,
+            find,
         ])
     }
 
@@ -1456,6 +1616,19 @@ impl App {
                 .on_complete(Message::Complete)
                 .completions(self.completions.as_ref())
                 .on_definition(Message::Definition);
+            let editor: Element<'_, Message> = if self.find.is_open() {
+                let (start, end) = self.selection_bounds();
+                column![
+                    self.find
+                        .view(&self.localizer, &(start..end))
+                        .map(Message::Find),
+                    hairline(),
+                    editor
+                ]
+                .into()
+            } else {
+                editor.into()
+            };
             let mut panes = row![];
             if self.outline.is_open() {
                 let note = (self.compiler.backend() != &Backend::Embedded)
@@ -1694,6 +1867,14 @@ fn server_key(event: iced::Event, _status: event::Status, _window: window::Id) -
     };
     (pressed == keyboard::Key::Named(keyboard::key::Named::Escape))
         .then_some(Message::Server(server_dialog::Message::Close))
+}
+
+fn find_key(event: iced::Event, _status: event::Status, _window: window::Id) -> Option<Message> {
+    let iced::Event::Keyboard(keyboard::Event::KeyPressed { key: pressed, .. }) = event else {
+        return None;
+    };
+    (pressed == keyboard::Key::Named(keyboard::key::Named::Escape))
+        .then_some(Message::Find(find_bar::Message::Close))
 }
 
 fn window_event((id, event): (window::Id, window::Event)) -> Option<Message> {
@@ -2300,6 +2481,193 @@ mod tests {
         open(&mut app, &book());
 
         assert!(simulator(app.view()).find("One").is_err());
+    }
+
+    const CATS: &str = "a cat and a cat";
+
+    fn find(message: find_bar::Message) -> Message {
+        Message::Find(message)
+    }
+
+    fn finding(query: &str) -> App {
+        let mut app = typed_app(CATS);
+        send(&mut app, control_key('f'));
+        send(&mut app, find(find_bar::Message::Query(query.to_owned())));
+        app
+    }
+
+    fn selected(app: &App) -> (usize, usize) {
+        let range = app.editor.document().selection().primary();
+        (range.start().offset(), range.end().offset())
+    }
+
+    fn found_marks(app: &App) -> usize {
+        app.marks()
+            .iter()
+            .filter(|mark| mark.kind == MarkKind::Match)
+            .count()
+    }
+
+    fn text_of(app: &App) -> String {
+        app.editor.document().buffer().to_string()
+    }
+
+    fn replace_shortcut() -> Message {
+        let Message::Key(keyboard::Event::KeyPressed {
+            key,
+            modified_key,
+            physical_key,
+            location,
+            modifiers,
+            text,
+            repeat,
+        }) = control_key(if cfg!(target_os = "macos") { 'f' } else { 'h' })
+        else {
+            unreachable!()
+        };
+        let modifiers = if cfg!(target_os = "macos") {
+            modifiers | keyboard::Modifiers::ALT
+        } else {
+            modifiers
+        };
+        Message::Key(keyboard::Event::KeyPressed {
+            key,
+            modified_key,
+            physical_key,
+            location,
+            modifiers,
+            text,
+            repeat,
+        })
+    }
+
+    #[test]
+    fn the_find_shortcut_opens_the_find_bar_with_the_selected_word() {
+        let mut app = typed_app(CATS);
+        send(
+            &mut app,
+            Message::Editor(presswork_editor::Action::SelectWord(Position::new(3))),
+        );
+
+        send(&mut app, control_key('f'));
+
+        assert!(app.find.is_open());
+        assert_eq!(found_marks(&app), 2);
+    }
+
+    #[test]
+    fn a_query_marks_all_matches_and_selects_the_next_one() {
+        let app = finding("cat");
+
+        assert_eq!(found_marks(&app), 2);
+        assert_eq!(selected(&app), (2, 5));
+        assert!(simulator(app.view()).find("1 of 2").is_ok());
+    }
+
+    #[test]
+    fn next_and_previous_go_through_the_matches() {
+        let mut app = finding("cat");
+
+        send(&mut app, find(find_bar::Message::Next));
+        assert_eq!(selected(&app), (12, 15));
+        send(&mut app, find(find_bar::Message::Next));
+        assert_eq!(selected(&app), (2, 5));
+        send(&mut app, find(find_bar::Message::Previous));
+        assert_eq!(selected(&app), (12, 15));
+    }
+
+    #[test]
+    fn enter_with_shift_goes_to_the_previous_match() {
+        let mut app = finding("cat");
+
+        send(
+            &mut app,
+            Message::Key(keyboard::Event::ModifiersChanged(
+                keyboard::Modifiers::SHIFT,
+            )),
+        );
+        send(&mut app, find(find_bar::Message::Submit));
+
+        assert_eq!(selected(&app), (12, 15));
+    }
+
+    #[test]
+    fn replace_changes_the_selected_match_and_selects_the_next() {
+        let mut app = finding("cat");
+        send(
+            &mut app,
+            find(find_bar::Message::Replacement("dog".to_owned())),
+        );
+
+        send(&mut app, find(find_bar::Message::Replace));
+
+        assert_eq!(text_of(&app), "a dog and a cat");
+        assert_eq!(selected(&app), (12, 15));
+    }
+
+    #[test]
+    fn replace_all_changes_all_matches_in_one_undo_step() {
+        let mut app = finding("cat");
+        send(
+            &mut app,
+            find(find_bar::Message::Replacement("dog".to_owned())),
+        );
+
+        send(&mut app, find(find_bar::Message::ReplaceAll));
+        assert_eq!(text_of(&app), "a dog and a dog");
+
+        send(&mut app, Message::Editor(presswork_editor::Action::Undo));
+        assert_eq!(text_of(&app), CATS);
+    }
+
+    #[test]
+    fn the_matches_follow_the_changes_of_the_text() {
+        let mut app = finding("cat");
+
+        send(&mut app, move_to(CATS.len()));
+        send(&mut app, insert(" cat"));
+
+        assert_eq!(found_marks(&app), 3);
+    }
+
+    #[test]
+    fn closing_the_find_bar_removes_the_marks() {
+        let mut app = finding("cat");
+
+        send(&mut app, find(find_bar::Message::Close));
+
+        assert!(!app.find.is_open());
+        assert_eq!(found_marks(&app), 0);
+    }
+
+    #[test]
+    fn escape_closes_the_find_bar_also_from_its_field() {
+        let escape = keyboard::Key::Named(keyboard::key::Named::Escape);
+        let event = iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key: escape.clone(),
+            modified_key: escape,
+            physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Escape),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::empty(),
+            text: None,
+            repeat: false,
+        });
+
+        let message = find_key(event, event::Status::Captured, window::Id::unique());
+
+        assert!(matches!(
+            message,
+            Some(Message::Find(find_bar::Message::Close))
+        ));
+    }
+
+    #[test]
+    fn the_replace_shortcut_shows_the_replace_row() {
+        let mut app = typed_app(CATS);
+
+        send(&mut app, replace_shortcut());
+
+        assert!(simulator(app.view()).find("Replace all").is_ok());
     }
 
     const BINDING: &str = "#let gap = 1pt\n#gap";

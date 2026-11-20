@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use iced::{Settings, window};
+use iced::{Settings, keyboard, window};
 use iced_test::Simulator;
 use jiff::Timestamp;
 use presswork_log::{Level, LogEntry, LogStore};
@@ -23,6 +23,7 @@ use uuid::Uuid;
 
 use crate::app::{App, Message, send};
 use crate::chat_panel::Message as ChatPanelMessage;
+use crate::find_bar::Message as FindMessage;
 use crate::library_view::{Message as LibraryMessage, PickedFile, Target};
 use crate::live_session::Event as LiveEvent;
 use crate::server_dialog::{Connection, Message as ServerMessage, Shelf};
@@ -190,6 +191,8 @@ fn render_screens() {
     select(&mut app, start, start + sentence.len());
     render(&mut app, "project");
 
+    render_find(&mut app);
+
     send(&mut app, Message::MenuItem(menu::Item::Quit));
     render(&mut app, "unsaved");
     send(&mut app, Message::Unsaved(unsaved::Answer::Cancel));
@@ -236,6 +239,36 @@ fn render_screens() {
     render_chat(&mut app);
     render_tasks(&mut app);
     render_library(&mut app);
+}
+
+fn render_find(app: &mut App) {
+    let letter = if cfg!(target_os = "macos") { "f" } else { "h" };
+    let modifiers = if cfg!(target_os = "macos") {
+        keyboard::Modifiers::COMMAND | keyboard::Modifiers::ALT
+    } else {
+        keyboard::Modifiers::COMMAND
+    };
+    send(
+        app,
+        Message::Key(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Character(letter.into()),
+            modified_key: keyboard::Key::Character(letter.into()),
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            location: keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        }),
+    );
+    send(app, Message::Find(FindMessage::Query("paper".to_owned())));
+    send(
+        app,
+        Message::Find(FindMessage::Replacement("stock".to_owned())),
+    );
+    render(app, "find-replace");
+    send(app, Message::Find(FindMessage::Close));
 }
 
 fn render_library(app: &mut App) {

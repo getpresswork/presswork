@@ -161,6 +161,25 @@ label-kind-other = Labeled element
 completion-label-page = { $kind }, page { $page }
 completion-label-text = { $place }: { $text }
 
+find-placeholder = Find
+replace-placeholder = Replace
+find-count = { $current } of { $total }
+find-total = { $total ->
+    [one] 1 result
+   *[other] { $total } results
+}
+find-none = No results
+find-invalid = The pattern is not valid
+find-match-case = Match case
+find-whole-word = Whole word
+find-pattern = Regular expression
+find-previous = Previous result (Shift+Enter)
+find-next = Next result (Enter)
+find-close = Close (Escape)
+find-toggle-replace = Show or hide Replace
+replace-one = Replace
+replace-all = Replace all
+
 outline-title = Outline
 outline-toggle = Outline
 outline-empty = The document has no headings.
