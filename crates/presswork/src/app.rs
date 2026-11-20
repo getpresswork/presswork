@@ -503,6 +503,7 @@ impl App {
         match action {
             presswork_preview::Action::ShowProblem => self.show_problem(),
             presswork_preview::Action::Click(point) => return self.jump_to_source(point),
+            presswork_preview::Action::GoToPage(page) => return self.preview.go_to_page(page),
             presswork_preview::Action::Detach => return self.detach_preview(),
             presswork_preview::Action::Attach => {
                 return self.preview_window.map_or_else(Task::none, window::close);
@@ -2053,6 +2054,21 @@ mod tests {
         let task = app.update(click(point));
 
         assert_eq!(app.cursor(), Position::new(offset));
+        assert!(task.units() > 0);
+    }
+
+    #[test]
+    fn a_click_on_a_thumbnail_scrolls_the_preview_to_its_page() {
+        let mut app = compiled_app(TWO_PAGES);
+        send(
+            &mut app,
+            Message::Preview(presswork_preview::Action::Scrolled(
+                presswork_preview::Viewport::default(),
+            )),
+        );
+
+        let task = app.update(Message::Preview(presswork_preview::Action::GoToPage(1)));
+
         assert!(task.units() > 0);
     }
 

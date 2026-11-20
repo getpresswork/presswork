@@ -264,6 +264,9 @@ fn render_spreads(app: &mut App) {
     app.compile_now();
     send(app, Message::Preview(PreviewAction::Spreads));
     render(app, "spreads");
+    send(app, Message::Preview(PreviewAction::Spreads));
+    send(app, Message::Preview(PreviewAction::Thumbnails));
+    render(app, "thumbnails");
 }
 
 fn render_find(app: &mut App) {

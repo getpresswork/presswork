@@ -3,7 +3,7 @@ use std::time::Instant;
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::scrollable::{AbsoluteOffset, Direction, Scrollbar};
 use iced::widget::{
-    button, column, container, image, operation, responsive, row, scrollable, space, text,
+    button, column, container, image, operation, responsive, row, rule, scrollable, space, text,
 };
 use iced::{Element, Fill, Point, Size, Task};
 use presswork_typst::{Output, PagePoint};
@@ -24,6 +24,8 @@ const PAGE_GAP: f32 = 24.0;
 const SCROLLBAR_SPACE: f32 = 12.0;
 const EMPTY_WIDTH: f32 = 320.0;
 const PERCENT_WIDTH: f32 = 48.0;
+const THUMBNAIL_WIDTH: f32 = 72.0;
+const THUMBNAIL_STRIP: f32 = 120.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Zoom {
@@ -45,6 +47,8 @@ pub enum Action {
     ZoomOut,
     FitWidth,
     Spreads,
+    Thumbnails,
+    GoToPage(usize),
     ShowProblem,
     Detach,
     Attach,
@@ -88,6 +92,7 @@ pub struct Preview {
     pages: Vec<Page>,
     zoom: Zoom,
     arrangement: Arrangement,
+    thumbnails: bool,
     problem: Option<String>,
     detached: bool,
     viewport: Option<Viewport>,
@@ -155,6 +160,27 @@ impl Preview {
         }
     }
 
+    fn page_target(&self, page: usize) -> Option<f32> {
+        let viewport = self.viewport?;
+        let Frame { scale, .. } = self.frame(viewport.width);
+        Some((self.row_top(page, scale)? - PAGE_GAP / 2.0).max(0.0))
+    }
+
+    fn current_page(&self) -> Option<usize> {
+        let viewport = self.viewport?;
+        let Frame { scale, .. } = self.frame(viewport.width);
+        let middle = viewport.top + viewport.height / 2.0;
+        let rows = self.rows();
+        let mut bottom = PADDING;
+        for row in &rows {
+            bottom += self.row_height(row) * PX_PER_PT * scale + PAGE_GAP;
+            if middle < bottom {
+                return Some(row.start);
+            }
+        }
+        rows.last().map(|row| row.start)
+    }
+
     fn row_height(&self, row: &std::ops::Range<usize>) -> f32 {
         self.pages[row.clone()]
             .iter()
@@ -203,8 +229,29 @@ impl Preview {
                 };
                 return;
             }
-            Action::ShowProblem | Action::Detach | Action::Attach | Action::Click(_) => return,
+            Action::Thumbnails => {
+                self.thumbnails = !self.thumbnails;
+                return;
+            }
+            Action::GoToPage(_)
+            | Action::ShowProblem
+            | Action::Detach
+            | Action::Attach
+            | Action::Click(_) => return,
         };
+    }
+
+    pub fn go_to_page<T>(&mut self, page: usize) -> Task<T> {
+        match self.page_target(page) {
+            Some(top) => operation::scroll_to(
+                PAGES,
+                AbsoluteOffset {
+                    x: None,
+                    y: Some(top),
+                },
+            ),
+            None => Task::none(),
+        }
     }
 
     pub fn show_point<T>(&mut self, point: PagePoint, now: Instant) -> Task<T> {
@@ -302,9 +349,19 @@ impl Preview {
         size: Size,
         on_action: impl Fn(Action) -> Message + Copy + 'a,
     ) -> Element<'a, Message> {
-        let Frame { scale, width } = self.frame(size.width);
+        let strip = if self.thumbnails {
+            THUMBNAIL_STRIP + 1.0
+        } else {
+            0.0
+        };
+        let Frame { scale, width } = self.frame(size.width - strip);
         let percent = scale * 100.0;
         let toolbar = row![
+            tool(
+                Icon::PanelLeft,
+                self.thumbnails,
+                on_action(Action::Thumbnails)
+            ),
             space().width(Fill),
             tool(
                 Icon::BookOpen,
@@ -365,7 +422,59 @@ impl Preview {
             .on_scroll(move |viewport| on_action(Action::Scrolled(viewport.into())))
             .width(Fill)
             .height(Fill);
+        if self.thumbnails {
+            let strip = self.thumbnails_view(on_action);
+            return column![
+                toolbar,
+                row![strip, rule::vertical(1).style(style::hairline), pages]
+            ]
+            .into();
+        }
         column![toolbar, pages].into()
+    }
+
+    fn thumbnails_view<'a, Message: Clone + 'a>(
+        &'a self,
+        on_action: impl Fn(Action) -> Message + Copy + 'a,
+    ) -> Element<'a, Message> {
+        let current = self.current_page();
+        let items = self.pages.iter().enumerate().map(|(index, page)| {
+            let height = page.height / page.width.max(1.0) * THUMBNAIL_WIDTH;
+            let picture = container(
+                image(page.handle.clone())
+                    .width(THUMBNAIL_WIDTH)
+                    .height(height),
+            )
+            .style(style::paper);
+            let number = text((index + 1).to_string())
+                .size(font_size::CAPTION)
+                .font(font::MONO);
+            container(
+                button(
+                    column![picture, number]
+                        .spacing(gap::XS)
+                        .align_x(Horizontal::Center),
+                )
+                .padding(gap::XS)
+                .style(style::tab(current == Some(index)))
+                .on_press(on_action(Action::GoToPage(index))),
+            )
+            .id(format!("thumbnail-{index}"))
+            .into()
+        });
+        container(
+            scrollable(
+                column(items)
+                    .spacing(gap::S)
+                    .padding(gap::S)
+                    .align_x(Horizontal::Center)
+                    .width(Fill),
+            )
+            .height(Fill),
+        )
+        .width(THUMBNAIL_STRIP)
+        .height(Fill)
+        .into()
     }
 
     fn page_view<'a, Message: Clone + 'a>(
@@ -758,6 +867,62 @@ mod tests {
                 "page {index}"
             );
         }
+    }
+
+    #[test]
+    fn the_toolbar_shows_and_hides_the_thumbnails() {
+        let mut preview = Preview::default();
+        preview.show(&output(3), 2.0);
+
+        assert_eq!(clicked(&preview, Icon::PanelLeft), [Action::Thumbnails]);
+        preview.perform(Action::Thumbnails);
+        let mut ui = simulator(preview.view(EMPTY.to_owned(), |action| action));
+        assert!(
+            ui.find(iced::widget::Id::from("thumbnail-2".to_owned()))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_click_on_a_thumbnail_goes_to_its_page() {
+        let mut preview = Preview::default();
+        preview.show(&output(3), 2.0);
+        preview.perform(Action::Thumbnails);
+        let mut ui = simulator(preview.view(EMPTY.to_owned(), |action| action));
+
+        ui.click(iced::widget::Id::from("thumbnail-1".to_owned()))
+            .unwrap();
+
+        assert!(
+            ui.into_messages()
+                .any(|action| action == Action::GoToPage(1))
+        );
+    }
+
+    #[test]
+    fn a_page_shows_at_the_top_of_the_view() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        preview.perform(scrolled(0.0, 600.0, 640.0));
+        let scale = preview.frame(640.0).scale;
+
+        let target = preview.page_target(1).unwrap();
+
+        let top = PADDING + 595.0 * PX_PER_PT * scale + PAGE_GAP / 2.0;
+        assert!((target - top).abs() < 0.5, "{target} {top}");
+    }
+
+    #[test]
+    fn the_current_page_is_in_the_middle_of_the_view() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        let scale = preview.frame(640.0).scale;
+        let page = 595.0 * PX_PER_PT * scale + PAGE_GAP;
+
+        preview.perform(scrolled(0.0, 200.0, 640.0));
+        assert_eq!(preview.current_page(), Some(0));
+        preview.perform(scrolled(PADDING + page, 200.0, 640.0));
+        assert_eq!(preview.current_page(), Some(1));
     }
 
     #[test]
