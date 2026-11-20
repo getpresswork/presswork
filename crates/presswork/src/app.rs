@@ -26,6 +26,7 @@ use presswork_ui::style::{self, Tone};
 use presswork_ui::theme::{self as ui_theme, Mode};
 use presswork_ui::{font, font_size, size, space as gap};
 
+use crate::assist;
 use crate::chat_panel::{self, ChatPanel};
 use crate::chrome::{self, Controls, Frame};
 use crate::compiler::{self, Backend, Compiler};
@@ -64,6 +65,8 @@ pub(crate) struct App {
     compiled: Option<Arc<Output>>,
     compiled_revision: Option<u64>,
     pages_analysis: Option<Analysis>,
+    hovered: Option<Position>,
+    tooltip: Option<presswork_editor::Tooltip>,
     project: Option<Project>,
     saved: u64,
     notice: Option<String>,
@@ -86,6 +89,12 @@ pub(crate) enum Message {
     Toolchains(toolchain_panel::Message),
     SystemTheme(Mode),
     Editor(presswork_editor::Action),
+    Hover(Option<Position>),
+    TooltipFound {
+        position: Position,
+        revision: u64,
+        tooltip: Option<presswork_typst::Tooltip>,
+    },
     Compiled {
         generation: u64,
         revision: u64,
@@ -139,6 +148,8 @@ impl App {
             compiled: None,
             compiled_revision: None,
             pages_analysis: None,
+            hovered: None,
+            tooltip: None,
             project: None,
             notice: None,
             main_window: window::Id::unique(),
@@ -423,6 +434,7 @@ impl App {
             Err(error) => tracing::warn!(%error, "Editor action failed"),
         }
         if self.editor.revision() != revision {
+            self.tooltip = None;
             return self.request_compile();
         }
         if self.cursor() == head {
@@ -433,6 +445,65 @@ impl App {
 
     fn cursor(&self) -> Position {
         self.editor.document().selection().primary().head
+    }
+
+    fn preview_action(&mut self, action: presswork_preview::Action) -> Task<Message> {
+        match action {
+            presswork_preview::Action::ShowProblem => self.show_problem(),
+            presswork_preview::Action::Click(point) => return self.jump_to_source(point),
+            presswork_preview::Action::Detach => return self.detach_preview(),
+            presswork_preview::Action::Attach => {
+                return self.preview_window.map_or_else(Task::none, window::close);
+            }
+            action => self.preview.perform(action),
+        }
+        Task::none()
+    }
+
+    fn hover(&mut self, position: Option<Position>) -> Task<Message> {
+        self.hovered = position;
+        self.tooltip = None;
+        let (Some(position), Some(analysis)) = (position, self.assist_analysis()) else {
+            return Task::none();
+        };
+        let text = self.editor.document().buffer().to_string();
+        let revision = self.editor.revision();
+        Task::perform(
+            assist::tooltip(analysis, text, position.offset()),
+            move |tooltip| Message::TooltipFound {
+                position,
+                revision,
+                tooltip,
+            },
+        )
+    }
+
+    fn assist_analysis(&self) -> Option<Analysis> {
+        self.pages_analysis
+            .clone()
+            .or_else(|| self.compiled.as_ref()?.analysis.clone())
+    }
+
+    fn tooltip_found(
+        &mut self,
+        position: Position,
+        revision: u64,
+        tooltip: Option<presswork_typst::Tooltip>,
+    ) {
+        if self.hovered != Some(position) || revision != self.editor.revision() {
+            return;
+        }
+        self.tooltip = tooltip.map(|tooltip| {
+            let (text, code) = match tooltip {
+                presswork_typst::Tooltip::Text(text) => (text, false),
+                presswork_typst::Tooltip::Code(code) => (code, true),
+            };
+            presswork_editor::Tooltip {
+                position,
+                text,
+                code,
+            }
+        });
     }
 
     fn follow_cursor(&mut self) -> Task<Message> {
@@ -813,6 +884,12 @@ impl App {
             }
             Message::Editor(_) if self.quitting => {}
             Message::Editor(action) => return self.edit(action),
+            Message::Hover(position) => return self.hover(position),
+            Message::TooltipFound {
+                position,
+                revision,
+                tooltip,
+            } => self.tooltip_found(position, revision, tooltip),
             Message::Server(message) => return self.server(message),
             Message::Live(event) => return self.live_event(event),
             Message::Chat(message) => self.chat_message(message),
@@ -832,14 +909,7 @@ impl App {
                 let output = Arc::new(self.failed_output(&error));
                 return self.show_output(generation, revision, output);
             }
-            Message::Preview(presswork_preview::Action::ShowProblem) => self.show_problem(),
-            Message::Preview(presswork_preview::Action::Click(point)) => {
-                return self.jump_to_source(point);
-            }
-            Message::Preview(presswork_preview::Action::Detach) => return self.detach_preview(),
-            Message::Preview(presswork_preview::Action::Attach) => {
-                return self.preview_window.map_or_else(Task::none, window::close);
-            }
+            Message::Preview(action) => return self.preview_action(action),
             Message::ToggleMenu => self.menu_open = !self.menu_open,
             Message::CloseMenu => self.menu_open = false,
             Message::MenuItem(item) => {
@@ -864,7 +934,6 @@ impl App {
                     return iced::exit();
                 }
             }
-            Message::Preview(action) => self.preview.perform(action),
             Message::OpenFolder => return self.open_folder(),
             Message::FolderPicked(Some(root)) => return self.open_project(&root),
             Message::Save => self.save(),
@@ -1131,7 +1200,9 @@ impl App {
             let editor = presswork_editor::view(&self.editor, colors, Message::Editor)
                 .id(EDITOR)
                 .autofocus(true)
-                .marks(self.marks());
+                .marks(self.marks())
+                .on_hover(Message::Hover)
+                .tooltip(self.tooltip.as_ref());
             if self.preview_window.is_some() {
                 return container(editor).width(Fill).height(Fill).into();
             }
@@ -1586,6 +1657,80 @@ mod tests {
         send(&mut app, insert("x"));
 
         assert_eq!(app.preview.marked(), None);
+    }
+
+    const LENGTH: &str = "#let gap = 10pt";
+
+    fn hover_at(offset: usize) -> Message {
+        Message::Hover(Some(Position::new(offset)))
+    }
+
+    fn found(app: &App, offset: usize, tooltip: presswork_typst::Tooltip) -> Message {
+        Message::TooltipFound {
+            position: Position::new(offset),
+            revision: app.editor.revision(),
+            tooltip: Some(tooltip),
+        }
+    }
+
+    fn code(text: &str) -> presswork_typst::Tooltip {
+        presswork_typst::Tooltip::Code(text.to_owned())
+    }
+
+    #[test]
+    fn resting_on_text_asks_for_its_tooltip() {
+        let mut app = compiled_app(LENGTH);
+
+        let task = app.update(hover_at(12));
+
+        assert!(task.units() > 0);
+    }
+
+    #[test]
+    fn a_found_tooltip_shows_at_the_hovered_text() {
+        let mut app = compiled_app(LENGTH);
+        send(&mut app, hover_at(12));
+
+        let message = found(&app, 12, code("10pt = 3.53mm"));
+        send(&mut app, message);
+
+        assert_eq!(
+            app.tooltip,
+            Some(presswork_editor::Tooltip {
+                position: Position::new(12),
+                text: "10pt = 3.53mm".to_owned(),
+                code: true,
+            })
+        );
+    }
+
+    #[test]
+    fn a_tooltip_for_another_position_or_other_text_is_dropped() {
+        let mut app = compiled_app(LENGTH);
+        send(&mut app, hover_at(12));
+
+        let other_position = found(&app, 5, code("10pt"));
+        send(&mut app, other_position);
+        let other_text = Message::TooltipFound {
+            position: Position::new(12),
+            revision: app.editor.revision() + 1,
+            tooltip: Some(code("10pt")),
+        };
+        send(&mut app, other_text);
+
+        assert_eq!(app.tooltip, None);
+    }
+
+    #[test]
+    fn the_end_of_a_hover_hides_the_tooltip() {
+        let mut app = compiled_app(LENGTH);
+        send(&mut app, hover_at(12));
+        let message = found(&app, 12, code("10pt"));
+        send(&mut app, message);
+
+        send(&mut app, Message::Hover(None));
+
+        assert_eq!(app.tooltip, None);
     }
 
     fn project_folder(files: &[(&str, &str)]) -> tempfile::TempDir {

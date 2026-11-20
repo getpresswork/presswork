@@ -1,4 +1,5 @@
 mod app;
+mod assist;
 mod chat_panel;
 mod chrome;
 mod compiler;
