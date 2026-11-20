@@ -166,6 +166,27 @@ pub fn ghost(theme: &Theme, status: button::Status) -> button::Style {
     tab(false)(theme, status)
 }
 
+pub fn list_item(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |theme, status| {
+        let colors = colors(theme);
+        let (background, text_color) = match (selected, status) {
+            (true, _) => (Some(colors.accent_soft), colors.accent),
+            (false, button::Status::Hovered | button::Status::Pressed) => {
+                (Some(colors.hover), colors.ink)
+            }
+            (false, button::Status::Disabled) => (None, colors.ink_faint),
+            (false, button::Status::Active) => (None, colors.ink),
+        };
+        button::Style {
+            border: Border {
+                radius: radius::SMALL.into(),
+                ..Border::default()
+            },
+            ..flat(background, text_color)
+        }
+    }
+}
+
 #[must_use]
 pub fn window_button(theme: &Theme, status: button::Status) -> button::Style {
     let colors = colors(theme);
@@ -359,6 +380,25 @@ mod tests {
         assert_eq!(quiet.text_color, LIGHT.ink_muted);
         assert_eq!(hovered.background, Some(Background::Color(LIGHT.hover)));
         assert_eq!(hovered.text_color, LIGHT.ink);
+    }
+
+    #[test]
+    fn a_list_item_uses_the_ink_and_the_hover_color() {
+        let quiet = list_item(false)(&light(), button::Status::Active);
+        let hovered = list_item(false)(&light(), button::Status::Hovered);
+
+        assert_eq!(quiet.background, None);
+        assert_eq!(quiet.text_color, LIGHT.ink);
+        assert_eq!(hovered.background, Some(Background::Color(LIGHT.hover)));
+        assert_eq!(quiet.border.radius, radius::SMALL.into());
+    }
+
+    #[test]
+    fn a_selected_list_item_uses_the_accent_on_the_soft_accent() {
+        let style = list_item(true)(&dark(), button::Status::Hovered);
+
+        assert_eq!(style.text_color, DARK.accent);
+        assert_eq!(style.background, Some(Background::Color(DARK.accent_soft)));
     }
 
     #[test]
