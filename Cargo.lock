@@ -5414,6 +5414,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "presswork-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "fluent-bundle",
+ "presswork-project",
+ "presswork-toolchain",
+ "presswork-typst",
+ "tempfile",
+ "unic-langid",
+]
+
+[[package]]
 name = "presswork-client"
 version = "0.1.0"
 dependencies = [

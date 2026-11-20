@@ -1,0 +1,24 @@
+[package]
+name = "presswork-cli"
+description = "The Presswork command-line tool: build and check projects without a window"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+clap.workspace = true
+fluent-bundle.workspace = true
+presswork-project.workspace = true
+presswork-toolchain.workspace = true
+presswork-typst.workspace = true
+unic-langid = { workspace = true, features = ["macros"] }
+
+[dev-dependencies]
+tempfile.workspace = true
