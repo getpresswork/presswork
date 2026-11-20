@@ -13,6 +13,7 @@ mod log_panel;
 mod logging;
 mod menu;
 mod outline_panel;
+mod publish_view;
 #[cfg(test)]
 mod screens;
 mod server_dialog;

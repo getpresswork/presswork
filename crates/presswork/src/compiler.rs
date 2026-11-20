@@ -1,14 +1,36 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
 use futures::channel::oneshot;
-use presswork_typst::{Datetime, Fonts, Output, Program, Scheduler, Stop, World};
+use presswork_project::{ExportFormat, ExportProfile};
+use presswork_typst::{
+    Datetime, ExportError, ExportSettings, Fonts, Format, Output, Problem, Program, Scheduler,
+    Stop, World,
+};
 
 pub(crate) const SCALE: f32 = 2.0;
 const PROGRAM_TIME_LIMIT: Duration = Duration::from_secs(120);
+const DEFAULT_PPI: u32 = 144;
+const POINTS_PER_INCH: f32 = 72.0;
 
 static FONTS: LazyLock<Arc<Fonts>> = LazyLock::new(|| Arc::new(Fonts::embedded()));
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExportReport {
+    pub(crate) files: Vec<PathBuf>,
+    pub(crate) problems: Vec<Problem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ExportFailure {
+    NeedsEngine,
+    NoPages,
+    Stopped,
+    Outside(PathBuf),
+    Export(String),
+    Write(String),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Backend {
@@ -20,6 +42,7 @@ pub(crate) enum Backend {
 pub(crate) struct Compiler {
     engine: Arc<Mutex<World>>,
     root: Option<PathBuf>,
+    main: PathBuf,
     backend: Backend,
     scheduler: Scheduler,
     generation: u64,
@@ -32,6 +55,7 @@ impl Compiler {
         Self {
             engine: Arc::new(Mutex::new(World::new(Arc::clone(&FONTS), today()))),
             root: None,
+            main: PathBuf::from("main.typ"),
             backend: Backend::Embedded,
             scheduler: Scheduler::default(),
             generation: 0,
@@ -44,6 +68,7 @@ impl Compiler {
         let world = World::open(Arc::clone(&FONTS), today(), root.to_path_buf(), main);
         self.engine = Arc::new(Mutex::new(world));
         self.root = Some(root.to_path_buf());
+        self.main = main.to_path_buf();
         self.backend = backend;
         self.restart();
     }
@@ -127,6 +152,89 @@ impl Compiler {
         self.compile_fn()(text)
     }
 
+    #[cfg(test)]
+    pub(crate) fn export_now(
+        &self,
+        text: &str,
+        profile: &ExportProfile,
+    ) -> Result<ExportReport, ExportFailure> {
+        self.export_fn(profile.clone())(text)
+    }
+
+    pub(crate) fn export_job(
+        &self,
+        text: String,
+        profile: ExportProfile,
+    ) -> impl Future<Output = Result<ExportReport, ExportFailure>> + Send + 'static {
+        let export = self.export_fn(profile);
+        async move {
+            let (sender, receiver) = oneshot::channel();
+            let spawned = std::thread::Builder::new()
+                .name("typst-export".to_owned())
+                .spawn(move || {
+                    let _ = sender.send(export(&text));
+                });
+            if let Err(error) = spawned {
+                tracing::error!(%error, "The export thread did not start");
+            }
+            receiver.await.unwrap_or(Err(ExportFailure::Stopped))
+        }
+    }
+
+    fn export_fn(
+        &self,
+        profile: ExportProfile,
+    ) -> impl FnOnce(&str) -> Result<ExportReport, ExportFailure> + Send + 'static {
+        let engine = Arc::clone(&self.engine);
+        let root = self.root.clone().unwrap_or_default();
+        let main = self.main.clone();
+        let embedded = self.backend == Backend::Embedded;
+        move |text| {
+            if !embedded {
+                return Err(ExportFailure::NeedsEngine);
+            }
+            if let Some(outside) = profile
+                .files(&main, 1)
+                .into_iter()
+                .find(|path| !inside(path))
+            {
+                return Err(ExportFailure::Outside(outside));
+            }
+            let analysis = presswork_typst::analyze(&engine, text)
+                .analysis
+                .ok_or(ExportFailure::NoPages)?;
+            let problems = analysis.preflight(profile.image_ppi);
+            let settings = ExportSettings {
+                format: match profile.format {
+                    ExportFormat::Pdf => Format::Pdf,
+                    ExportFormat::Png => Format::Png,
+                    ExportFormat::Svg => Format::Svg,
+                },
+                standards: profile.standards.clone(),
+                pixel_per_pt: pixels_per_point(profile.ppi.unwrap_or(DEFAULT_PPI)),
+                date: now(),
+            };
+            let files = analysis.export(&settings).map_err(|error| match error {
+                ExportError::NoPages => ExportFailure::NoPages,
+                error => ExportFailure::Export(error.to_string()),
+            })?;
+            let paths = profile.files(&main, files.len());
+            for (path, bytes) in paths.iter().zip(&files) {
+                let full = root.join(path);
+                if let Some(parent) = full.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|error| ExportFailure::Write(error.to_string()))?;
+                }
+                std::fs::write(&full, bytes)
+                    .map_err(|error| ExportFailure::Write(error.to_string()))?;
+            }
+            Ok(ExportReport {
+                files: paths,
+                problems,
+            })
+        }
+    }
+
     fn compile_fn(&self) -> impl FnOnce(&str) -> Result<Output, String> + Send + 'static {
         let engine = Arc::clone(&self.engine);
         let root = self.root.clone().unwrap_or_default();
@@ -141,6 +249,27 @@ impl Compiler {
             Backend::Unavailable => Ok(Output::default()),
         }
     }
+}
+
+fn inside(path: &Path) -> bool {
+    path.components()
+        .all(|part| matches!(part, Component::Normal(_) | Component::CurDir))
+}
+
+fn pixels_per_point(ppi: u32) -> f32 {
+    f32::from(u16::try_from(ppi).unwrap_or(u16::MAX)) / POINTS_PER_INCH
+}
+
+fn now() -> Option<Datetime> {
+    let time = jiff::Timestamp::now().to_zoned_datetime(jiff::tz::TimeZone::UTC);
+    Datetime::from_ymd_hms(
+        i32::from(time.year()),
+        u8::try_from(time.month()).ok()?,
+        u8::try_from(time.day()).ok()?,
+        u8::try_from(time.hour()).ok()?,
+        u8::try_from(time.minute()).ok()?,
+        u8::try_from(time.second()).ok()?,
+    )
 }
 
 fn today() -> Option<Datetime> {
@@ -163,6 +292,110 @@ mod tests {
         let output = futures::executor::block_on(compiler.job("Hello.".to_owned())).unwrap();
 
         assert_eq!(output.pages.map(|pages| pages.len()), Some(1));
+    }
+
+    fn project_compiler() -> (Compiler, tempfile::TempDir) {
+        let folder = tempfile::tempdir().unwrap();
+        let mut compiler = Compiler::new();
+        compiler.open(folder.path(), Path::new("main.typ"), Backend::Embedded);
+        (compiler, folder)
+    }
+
+    fn profile(format: ExportFormat, output: Option<&str>) -> ExportProfile {
+        ExportProfile {
+            output: output.map(PathBuf::from),
+            ..ExportProfile::named("test", format)
+        }
+    }
+
+    #[test]
+    fn an_export_job_writes_the_files_when_it_runs() {
+        let (compiler, folder) = project_compiler();
+        let job = compiler.export_job("Hello.".to_owned(), profile(ExportFormat::Pdf, None));
+
+        let report = futures::executor::block_on(job).unwrap();
+
+        assert_eq!(report.files, [PathBuf::from("main.pdf")]);
+        assert!(folder.path().join("main.pdf").is_file());
+    }
+
+    #[test]
+    fn an_export_writes_a_pdf_file_into_the_project() {
+        let (compiler, folder) = project_compiler();
+
+        let report = compiler
+            .export_now("Hello.", &profile(ExportFormat::Pdf, None))
+            .unwrap();
+
+        assert_eq!(report.files, [PathBuf::from("main.pdf")]);
+        let bytes = std::fs::read(folder.path().join("main.pdf")).unwrap();
+        assert!(bytes.starts_with(b"%PDF-"));
+    }
+
+    #[test]
+    fn page_images_go_into_numbered_files() {
+        let (compiler, folder) = project_compiler();
+
+        let report = compiler
+            .export_now(
+                "One.\n#pagebreak()\nTwo.",
+                &profile(ExportFormat::Png, Some("out/page-{p}.png")),
+            )
+            .unwrap();
+
+        assert_eq!(report.files.len(), 2);
+        assert!(folder.path().join("out/page-2.png").is_file());
+    }
+
+    #[test]
+    fn an_export_outside_the_project_folder_is_refused() {
+        let (compiler, folder) = project_compiler();
+
+        let result = compiler.export_now("Hello.", &profile(ExportFormat::Pdf, Some("../out.pdf")));
+
+        assert!(
+            matches!(result, Err(ExportFailure::Outside(_))),
+            "{result:?}"
+        );
+        assert!(!folder.path().join("../out.pdf").exists());
+    }
+
+    #[test]
+    fn a_document_with_errors_does_not_export() {
+        let (compiler, _folder) = project_compiler();
+
+        let result = compiler.export_now("#let", &profile(ExportFormat::Pdf, None));
+
+        assert_eq!(result, Err(ExportFailure::NoPages));
+    }
+
+    #[test]
+    fn only_the_built_in_engine_exports() {
+        let (mut compiler, _folder) = project_compiler();
+        compiler.set_backend(Backend::Program(Program::new(
+            PathBuf::from("typst"),
+            semver_version(),
+        )));
+
+        let result = compiler.export_now("Hello.", &profile(ExportFormat::Pdf, None));
+
+        assert_eq!(result, Err(ExportFailure::NeedsEngine));
+    }
+
+    #[test]
+    fn the_export_reports_the_preflight_problems() {
+        let (compiler, folder) = project_compiler();
+        std::fs::write(
+            folder.path().join("a.svg"),
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"/>",
+        )
+        .unwrap();
+
+        let report = compiler
+            .export_now("#image(\"a.svg\")", &profile(ExportFormat::Pdf, None))
+            .unwrap();
+
+        assert_eq!(report.problems.len(), 1);
     }
 
     #[test]

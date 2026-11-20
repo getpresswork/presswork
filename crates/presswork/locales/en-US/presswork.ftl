@@ -185,6 +185,28 @@ outline-toggle = Outline
 outline-empty = The document has no headings.
 outline-needs-engine = The outline is available only with the built-in Typst engine.
 
+publish-title = Export
+publish-default-note = The project has no export profiles. Presswork uses one PDF profile. To add profiles, add [[export]] tables to presswork.toml.
+publish-no-project = Open a project to export it.
+publish-export = Export
+publish-exporting = Exporting…
+publish-exported = { $count ->
+    [one] Presswork wrote { $file }.
+   *[other] Presswork wrote { $count } files in { $folder }.
+}
+publish-project-folder = the project folder
+publish-needs-engine = The export is available only with the built-in Typst engine.
+publish-no-pages = The document has errors. Correct the errors, then export again.
+publish-stopped = The export stopped before the end. Export again.
+publish-outside = The file { $path } is outside the project folder. Presswork writes export files only in the project folder.
+publish-failed = Presswork cannot export the document. { $error }
+publish-write-failed = Presswork cannot write the export file. { $error }
+publish-format-pdf = PDF
+publish-format-png = PNG, { $ppi } ppi
+publish-format-svg = SVG
+publish-problem-resolution = Page { $page }: The image has { $ppi } ppi. The profile needs { $minimum } ppi.
+publish-problem-alt = Page { $page }: The image has no alternative text.
+
 logs-toggle = Logs
 logs-title = Logs
 logs-level-error = Error

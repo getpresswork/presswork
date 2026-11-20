@@ -19,7 +19,7 @@ use presswork_editor::{
 };
 use presswork_log::{Level, LogStore};
 use presswork_preview::Preview;
-use presswork_project::Project;
+use presswork_project::{ExportFormat, ExportProfile, Project};
 use presswork_text::{ChangeSet, Position, Unit};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
@@ -43,6 +43,7 @@ use crate::live_session::{self, LiveSession};
 use crate::log_panel::{self, LogPanel};
 use crate::menu;
 use crate::outline_panel::{self, OutlinePanel};
+use crate::publish_view::{self, PublishView};
 use crate::server_dialog::{self, ServerDialog};
 use crate::task_list::{self, TaskList};
 use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
@@ -74,6 +75,7 @@ pub(crate) struct App {
     pages_analysis: Option<Analysis>,
     outline: OutlinePanel,
     find: FindBar,
+    publish: PublishView,
     modifiers: keyboard::Modifiers,
     hovered: Option<Position>,
     tooltip: Option<presswork_editor::Tooltip>,
@@ -132,6 +134,7 @@ pub(crate) enum Message {
     Preview(presswork_preview::Action),
     Outline(outline_panel::Message),
     Find(find_bar::Message),
+    Publish(publish_view::Message),
     OpenFolder,
     FolderPicked(Option<PathBuf>),
     Save,
@@ -176,6 +179,7 @@ impl App {
             pages_analysis: None,
             outline: OutlinePanel::default(),
             find: FindBar::default(),
+            publish: PublishView::default(),
             modifiers: keyboard::Modifiers::default(),
             hovered: None,
             tooltip: None,
@@ -348,6 +352,7 @@ impl App {
                 let backend = self.backend();
                 self.compiler.open(&root, &main, backend);
                 self.clear_pages();
+                self.publish.clear();
                 self.notice = None;
                 self.workspace = Workspace::Write;
                 self.request_compile()
@@ -677,6 +682,84 @@ impl App {
         }
     }
 
+    fn publish_message(&mut self, message: publish_view::Message) -> Task<Message> {
+        match message {
+            publish_view::Message::Export(index) => self.export(index),
+            publish_view::Message::Exported { index, run, result } => {
+                match &result {
+                    Ok(report) => tracing::info!(
+                        files = report.files.len(),
+                        problems = report.problems.len(),
+                        "Export finished"
+                    ),
+                    Err(failure) => tracing::warn!(?failure, "The export did not finish"),
+                }
+                self.publish.finish(index, run, result);
+                Task::none()
+            }
+            publish_view::Message::ShowProblem(index, problem) => {
+                self.show_export_problem(index, problem)
+            }
+        }
+    }
+
+    fn export(&mut self, index: usize) -> Task<Message> {
+        let Some((run, text, profile)) = self.start_export(index) else {
+            return Task::none();
+        };
+        Task::perform(self.compiler.export_job(text, profile), move |result| {
+            Message::Publish(publish_view::Message::Exported { index, run, result })
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn export_now(&mut self, index: usize) {
+        if let Some((run, text, profile)) = self.start_export(index) {
+            let result = self.compiler.export_now(&text, &profile);
+            send(
+                self,
+                Message::Publish(publish_view::Message::Exported { index, run, result }),
+            );
+        }
+    }
+
+    fn start_export(&mut self, index: usize) -> Option<(u64, String, ExportProfile)> {
+        let profile = self
+            .project
+            .as_ref()
+            .and_then(|project| export_profiles(project).0.into_iter().nth(index))?;
+        let run = self.publish.start(index)?;
+        tracing::info!(profile = %profile.name, "Export started");
+        Some((run, self.editor.document().buffer().to_string(), profile))
+    }
+
+    fn show_export_problem(&mut self, index: usize, problem: usize) -> Task<Message> {
+        let Some(source) = self
+            .publish
+            .problem(index, problem)
+            .and_then(|problem| problem.source.clone())
+        else {
+            return Task::none();
+        };
+        match source {
+            SourceRange::Main(range) => {
+                let workspace = self.select_workspace(Workspace::Write);
+                let select = self.select_range(range.start, range.end);
+                Task::batch([workspace, select, operation::focus(EDITOR)])
+            }
+            SourceRange::File(path, _) => {
+                self.other_file_notice(&path);
+                Task::none()
+            }
+        }
+    }
+
+    fn other_file_notice(&mut self, path: &Path) {
+        let mut args = FluentArgs::new();
+        args.set("file", path.display().to_string());
+        self.notice = Some(self.localizer.format("preview-jump-other-file", &args));
+    }
+
     fn go_to_heading(&mut self, index: usize) -> Task<Message> {
         let Some(heading) = self.outline.heading(index).cloned() else {
             return Task::none();
@@ -691,9 +774,7 @@ impl App {
                 Task::batch([operation::focus(EDITOR), preview])
             }
             Some(SourceRange::File(path, _)) => {
-                let mut args = FluentArgs::new();
-                args.set("file", path.display().to_string());
-                self.notice = Some(self.localizer.format("preview-jump-other-file", &args));
+                self.other_file_notice(&path);
                 preview
             }
             None => preview,
@@ -939,9 +1020,7 @@ impl App {
                 Task::batch([operation::focus(EDITOR), self.follow_cursor()])
             }
             Some(Jump::File(path, _)) => {
-                let mut args = FluentArgs::new();
-                args.set("file", path.display().to_string());
-                self.notice = Some(self.localizer.format("preview-jump-other-file", &args));
+                self.other_file_notice(&path);
                 Task::none()
             }
             Some(Jump::Page(target)) => self.preview.show_point(target, Instant::now()),
@@ -1327,6 +1406,7 @@ impl App {
             Message::Preview(action) => return self.preview_action(action),
             Message::Outline(message) => return self.outline_message(message),
             Message::Find(message) => return self.find_message(message),
+            Message::Publish(message) => return self.publish_message(message),
             Message::ToggleMenu => self.menu_open = !self.menu_open,
             Message::CloseMenu => self.menu_open = false,
             Message::MenuItem(item) => {
@@ -1612,6 +1692,9 @@ impl App {
         {
             return library.view(&self.localizer).map(Message::Library);
         }
+        if workspace == Workspace::Publish {
+            return self.publish_area();
+        }
         if workspace == Workspace::Write {
             let colors = ui_theme::colors(&self.theme());
             let editor = presswork_editor::view(&self.editor, colors, Message::Editor)
@@ -1675,6 +1758,21 @@ impl App {
         .spacing(gap::S)
         .align_x(Horizontal::Center);
         container(content).center(Fill).style(style::page).into()
+    }
+
+    fn publish_area(&self) -> Element<'_, Message> {
+        let Some(project) = &self.project else {
+            return publish_view::no_project(&self.localizer).map(Message::Publish);
+        };
+        let (profiles, from_manifest) = export_profiles(project);
+        self.publish
+            .view(
+                &self.localizer,
+                &profiles,
+                &project.manifest().main,
+                from_manifest,
+            )
+            .map(Message::Publish)
     }
 
     fn location(&self) -> String {
@@ -1891,6 +1989,14 @@ fn window_event((id, event): (window::Id, window::Event)) -> Option<Message> {
         window::Event::Resized(_) => Some(Message::WindowResized(id)),
         _ => None,
     }
+}
+
+fn export_profiles(project: &Project) -> (Vec<ExportProfile>, bool) {
+    let exports = &project.manifest().exports;
+    if exports.is_empty() {
+        return (vec![ExportProfile::named("PDF", ExportFormat::Pdf)], false);
+    }
+    (exports.clone(), true)
 }
 
 #[cfg(test)]
@@ -2517,6 +2623,116 @@ mod tests {
         open(&mut app, &book());
 
         assert!(simulator(app.view()).find("One").is_err());
+    }
+
+    const DOT: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><rect width=\"10\" height=\"10\"/></svg>";
+
+    fn publish(app: &mut App) {
+        send(app, Message::SelectWorkspace(Workspace::Publish));
+    }
+
+    #[test]
+    fn without_a_project_the_publish_workspace_asks_for_one() {
+        let mut app = app();
+
+        publish(&mut app);
+
+        assert!(
+            simulator(app.view())
+                .find("Open a project to export it.")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn the_publish_workspace_shows_the_export_profiles_of_the_project() {
+        let folder = project_folder(&[
+            (
+                "presswork.toml",
+                "[project]\nname = \"The Book\"\n\n[[export]]\nname = \"print\"\nstandards = [\"a-2b\"]\noutput = \"out/book.pdf\"\n",
+            ),
+            ("main.typ", "= Book"),
+        ]);
+        let mut app = app();
+        open(&mut app, &folder);
+
+        publish(&mut app);
+
+        let mut ui = simulator(app.view());
+        assert!(ui.find("print").is_ok());
+        assert!(ui.find("out/book.pdf").is_ok());
+    }
+
+    #[test]
+    fn the_export_button_starts_the_export() {
+        let folder = book();
+        let mut app = app();
+        open(&mut app, &folder);
+        publish(&mut app);
+
+        click_in(
+            &mut app,
+            iced_test::selector::id(publish_view::export_id(0)),
+        );
+
+        assert!(simulator(app.view()).find("Exporting…").is_ok());
+    }
+
+    #[test]
+    fn a_finished_export_shows_its_file() {
+        let folder = book();
+        let mut app = app();
+        open(&mut app, &folder);
+        publish(&mut app);
+
+        app.export_now(0);
+
+        assert!(folder.path().join("main.pdf").is_file());
+        assert!(
+            simulator(app.view())
+                .find("Presswork wrote main.pdf.")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_click_on_an_export_problem_selects_its_source() {
+        let text = "Text.\n#image(\"dot.svg\", width: 1in)";
+        let folder = project_folder(&[
+            ("presswork.toml", "[project]\nname = \"The Book\"\n"),
+            ("main.typ", text),
+            ("dot.svg", DOT),
+        ]);
+        let mut app = app();
+        open(&mut app, &folder);
+        publish(&mut app);
+        app.export_now(0);
+
+        click_in(&mut app, "Page 1: The image has no alternative text.");
+
+        assert_eq!(app.workspace, Workspace::Write);
+        assert_eq!(
+            app.selection_bounds(),
+            (text.find("image").unwrap(), text.len())
+        );
+    }
+
+    #[test]
+    fn another_project_clears_the_export_results() {
+        let (first, second) = (book(), book());
+        let mut app = app();
+        open(&mut app, &first);
+        publish(&mut app);
+        app.export_now(0);
+
+        open(&mut app, &second);
+        publish(&mut app);
+
+        assert!(
+            simulator(app.view())
+                .find("Presswork wrote main.pdf.")
+                .is_err()
+        );
     }
 
     const CATS: &str = "a cat and a cat";

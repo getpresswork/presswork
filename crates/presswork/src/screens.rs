@@ -26,6 +26,7 @@ use crate::chat_panel::Message as ChatPanelMessage;
 use crate::find_bar::Message as FindMessage;
 use crate::library_view::{Message as LibraryMessage, PickedFile, Target};
 use crate::live_session::Event as LiveEvent;
+use crate::publish_view::Message as PublishMessage;
 use crate::server_dialog::{Connection, Message as ServerMessage, Shelf};
 use crate::task_list::Message as TaskListMessage;
 use crate::toolchain_panel::Message as ToolchainMessage;
@@ -240,6 +241,57 @@ fn render_screens() {
     render_tasks(&mut app);
     render_library(&mut app);
     render_spreads(&mut app);
+    render_publish(&mut app);
+}
+
+const EXPORTS: &str = "[project]\nname = \"Field Notes\"\n\n\
+                       [[export]]\nname = \"Print\"\nstandards = [\"a-2b\"]\nimage-ppi = 300\n\
+                       output = \"out/field-notes-print.pdf\"\n\n\
+                       [[export]]\nname = \"Screen\"\nstandards = [\"ua-1\"]\n\
+                       output = \"out/field-notes.pdf\"\n\n\
+                       [[export]]\nname = \"Pages\"\nformat = \"png\"\nppi = 144\n\
+                       output = \"out/pages/page-{0p}.png\"\n";
+
+const MAP: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"120\" height=\"80\">\
+                   <rect width=\"120\" height=\"80\" fill=\"#E8E1D3\"/>\
+                   <path d=\"M10 60 Q40 10 70 40 T110 20\" stroke=\"#8C2F39\" \
+                   stroke-width=\"3\" fill=\"none\"/></svg>";
+
+fn render_publish(app: &mut App) {
+    let text = "#set page(paper: \"a5\")\n#set text(font: \"Libertinus Serif\")\n\
+                = Field notes\n\n#image(\"meadow.png\", width: 5cm, alt: \"A meadow at dawn\")\n\n\
+                #image(\"map.svg\", width: 4cm)\n";
+    let book = folder(&[
+        ("presswork.toml", EXPORTS),
+        ("main.typ", text),
+        ("map.svg", MAP),
+    ]);
+    std::fs::write(book.path().join("meadow.png"), gradient(300, 200)).unwrap();
+    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    send(app, Message::SelectWorkspace(Workspace::Publish));
+    app.export_now(0);
+    send(app, Message::Publish(PublishMessage::Export(2)));
+    render(app, "publish");
+}
+
+fn gradient(width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, width, height);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    let pixels: Vec<u8> = (0..height)
+        .flat_map(|y| {
+            (0..width).flat_map(move |x| {
+                let across = u8::try_from(x * 100 / width).unwrap();
+                let down = u8::try_from(y * 60 / height).unwrap();
+                [110 + across, 150 + down, 120]
+            })
+        })
+        .collect();
+    writer.write_image_data(&pixels).unwrap();
+    writer.finish().unwrap();
+    bytes
 }
 
 fn render_spreads(app: &mut App) {
