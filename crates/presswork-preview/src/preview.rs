@@ -571,6 +571,7 @@ mod tests {
                         width: 20,
                         height: 30,
                         rgba: vec![255; 20 * 30 * 4],
+                        ..PageImage::default()
                     })
                     .collect(),
             ),
@@ -634,6 +635,7 @@ mod tests {
                 width: 840,
                 height: 1190,
                 rgba: vec![255; 840 * 1190 * 4],
+                ..PageImage::default()
             }]),
             ..Output::default()
         }
@@ -729,6 +731,7 @@ mod tests {
                         width: 840,
                         height: 1190,
                         rgba: vec![255; 840 * 1190 * 4],
+                        ..PageImage::default()
                     })
                     .collect(),
             ),

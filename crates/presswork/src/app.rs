@@ -2113,6 +2113,7 @@ mod tests {
                 width: 20,
                 height: 30,
                 rgba: vec![255; 20 * 30 * 4],
+                ..presswork_typst::PageImage::default()
             }]),
             ..Output::default()
         };

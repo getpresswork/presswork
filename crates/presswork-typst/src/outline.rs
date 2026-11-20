@@ -174,7 +174,7 @@ mod tests {
 
     fn analysis(text: &str) -> Analysis {
         let world = Mutex::new(World::new(Arc::new(Fonts::embedded()), today()));
-        run(&world, text, 1.0).analysis.unwrap()
+        run(&world, text, 1.0, false).analysis.unwrap()
     }
 
     #[test]
@@ -259,7 +259,7 @@ mod tests {
             Path::new("main.typ"),
         ));
 
-        let headings = run(&world, main, 1.0).analysis.unwrap().outline();
+        let headings = run(&world, main, 1.0, false).analysis.unwrap().outline();
 
         assert_eq!(
             headings[1].source,

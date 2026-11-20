@@ -17,7 +17,7 @@ pub use ide::{Analysis, Jump, PagePoint};
 pub use job::{Output, run};
 pub use outline::{Heading, LabelKind, LabelTarget, SourceRange};
 pub use program::{Program, ProgramError, Stop};
-pub use render::{PageImage, render_page};
+pub use render::{Insets, PageImage, render_page};
 pub use scheduler::Scheduler;
 pub use typst::foundations::Datetime;
 pub use typst_layout::PagedDocument;

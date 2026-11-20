@@ -185,7 +185,7 @@ mod tests {
     fn analysis(text: &str) -> Analysis {
         let today = Datetime::from_ymd(2026, 11, 19);
         let world = Mutex::new(World::new(Arc::new(Fonts::embedded()), today));
-        run(&world, text, 1.0).analysis.unwrap()
+        run(&world, text, 1.0, false).analysis.unwrap()
     }
 
     fn inside(text: &str, word: &str) -> usize {
@@ -359,7 +359,7 @@ mod tests {
             folder.path().to_path_buf(),
             std::path::Path::new("main.typ"),
         ));
-        let analysis = run(&world, text, 1.0).analysis.unwrap();
+        let analysis = run(&world, text, 1.0, false).analysis.unwrap();
 
         let definition = analysis.definition(text, inside(text, "part"));
 

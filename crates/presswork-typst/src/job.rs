@@ -15,14 +15,14 @@ pub struct Output {
 }
 
 #[must_use]
-pub fn run(world: &Mutex<World>, text: &str, pixel_per_pt: f32) -> Output {
+pub fn run(world: &Mutex<World>, text: &str, pixel_per_pt: f32, bleed: bool) -> Output {
     let start = Instant::now();
     let mut world = world.lock().unwrap_or_else(PoisonError::into_inner);
     world.set_main_text(text);
     let compilation = compile(&world);
     let pages = compilation.document.as_ref().map(|document| {
         (0..document.pages().len())
-            .filter_map(|index| render_page(document, index, pixel_per_pt))
+            .filter_map(|index| render_page(document, index, pixel_per_pt, bleed))
             .collect()
     });
     Output {
@@ -50,15 +50,28 @@ mod tests {
 
     #[test]
     fn a_job_gives_an_image_for_each_page() {
-        let output = run(&world(), "One.\n#pagebreak()\nTwo.", 1.0);
+        let output = run(&world(), "One.\n#pagebreak()\nTwo.", 1.0, false);
 
         assert_eq!(output.pages.map(|pages| pages.len()), Some(2));
         assert_eq!(output.diagnostics, []);
     }
 
     #[test]
+    fn a_job_can_render_the_bleed() {
+        let output = run(
+            &world(),
+            "#set page(width: 100pt, height: 50pt, bleed: 5pt)\nText.",
+            1.0,
+            true,
+        );
+
+        let page = &output.pages.unwrap()[0];
+        assert_eq!((page.width, page.height), (110, 60));
+    }
+
+    #[test]
     fn a_job_with_errors_gives_no_pages() {
-        let output = run(&world(), "#unknown-name", 1.0);
+        let output = run(&world(), "#unknown-name", 1.0, false);
 
         assert_eq!(output.pages, None);
         assert_eq!(output.diagnostics[0].severity, Severity::Error);

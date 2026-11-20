@@ -125,7 +125,7 @@ impl Compiler {
         let backend = self.backend.clone();
         let stop = self.stop.clone();
         move |text| match backend {
-            Backend::Embedded => Ok(presswork_typst::run(&engine, text, SCALE)),
+            Backend::Embedded => Ok(presswork_typst::run(&engine, text, SCALE, false)),
             Backend::Program(program) => program
                 .run(&root, text, &stop)
                 .map_err(|error| error.to_string()),

@@ -306,6 +306,7 @@ fn decode(path: &Path) -> Result<PageImage, ProgramError> {
         width: info.width,
         height: info.height,
         rgba,
+        ..PageImage::default()
     })
 }
 
