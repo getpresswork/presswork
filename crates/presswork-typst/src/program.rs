@@ -138,6 +138,7 @@ impl Program {
             pages,
             diagnostics,
             duration: start.elapsed(),
+            analysis: None,
         })
     }
 

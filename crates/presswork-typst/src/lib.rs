@@ -1,5 +1,6 @@
 mod compile;
 mod fonts;
+mod ide;
 mod job;
 mod program;
 mod render;
@@ -9,6 +10,7 @@ mod world;
 
 pub use compile::{Compilation, Diagnostic, Severity, compile};
 pub use fonts::Fonts;
+pub use ide::{Analysis, Jump, PagePoint};
 pub use job::{Output, run};
 pub use program::{Program, ProgramError, Stop};
 pub use render::{PageImage, render_page};

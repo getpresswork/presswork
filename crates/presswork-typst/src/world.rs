@@ -12,7 +12,7 @@ use typst::utils::LazyHash;
 
 use crate::fonts::Fonts;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct World {
     library: LazyHash<Library>,
     fonts: Arc<Fonts>,
@@ -88,7 +88,7 @@ impl World {
     }
 }
 
-fn file_id(path: &Path) -> Option<FileId> {
+pub(crate) fn file_id(path: &Path) -> Option<FileId> {
     let parts: Vec<&str> = path
         .components()
         .map(|component| match component {
@@ -140,6 +140,12 @@ impl typst::World for World {
     fn today(&self, offset: Option<Duration>) -> Option<Datetime> {
         let _ = offset;
         self.today
+    }
+}
+
+impl typst_ide::IdeWorld for World {
+    fn upcast(&self) -> &dyn typst::World {
+        self
     }
 }
 

@@ -2,6 +2,7 @@ use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use crate::compile::{Diagnostic, compile};
+use crate::ide::Analysis;
 use crate::render::{PageImage, render_page};
 use crate::world::World;
 
@@ -10,6 +11,7 @@ pub struct Output {
     pub pages: Option<Vec<PageImage>>,
     pub diagnostics: Vec<Diagnostic>,
     pub duration: Duration,
+    pub analysis: Option<Analysis>,
 }
 
 #[must_use]
@@ -27,6 +29,7 @@ pub fn run(world: &Mutex<World>, text: &str, pixel_per_pt: f32) -> Output {
         pages,
         diagnostics: compilation.diagnostics,
         duration: start.elapsed(),
+        analysis: Some(Analysis::new(world.clone(), compilation.document)),
     }
 }
 

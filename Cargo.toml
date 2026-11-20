@@ -80,6 +80,7 @@ tracing = "0.1.44"
 tracing-appender = "0.2.5"
 typst = "0.15.1"
 typst-assets = { version = "0.15.1", features = ["fonts"] }
+typst-ide = "0.15.1"
 typst-layout = "0.15.1"
 typst-render = "0.15.1"
 typst-syntax = "0.15.1"
