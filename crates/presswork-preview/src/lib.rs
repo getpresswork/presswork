@@ -1,4 +1,4 @@
 mod page;
 mod preview;
 
-pub use preview::{Action, Preview, Viewport, Zoom};
+pub use preview::{Action, Arrangement, Preview, Viewport, Zoom};

@@ -239,6 +239,31 @@ fn render_screens() {
     render_chat(&mut app);
     render_tasks(&mut app);
     render_library(&mut app);
+    render_spreads(&mut app);
+}
+
+fn render_spreads(app: &mut App) {
+    let chapters: Vec<String> = (1..=4)
+        .map(|number| {
+            format!(
+                "= Chapter {number}\n\n{}\n",
+                "Good books start with good paper. ".repeat(40)
+            )
+        })
+        .collect();
+    let text = format!(
+        "#set page(paper: \"a5\", numbering: \"1\")\n#set text(font: \"Libertinus Serif\")\n{}",
+        chapters.join("#pagebreak()\n")
+    );
+    let book = folder(&[
+        ("presswork.toml", "[project]\nname = \"Spreads\"\n"),
+        ("main.typ", &text),
+    ]);
+    send(app, Message::SelectWorkspace(Workspace::Write));
+    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    app.compile_now();
+    send(app, Message::Preview(PreviewAction::Spreads));
+    render(app, "spreads");
 }
 
 fn render_find(app: &mut App) {

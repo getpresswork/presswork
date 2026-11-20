@@ -32,11 +32,19 @@ pub enum Zoom {
     Percent(u16),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Arrangement {
+    #[default]
+    Pages,
+    Spreads,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Action {
     ZoomIn,
     ZoomOut,
     FitWidth,
+    Spreads,
     ShowProblem,
     Detach,
     Attach,
@@ -79,6 +87,7 @@ struct Frame {
 pub struct Preview {
     pages: Vec<Page>,
     zoom: Zoom,
+    arrangement: Arrangement,
     problem: Option<String>,
     detached: bool,
     viewport: Option<Viewport>,
@@ -122,6 +131,47 @@ impl Preview {
         self.mark.map(|(point, _)| point)
     }
 
+    #[must_use]
+    pub fn arrangement(&self) -> Arrangement {
+        self.arrangement
+    }
+
+    fn rows(&self) -> Vec<std::ops::Range<usize>> {
+        let count = self.pages.len();
+        match self.arrangement {
+            Arrangement::Pages => (0..count).map(|index| index..index + 1).collect(),
+            Arrangement::Spreads => {
+                let mut rows = Vec::new();
+                if count > 0 {
+                    rows.push(0..1);
+                }
+                let mut start = 1;
+                while start < count {
+                    rows.push(start..(start + 2).min(count));
+                    start += 2;
+                }
+                rows
+            }
+        }
+    }
+
+    fn row_height(&self, row: &std::ops::Range<usize>) -> f32 {
+        self.pages[row.clone()]
+            .iter()
+            .map(|page| page.height)
+            .fold(0.0, f32::max)
+    }
+
+    fn row_top(&self, page: usize, scale: f32) -> Option<f32> {
+        let rows = self.rows();
+        let row = rows.iter().position(|row| row.contains(&page))?;
+        let above: f32 = rows[..row]
+            .iter()
+            .map(|row| self.row_height(row) * PX_PER_PT * scale + PAGE_GAP)
+            .sum();
+        Some(PADDING + above)
+    }
+
     pub fn perform(&mut self, action: Action) {
         let current = match self.zoom {
             Zoom::Percent(percent) => percent,
@@ -146,6 +196,13 @@ impl Preview {
                 self.viewport = Some(viewport);
                 return;
             }
+            Action::Spreads => {
+                self.arrangement = match self.arrangement {
+                    Arrangement::Pages => Arrangement::Spreads,
+                    Arrangement::Spreads => Arrangement::Pages,
+                };
+                return;
+            }
             Action::ShowProblem | Action::Detach | Action::Attach | Action::Click(_) => return,
         };
     }
@@ -166,14 +223,8 @@ impl Preview {
 
     fn scroll_target(&self, point: PagePoint) -> Option<f32> {
         let viewport = self.viewport?;
-        let above = self.pages.get(..point.page)?;
-        self.pages.get(point.page)?;
         let Frame { scale, .. } = self.frame(viewport.width);
-        let pages_above: f32 = above
-            .iter()
-            .map(|page| page.height * PX_PER_PT * scale + PAGE_GAP)
-            .sum();
-        let y = PADDING + pages_above + to_f32(point.y) * PX_PER_PT * scale;
+        let y = self.row_top(point.page, scale)? + to_f32(point.y) * PX_PER_PT * scale;
         let margin = viewport.height * SHOWN_MARGIN;
         if y >= viewport.top + margin && y <= viewport.top + viewport.height - margin {
             return None;
@@ -229,7 +280,10 @@ impl Preview {
 
     fn frame(&self, viewport: f32) -> Frame {
         let available = (viewport - SCROLLBAR_SPACE).max(0.0);
-        let widest = self.pages.iter().map(|page| page.width).fold(0.0, f32::max) * PX_PER_PT;
+        let mut widest = self.pages.iter().map(|page| page.width).fold(0.0, f32::max) * PX_PER_PT;
+        if self.arrangement == Arrangement::Spreads {
+            widest *= 2.0;
+        }
         let scale = match self.zoom {
             Zoom::Percent(percent) => f32::from(percent) / f32::from(FULL_SIZE),
             Zoom::FitWidth if widest > 0.0 => {
@@ -252,6 +306,12 @@ impl Preview {
         let percent = scale * 100.0;
         let toolbar = row![
             space().width(Fill),
+            tool(
+                Icon::BookOpen,
+                self.arrangement == Arrangement::Spreads,
+                on_action(Action::Spreads)
+            ),
+            space().width(gap::S),
             tool(Icon::ZoomOut, false, on_action(Action::ZoomOut)),
             text(format!("{percent:.0}%"))
                 .size(font_size::SMALL)
@@ -275,28 +335,27 @@ impl Preview {
         .spacing(gap::XXS)
         .align_y(Vertical::Center)
         .padding([gap::XS, gap::S]);
-        let pages = column(self.pages.iter().enumerate().map(|(index, page)| {
-            let content = container(
-                image(page.handle.clone())
-                    .width(page.width * PX_PER_PT * scale)
-                    .height(page.height * PX_PER_PT * scale),
-            )
-            .style(style::paper)
-            .id(format!("page-{index}"));
-            page_area(content, move |point| {
-                on_action(Action::Click(PagePoint {
-                    page: index,
-                    x: f64::from(point.x / (PX_PER_PT * scale)),
-                    y: f64::from(point.y / (PX_PER_PT * scale)),
-                }))
-            })
-            .mark(self.mark_on(index, scale))
-            .into()
-        }))
-        .spacing(PAGE_GAP)
-        .padding(PADDING)
-        .align_x(Horizontal::Center)
-        .width(width);
+        let slot = self.pages.iter().map(|page| page.width).fold(0.0, f32::max) * PX_PER_PT * scale;
+        let rows = self.rows().into_iter().map(|shown| match self.arrangement {
+            Arrangement::Pages => self.page_view(shown.start, scale, on_action),
+            Arrangement::Spreads => {
+                let half = |index: Option<usize>, align: Horizontal| -> Element<'a, Message> {
+                    let content = match index {
+                        Some(index) => self.page_view(index, scale, on_action),
+                        None => space().into(),
+                    };
+                    container(content).width(slot).align_x(align).into()
+                };
+                let left = shown.clone().find(|index| index % 2 == 1);
+                let right = shown.clone().find(|index| index % 2 == 0);
+                row![half(left, Horizontal::Right), half(right, Horizontal::Left)].into()
+            }
+        });
+        let pages = column(rows)
+            .spacing(PAGE_GAP)
+            .padding(PADDING)
+            .align_x(Horizontal::Center)
+            .width(width);
         let pages = scrollable(pages)
             .id(PAGES)
             .direction(Direction::Both {
@@ -307,6 +366,31 @@ impl Preview {
             .width(Fill)
             .height(Fill);
         column![toolbar, pages].into()
+    }
+
+    fn page_view<'a, Message: Clone + 'a>(
+        &'a self,
+        index: usize,
+        scale: f32,
+        on_action: impl Fn(Action) -> Message + Copy + 'a,
+    ) -> Element<'a, Message> {
+        let page = &self.pages[index];
+        let content = container(
+            image(page.handle.clone())
+                .width(page.width * PX_PER_PT * scale)
+                .height(page.height * PX_PER_PT * scale),
+        )
+        .style(style::paper)
+        .id(format!("page-{index}"));
+        page_area(content, move |point| {
+            on_action(Action::Click(PagePoint {
+                page: index,
+                x: f64::from(point.x / (PX_PER_PT * scale)),
+                y: f64::from(point.y / (PX_PER_PT * scale)),
+            }))
+        })
+        .mark(self.mark_on(index, scale))
+        .into()
     }
 }
 
@@ -604,6 +688,76 @@ mod tests {
         preview.show(&a5_pages(3), 2.0);
 
         assert_eq!(preview.scroll_target(point(2, 50.0, 100.0)), None);
+    }
+
+    #[test]
+    fn single_pages_have_one_page_in_each_row() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+
+        assert_eq!(preview.rows(), [0..1, 1..2, 2..3]);
+    }
+
+    #[test]
+    fn spreads_put_the_first_page_alone_and_then_two_pages_in_each_row() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(4), 2.0);
+
+        preview.perform(Action::Spreads);
+
+        assert_eq!(preview.arrangement(), Arrangement::Spreads);
+        assert_eq!(preview.rows(), [0..1, 1..3, 3..4]);
+    }
+
+    #[test]
+    fn fit_width_in_spreads_fits_two_pages() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        preview.perform(Action::Spreads);
+
+        let frame = preview.frame(640.0);
+
+        let spread = 2.0 * 420.0 * PX_PER_PT * frame.scale;
+        assert!((spread + 2.0 * PADDING - frame.width).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_point_on_a_right_page_of_a_spread_scrolls_by_rows() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        preview.perform(Action::Spreads);
+        preview.perform(scrolled(0.0, 300.0, 640.0));
+        let scale = preview.frame(640.0).scale;
+        let y = PADDING + 595.0 * PX_PER_PT * scale + PAGE_GAP + 100.0 * PX_PER_PT * scale;
+
+        let target = preview.scroll_target(point(2, 50.0, 100.0)).unwrap();
+
+        assert!((target - (y - 100.0)).abs() < 0.5, "{target} {y}");
+    }
+
+    #[test]
+    fn the_toolbar_switches_between_pages_and_spreads() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+
+        assert_eq!(clicked(&preview, Icon::BookOpen), [Action::Spreads]);
+    }
+
+    #[test]
+    fn spreads_show_all_pages() {
+        let mut preview = Preview::default();
+        preview.show(&output(4), 2.0);
+        preview.perform(Action::Spreads);
+
+        let mut ui = simulator(preview.view(EMPTY.to_owned(), |action| action));
+
+        for index in 0..4 {
+            assert!(
+                ui.find(iced::widget::Id::from(format!("page-{index}")))
+                    .is_ok(),
+                "page {index}"
+            );
+        }
     }
 
     #[test]
