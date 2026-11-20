@@ -23,8 +23,8 @@ use presswork_project::{ExportProfile, Project};
 use presswork_text::{ChangeSet, Position, Unit};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
-    Analysis, Diagnostic, Jump, LabelKind, LabelTarget, Output, PagePoint, Program, Severity,
-    SourceRange,
+    Analysis, Diagnostic, Jump, LabelKind, LabelTarget, Output, PagePoint, Problem, Program,
+    Severity, SourceRange,
 };
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
@@ -47,6 +47,7 @@ use crate::publish_view::{self, PublishView};
 use crate::server_dialog::{self, ServerDialog};
 use crate::task_list::{self, TaskList};
 use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
+use crate::typeset_view;
 use crate::unsaved;
 use crate::workspace::Workspace;
 
@@ -76,6 +77,7 @@ pub(crate) struct App {
     outline: OutlinePanel,
     find: FindBar,
     publish: PublishView,
+    quality: Vec<Problem>,
     modifiers: keyboard::Modifiers,
     hovered: Option<Position>,
     tooltip: Option<presswork_editor::Tooltip>,
@@ -135,6 +137,7 @@ pub(crate) enum Message {
     Outline(outline_panel::Message),
     Find(find_bar::Message),
     Publish(publish_view::Message),
+    Typeset(typeset_view::Message),
     OpenFolder,
     FolderPicked(Option<PathBuf>),
     Save,
@@ -180,6 +183,7 @@ impl App {
             outline: OutlinePanel::default(),
             find: FindBar::default(),
             publish: PublishView::default(),
+            quality: Vec::new(),
             modifiers: keyboard::Modifiers::default(),
             hovered: None,
             tooltip: None,
@@ -397,6 +401,7 @@ impl App {
         self.compiled_revision = None;
         self.pages_analysis = None;
         self.outline.set_headings(Vec::new());
+        self.quality.clear();
     }
 
     fn load_library(&self) -> Task<Message> {
@@ -734,11 +739,23 @@ impl App {
     }
 
     fn show_export_problem(&mut self, index: usize, problem: usize) -> Task<Message> {
-        let Some(source) = self
+        let source = self
             .publish
             .problem(index, problem)
-            .and_then(|problem| problem.source.clone())
-        else {
+            .and_then(|problem| problem.source.clone());
+        self.show_source(source)
+    }
+
+    fn show_layout_problem(&mut self, index: usize) -> Task<Message> {
+        let source = self
+            .quality
+            .get(index)
+            .and_then(|problem| problem.source.clone());
+        self.show_source(source)
+    }
+
+    fn show_source(&mut self, source: Option<SourceRange>) -> Task<Message> {
+        let Some(source) = source else {
             return Task::none();
         };
         match source {
@@ -1293,6 +1310,10 @@ impl App {
                     .as_ref()
                     .map_or_else(Vec::new, Analysis::outline),
             );
+            self.quality = self
+                .pages_analysis
+                .as_ref()
+                .map_or_else(Vec::new, Analysis::quality);
         }
         self.compiled = Some(output);
         if self.compiler.finish() {
@@ -1407,6 +1428,9 @@ impl App {
             Message::Outline(message) => return self.outline_message(message),
             Message::Find(message) => return self.find_message(message),
             Message::Publish(message) => return self.publish_message(message),
+            Message::Typeset(typeset_view::Message::Show(index)) => {
+                return self.show_layout_problem(index);
+            }
             Message::ToggleMenu => self.menu_open = !self.menu_open,
             Message::CloseMenu => self.menu_open = false,
             Message::MenuItem(item) => {
@@ -1694,6 +1718,11 @@ impl App {
         }
         if workspace == Workspace::Publish {
             return self.publish_area();
+        }
+        if workspace == Workspace::Typeset {
+            let available = self.compiler.backend() == &Backend::Embedded;
+            return typeset_view::view(&self.localizer, &self.quality, available)
+                .map(Message::Typeset);
         }
         if workspace == Workspace::Write {
             let colors = ui_theme::colors(&self.theme());
@@ -2727,6 +2756,30 @@ mod tests {
     }
 
     const EXPORTED: &str = "Presswork wrote main.pdf and the build report PDF.report.json.";
+
+    const SHORT_END: &str = "A line of text \\ it.";
+    const SHORT_END_PROBLEM: &str = "Page 1: The last line of a paragraph has only 3 characters.";
+
+    #[test]
+    fn the_typeset_workspace_lists_the_problems_of_the_layout() {
+        let mut app = compiled_app(SHORT_END);
+
+        send(&mut app, Message::SelectWorkspace(Workspace::Typeset));
+
+        assert!(simulator(app.view()).find(SHORT_END_PROBLEM).is_ok());
+    }
+
+    #[test]
+    fn a_click_on_a_layout_problem_selects_its_source() {
+        let mut app = compiled_app(SHORT_END);
+        send(&mut app, Message::SelectWorkspace(Workspace::Typeset));
+
+        click_in(&mut app, SHORT_END_PROBLEM);
+
+        assert_eq!(app.workspace, Workspace::Write);
+        let start = SHORT_END.find("it.").unwrap();
+        assert_eq!(app.selection_bounds(), (start, start + 3));
+    }
 
     const CATS: &str = "a cat and a cat";
 

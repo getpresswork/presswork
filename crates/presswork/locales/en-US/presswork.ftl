@@ -204,6 +204,14 @@ publish-write-failed = Presswork cannot write { $path }. { $error }
 publish-format-pdf = PDF
 publish-format-png = PNG, { $ppi } ppi
 publish-format-svg = SVG
+typeset-title = Typesetting QA
+typeset-empty = Presswork found no problems in the layout.
+typeset-needs-engine = The QA report is available only with the built-in Typst engine.
+typeset-count = { $count ->
+    [one] 1 problem in the layout
+   *[other] { $count } problems in the layout
+}
+
 problem-on-page = Page { $page }: { $problem }
 problem-resolution = The image has { $ppi } ppi. The profile needs { $minimum } ppi.
 problem-alt = The image has no alternative text.

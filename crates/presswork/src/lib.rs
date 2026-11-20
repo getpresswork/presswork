@@ -22,6 +22,7 @@ mod task_list;
 #[cfg(test)]
 mod testing;
 mod toolchain_panel;
+mod typeset_view;
 mod unsaved;
 mod workspace;
 
