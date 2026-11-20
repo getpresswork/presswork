@@ -1,9 +1,11 @@
 use std::ops::Range;
+use std::path::PathBuf;
 
-use typst::World as _;
+use typst::foundations::Repr;
 use typst::syntax::Side;
+use typst::{World as _, WorldExt as _};
 
-use crate::ide::Analysis;
+use crate::ide::{Analysis, project_path};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tooltip {
@@ -40,6 +42,13 @@ pub struct Completions {
     pub items: Vec<Completion>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Definition {
+    Main(Range<usize>),
+    File(PathBuf, Option<Range<usize>>),
+    Library(String),
+}
+
 impl Analysis {
     #[must_use]
     pub fn tooltip(&self, text: &str, offset: usize) -> Option<Tooltip> {
@@ -64,6 +73,31 @@ impl Analysis {
             from,
             items: items.into_iter().map(completion).collect(),
         })
+    }
+
+    #[must_use]
+    pub fn definition(&self, text: &str, offset: usize) -> Option<Definition> {
+        let world = self.world_with(text);
+        let source = world.source(world.main()).ok()?;
+        let found = typst_ide::definition(&world, self.document(), &source, offset, Side::After)
+            .or_else(|| {
+                typst_ide::definition(&world, self.document(), &source, offset, Side::Before)
+            })?;
+        match found {
+            typst_ide::Definition::Span(span) => {
+                let id = span.id()?;
+                let range = world.range(span)?;
+                if id == world.main() {
+                    Some(Definition::Main(range))
+                } else {
+                    Some(Definition::File(project_path(id)?, Some(range)))
+                }
+            }
+            typst_ide::Definition::File(id) => Some(Definition::File(project_path(id)?, None)),
+            typst_ide::Definition::Std(value) => {
+                Some(Definition::Library(value.repr().to_string()))
+            }
+        }
     }
 }
 
@@ -210,6 +244,81 @@ mod tests {
             completions.is_some_and(|completions| !completions.items.is_empty()),
             "no completions"
         );
+    }
+
+    #[test]
+    fn the_definition_of_a_variable_is_its_name_in_the_binding() {
+        let text = "#let gap = 1pt\n#gap";
+        let used = text.rfind("gap").unwrap() + 1;
+
+        let definition = analysis(text).definition(text, used);
+
+        assert!(
+            matches!(&definition, Some(Definition::Main(range)) if &text[range.clone()] == "gap" && range.start < used),
+            "{definition:?}"
+        );
+    }
+
+    #[test]
+    fn the_end_of_a_name_also_finds_its_definition() {
+        let text = "#let gap = 1pt\n#gap";
+
+        let definition = analysis(text).definition(text, text.len());
+
+        assert!(
+            matches!(&definition, Some(Definition::Main(range)) if &text[range.clone()] == "gap"),
+            "{definition:?}"
+        );
+    }
+
+    #[test]
+    fn the_definition_of_a_reference_is_the_labeled_element() {
+        let text = "#set heading(numbering: \"1.\")\n= Start <start>\nSee @start.";
+
+        let definition = analysis(text).definition(text, text.rfind("start").unwrap() + 1);
+
+        assert!(
+            matches!(&definition, Some(Definition::Main(range)) if text[range.clone()].starts_with("= Start")),
+            "{definition:?}"
+        );
+    }
+
+    #[test]
+    fn a_function_of_the_library_is_in_the_library() {
+        let text = "#text[Hi]";
+
+        let definition = analysis(text).definition(text, inside(text, "text"));
+
+        assert_eq!(definition, Some(Definition::Library("text".to_owned())));
+    }
+
+    #[test]
+    fn an_included_path_gives_its_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let text = "#include \"part.typ\"";
+        std::fs::write(folder.path().join("main.typ"), text).unwrap();
+        std::fs::write(folder.path().join("part.typ"), "Part.").unwrap();
+        let world = Mutex::new(World::open(
+            Arc::new(Fonts::embedded()),
+            None,
+            folder.path().to_path_buf(),
+            std::path::Path::new("main.typ"),
+        ));
+        let analysis = run(&world, text, 1.0).analysis.unwrap();
+
+        let definition = analysis.definition(text, inside(text, "part"));
+
+        assert_eq!(
+            definition,
+            Some(Definition::File(PathBuf::from("part.typ"), None))
+        );
+    }
+
+    #[test]
+    fn plain_text_has_no_definition() {
+        let text = "Hello world.";
+
+        assert_eq!(analysis(text).definition(text, 3), None);
     }
 
     #[test]

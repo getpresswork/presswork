@@ -182,7 +182,7 @@ fn remove_links(frame: &mut Frame) {
     });
 }
 
-fn project_path(id: FileId) -> Option<PathBuf> {
+pub(crate) fn project_path(id: FileId) -> Option<PathBuf> {
     let rooted = id.get();
     match rooted.root() {
         VirtualRoot::Project => Some(PathBuf::from(rooted.vpath().get_without_slash())),
