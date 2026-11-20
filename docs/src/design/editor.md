@@ -115,5 +115,10 @@ In milestone 1, the preview does these things:
 
 ## Source and pages
 
-- If you click a point in the preview, the engine finds the source location of that point. The editor opens the file and moves the cursor there.
-- If the cursor moves, the preview scrolls to the cursor position in the pages and marks it for a short time.
+The embedded engine connects the points on the pages to the source, and the source positions to the pages (D169).
+
+- Click a point on a page. If the point is on text of the main file, the editor moves the cursor to that character and gets the keyboard focus. A click on the text of a web link also goes to the text (D170). A click on a link to a label or to a position scrolls the preview to the target of the link.
+- If the text comes from another file, a note gives the name of the file, because the editor shows only the main file.
+- If you move the cursor with the keys or the mouse, the preview marks the cursor position in the pages for 1.5 seconds. If the position is not in the visible part of the preview, the preview scrolls until the position is at one third of its height. While you type, the preview does not move (D171).
+- The positions come from the last compilation that gave pages. If you changed the text after that compilation, a position can be a few characters away from the correct position.
+- With the managed toolchain, the jumps are not available. A click on the pages shows a note that tells why.

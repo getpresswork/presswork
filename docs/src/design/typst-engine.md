@@ -97,7 +97,9 @@ The engine uses `typst-ide` for these functions:
 | Outline | The headings of the document, for the outline panel. |
 | Labels | All labels and their positions, for references. |
 
-These functions use the result of the last compilation.
+These functions use the result of the last compilation. Each compilation keeps a copy of the world and of the document. Thus the functions do not wait for a compilation that runs (D169).
+
+The jump from the source has its own search for the glyph at the cursor. The search of `typst-ide` gives only the first glyph of a text node, and in Typst 0.15 a text node contains a full line of text with its spaces. If a paragraph continues on the next page, the search gives only the page of the cursor.
 
 ## Export
 

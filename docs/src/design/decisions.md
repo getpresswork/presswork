@@ -1195,3 +1195,30 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** Dependabot opens update requests for new digests of `ubuntu:24.04` in the Dockerfile and of `postgres:17-alpine` in the Compose file. It ignores new Ubuntu releases and new major versions of PostgreSQL.
 - **Reason:** The image uses the Ubuntu release of the CI jobs (D162). A new major version of PostgreSQL cannot open the data folder of the previous version. Thus a change of the Compose file to a new major version needs a migration procedure first.
 - **Other options:** All version updates, with a review of each request.
+
+## D169. typst-ide for the editor functions of the embedded engine
+
+- **Status:** Accepted, 2026-11-18. **Origin:** Project owner.
+- **Decision:** The embedded engine uses the `typst-ide` crate of the Typst project for the jumps between source and pages, completion, tooltips, and go to definition. It has the same version as the other Typst crates. Each compilation keeps a copy of the world and of the document. The editor functions use this copy. Thus they do not wait for a compilation that runs.
+- **Reason:** The Typst web app and the Typst language servers use the same code. All dependencies of `typst-ide` are already in the workspace through the other Typst crates, so it adds only one crate.
+- **Other options:** Code of our own for each function, on the syntax tree and the document.
+
+## D170. A click on a web link in the preview goes to the source
+
+- **Status:** Accepted, 2026-11-18. **Origin:** Project owner.
+- **Decision:** A click on the text of a web link in the preview moves the cursor to that text, as a click on other text does. A click on a link to a label or to a position scrolls the preview to the target of the link.
+- **Reason:** The preview is a proof. A click on its text always goes to the source.
+- **Other options:** Open the address in the browser of the system. Show the address in a note.
+
+## D171. Details of the jumps between source and pages
+
+- **Status:** Accepted, 2026-11-19. **Origin:** Default.
+- **Decision:**
+  - The preview follows the cursor only when the cursor moves and the text does not change.
+  - The mark is a ring in the accent color. It shows for 1.5 seconds.
+  - The preview scrolls only when the position is not in the middle two thirds of the visible part. Then the position goes to one third of the height.
+  - After a jump to the source, the editor gets the keyboard focus, and the preview marks the new cursor position.
+  - A click on text of another file shows a note with the name of the file, because the editor shows only the main file.
+  - The jumps use the positions of the last compilation that gave pages, also when the text changed after it. The cursor goes to the nearest valid position.
+- **Reason:** The preview does not move while you type, and a short mark does not hide the text. A jump that is a few characters wrong is more useful than no jump while the text has an error.
+- **Other options:** Follow the cursor also while you type. A mark that stays until the next move. No jumps while the text is different from the compilation.
