@@ -73,8 +73,9 @@ Until the project model is ready, the Write workspace shows a scratch document. 
 | Ctrl+Shift+L | Select all places of the selected text. |
 | Ctrl+Alt+Up and Ctrl+Alt+Down | Add a cursor on the line above or below. |
 | Escape | With many cursors, keep only the primary cursor. |
+| Ctrl+Shift+[ and Ctrl+Shift+] | Fold or unfold the part of the text at the cursor. |
 
-On macOS, Cmd replaces Ctrl in shortcuts, and Alt replaces Ctrl for word movement and word deletion. Cmd+Left and Cmd+Right move to the start or the end of the line. Ctrl+Space stays Ctrl+Space, because Cmd+Space opens Spotlight. Cmd+Option+F opens the replace row, because Cmd+H hides the application. Cmd+Option+Up and Cmd+Option+Down add cursors.
+On macOS, Cmd replaces Ctrl in shortcuts, and Alt replaces Ctrl for word movement and word deletion. Cmd+Left and Cmd+Right move to the start or the end of the line. Ctrl+Space stays Ctrl+Space, because Cmd+Space opens Spotlight. Cmd+Option+F opens the replace row, because Cmd+H hides the application. Cmd+Option+Up and Cmd+Option+Down add cursors. Cmd+Option+[ and Cmd+Option+] fold and unfold.
 
 Click to move the cursor. Double-click to select a word, and triple-click to select a line. Drag to select text. Shift+click extends the selection. Ctrl+click a name to go to its definition. On macOS, use Cmd+click. Alt+click adds a cursor. On macOS, use Option+click.
 
@@ -125,6 +126,16 @@ You can edit the text at many places at the same time (D178).
 - If you paste as many lines as there are cursors, each cursor gets one line. Otherwise, each cursor gets all of the text.
 - Escape keeps only the primary cursor. The primary cursor is the cursor that you added last. Undo restores all the cursors.
 - A click without Alt, the find bar, completion, and go to definition use the primary cursor and go back to one cursor.
+
+### Folding
+
+You can fold parts of the text to hide them (D179).
+
+- A heading folds its text until the next heading of the same level or a higher level. A block in brackets, a raw block, an equation, and a comment fold the lines between their first line and their last line.
+- Move the mouse pointer over the line numbers to see an arrow next to each part that can fold. Click the arrow to fold the part. Push Ctrl+Shift+[ to fold the part at the cursor.
+- A folded line shows an arrow that points to the right and a box with three dots after its text. To unfold the part, click the arrow or the box, or push Ctrl+Shift+] on the line.
+- The arrow keys go over folded text. If the cursor goes into folded text in a different way, for example from the find bar or from a click in the preview, the text unfolds.
+- Folds move with the changes of the text. Presswork does not keep the folds after you close the document.
 
 ### Syntax colors
 

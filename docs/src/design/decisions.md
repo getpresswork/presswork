@@ -1300,3 +1300,17 @@ Do not change what an accepted decision says. You can correct its language. To c
   - Completion, the find bar, and go to definition use the primary cursor.
 - **Reason:** These are the keys of Visual Studio Code, which many writers of Typst use. Text lines and character columns do not change when the width of the editor changes.
 - **Other options:** Alt+drag for a column of cursors. Shift+Alt+Up and Shift+Alt+Down on Linux, where some desktops use Ctrl+Alt+Up and Ctrl+Alt+Down. Find text without a difference between capital and small letters.
+
+## D179. Details of folding
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - A heading at the top level of the document folds until the next heading with the same depth or a smaller depth. Blank lines at the end of the part stay visible.
+  - Code blocks, content blocks, arguments, parameters, arrays, dictionaries, expressions in parentheses, raw blocks, equations, and block comments on three or more lines fold the lines between their first line and their last line. Thus the closing bracket stays visible.
+  - If more parts start on one line, the longest part folds.
+  - The arrows are between the line numbers and the text. A folded line always shows its arrow. The other arrows show only while the mouse pointer is over the line numbers. A box with three dots after a folded line also unfolds it.
+  - Ctrl+Shift+[ folds the smallest part around the cursor that is not folded. Ctrl+Shift+] unfolds the fold of the cursor line. On macOS, Cmd+Option+[ and Cmd+Option+].
+  - A fold that hides the cursor moves the cursor to the end of the folded line. The arrow keys go over a fold. Other moves into a fold, for example from the find bar, unfold it.
+  - Folds move with all changes of the text. A change that removes the folded text also removes the fold. Presswork does not save the folds.
+- **Reason:** These are the parts and the keys of Visual Studio Code. The outline already gives the structure of the document, so folding is for the work on one part.
+- **Other options:** Commands that fold or unfold all parts. Folds that the project keeps. The number of hidden lines in the box after a folded line.
