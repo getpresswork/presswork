@@ -120,6 +120,11 @@ impl Editor {
                 self.select_range(line, now)
             }
             Action::Insert(text) => self.replace_selection(&text, now),
+            Action::Replace {
+                range,
+                text,
+                select,
+            } => self.replace(range, &text, select, now),
             Action::Newline => {
                 let head = self.document.selection().primary().head;
                 let text = format!(
@@ -189,6 +194,33 @@ impl Editor {
             .collect();
         let selection = Selection::new(cursors, selection.primary_index());
         self.change(Transaction::new(changes).with_selection(selection), now)
+    }
+
+    fn replace(
+        &mut self,
+        range: std::ops::Range<Position>,
+        text: &str,
+        select: std::ops::Range<usize>,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
+        let len = self.document.buffer().len();
+        let start = range.start.offset().min(len);
+        let end = range.end.offset().clamp(start, len);
+        let changes = ChangeSet::new(
+            len,
+            [Edit::replace(
+                Position::new(start)..Position::new(end),
+                text,
+            )],
+        )?;
+        let selection = SelectionRange::new(
+            Position::new(start + select.start.min(text.len())),
+            Position::new(start + select.end.min(text.len())),
+        );
+        self.change(
+            Transaction::new(changes).with_selection(Selection::single(selection)),
+            now,
+        )
     }
 
     fn delete(&mut self, deletion: Deletion, now: Instant) -> Result<Option<ChangeSet>, TextError> {
@@ -570,5 +602,34 @@ mod tests {
     #[test]
     fn selected_text_gives_the_text_of_the_selection() {
         assert_eq!(editor("a[bc|d").selected_text(), "bc");
+    }
+
+    fn replace(start: usize, end: usize, text: &str, select: std::ops::Range<usize>) -> Action {
+        Action::Replace {
+            range: Position::new(start)..Position::new(end),
+            text: text.to_owned(),
+            select,
+        }
+    }
+
+    #[test]
+    fn replace_puts_new_text_in_a_range_and_selects_a_part_of_it() {
+        assert_eq!(
+            after("#te|", &[replace(1, 3, "rgb(r, g, b)", 4..5)]),
+            "#rgb([r|, g, b)"
+        );
+    }
+
+    #[test]
+    fn replace_with_an_empty_selection_puts_the_cursor_in_the_new_text() {
+        assert_eq!(after("#te|", &[replace(1, 3, "text()", 5..5)]), "#text(|)");
+    }
+
+    #[test]
+    fn a_replacement_is_one_undo_step() {
+        assert_eq!(
+            after("#te|", &[replace(1, 3, "text()", 5..5), Action::Undo]),
+            "#te|"
+        );
     }
 }

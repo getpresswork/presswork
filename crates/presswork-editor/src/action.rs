@@ -1,7 +1,14 @@
+use std::ops::Range;
+
 use presswork_text::Position;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
+    Replace {
+        range: Range<Position>,
+        text: String,
+        select: Range<usize>,
+    },
     Move {
         motion: Motion,
         extend: bool,
