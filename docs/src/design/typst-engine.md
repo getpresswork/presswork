@@ -75,6 +75,7 @@ The editor underlines the range. The diagnostics panel shows a list of all diagn
 - Each page frame has a hash. The engine renders a page again only if its hash changes.
 - The preview asks for the visible pages first.
 - At high zoom levels, the engine renders tiles of a page, not the full page.
+- While the guides of the preview are on, the engine renders the bleed around each page and tells the preview the size of the bleed (D181).
 
 In milestone 1, the engine has these limits:
 

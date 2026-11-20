@@ -1326,3 +1326,10 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The thumbnails use the same page images as the preview. Thus they need no more rendering, but small text in them can look rough.
 - **Reason:** Typesetters check facing pages, and thumbnails give a fast way through a long document. Images that the preview already has keep compilations fast.
 - **Other options:** Spreads for books that open from right to left. Printed page numbers below the thumbnails. Separate small images for the thumbnails. A grid of thumbnails in place of the pages.
+
+## D181. Guides for the bleed and the trim line
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Project owner.
+- **Decision:** The **Guides** button of the preview renders the pages with their bleed, from `page(bleed: ..)`, and draws the trim box as a line of 1 pixel in the guide color. The engine renders the bleed only while the guides are on, so a switch compiles the document again. Clicks and marks use the coordinates of the trimmed page. The project owner also chose the text area, but the preview does not show it yet: Typst 0.15 does not give the margins of a page, and the body of a page is a separate group in the output only when other content comes before it, for example a header.
+- **Reason:** The bleed and the trim line come exactly from the Typst output. A text area that is correct on only some pages can give typesetters wrong information.
+- **Other options:** The text area as the box around the content of each page. Margins from the project manifest. The text area only on the pages where the output gives it.
