@@ -15,6 +15,20 @@ pub struct Output {
 }
 
 #[must_use]
+pub fn analyze(world: &Mutex<World>, text: &str) -> Output {
+    let start = Instant::now();
+    let mut world = world.lock().unwrap_or_else(PoisonError::into_inner);
+    world.set_main_text(text);
+    let compilation = compile(&world);
+    Output {
+        pages: None,
+        diagnostics: compilation.diagnostics,
+        duration: start.elapsed(),
+        analysis: Some(Analysis::new(world.clone(), compilation.document)),
+    }
+}
+
+#[must_use]
 pub fn run(world: &Mutex<World>, text: &str, pixel_per_pt: f32, bleed: bool) -> Output {
     let start = Instant::now();
     let mut world = world.lock().unwrap_or_else(PoisonError::into_inner);
@@ -67,6 +81,25 @@ mod tests {
 
         let page = &output.pages.unwrap()[0];
         assert_eq!((page.width, page.height), (110, 60));
+    }
+
+    #[test]
+    fn an_analysis_compiles_without_page_images() {
+        let output = analyze(&world(), "One.\n#pagebreak()\nTwo.");
+
+        assert_eq!(output.pages, None);
+        assert!(
+            output
+                .analysis
+                .unwrap()
+                .export(&crate::ExportSettings {
+                    format: crate::Format::Svg,
+                    standards: Vec::new(),
+                    pixel_per_pt: 1.0,
+                    date: None,
+                })
+                .is_ok_and(|files| files.len() == 2)
+        );
     }
 
     #[test]

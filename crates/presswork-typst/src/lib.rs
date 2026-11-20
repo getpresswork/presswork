@@ -17,7 +17,7 @@ pub use compile::{Compilation, Diagnostic, Severity, compile};
 pub use export::{ExportError, ExportSettings, Format, export};
 pub use fonts::Fonts;
 pub use ide::{Analysis, Jump, PagePoint};
-pub use job::{Output, run};
+pub use job::{Output, analyze, run};
 pub use outline::{Heading, LabelKind, LabelTarget, SourceRange};
 pub use preflight::{Problem, ProblemKind};
 pub use program::{Program, ProgramError, Stop};
