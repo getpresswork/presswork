@@ -15,6 +15,19 @@ The `presswork-cli` program uses the same engine as the desktop application. It 
 
 CI systems can use the command-line tool to check and build publications.
 
+In milestone 2, the program has the `build` and `check` commands (D183):
+
+- The last argument is the project folder. The default is the current folder.
+- `--profile NAME` selects an export profile. To select more profiles, give the option again. Without the option, the command uses all profiles of the manifest. If the manifest has no profiles, the command uses one PDF profile, as the Publish workspace does.
+- `build` compiles the project and writes the files of the profiles. It writes the path of each new file to the standard output, one path on each line.
+- `check` compiles the project and runs preflight. It writes no files. The quote checker, the spell checker, and the house style rules come later.
+- Errors, warnings, and preflight problems go to the standard error stream, one on each line, for example `chapters/one.typ:12:5: error: unknown variable: x`. Lines and columns start at 1. Preflight problems are warnings.
+- The exit code is 0 for success and 1 for a failure. `check` fails if the document has errors or preflight problems. `build` fails if the document has errors or if a profile cannot write its files. Preflight problems do not stop `build`.
+- If the Typst pin of the project does not accept the built-in Typst version, the command stops.
+- `presswork-cli --help` shows all options.
+
+The release packages do not contain the command-line tool yet. To install it from the source code, run `cargo install --path crates/presswork-cli` in the repository.
+
 ## API
 
 The server API is public. An OpenAPI description documents it. Refer to [Server](server.md). Personal access tokens give scripts access to the API.

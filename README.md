@@ -48,6 +48,14 @@ For the server, use the container image `ghcr.io/getpresswork/presswork-server` 
    cargo run --package presswork
    ```
 
+4. To build and check projects without a window, install the command-line tool:
+
+   ```sh
+   cargo install --path crates/presswork-cli
+   ```
+
+   Then run `presswork-cli build` or `presswork-cli check` in a project folder.
+
 ## Contribute
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -69,6 +69,8 @@ The engine changes each Typst diagnostic into a Presswork diagnostic with these 
 
 The editor underlines the range. The diagnostics panel shows a list of all diagnostics. A click on a diagnostic moves the cursor to its range.
 
+In milestone 2, a diagnostic has the file of its source and the byte range in that file. The editor shows only the main file, so it marks only the diagnostics of the main file. The command-line tool shows the file, the line, and the column of each diagnostic.
+
 ## Page images
 
 - The engine renders pages to images with `typst-render`. The scale is the zoom level multiplied by the scale factor of the screen.

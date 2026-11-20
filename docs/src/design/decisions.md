@@ -1349,3 +1349,18 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The result of an export stays until the next export with the same profile or until you open a different project. A result that comes after you open a different project does not show.
 - **Reason:** Most projects need only one PDF file, so a project without profiles can export without a change to the manifest. A profile must not write over files outside the project. Preflight needs the document model of the built-in engine. Problems are information for the typesetter, and a proof with problems is frequently necessary.
 - **Other options:** Exports with a managed toolchain through `typst compile`. Exports of the saved files only. A fixed date from the manifest for reproducible files. Preflight problems that stop an export. A dialog that asks for the output path.
+
+## D183. Details of the command-line tool
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - In milestone 2, `presswork-cli` has two commands: `build` and `check`. Each command takes the project folder (the current folder by default) and `--profile NAME`, which you can give more than one time.
+  - The program uses the built-in Typst engine and the fonts of Presswork, as the desktop application does. If the Typst pin of the project does not accept the built-in version, the program stops with a message.
+  - Messages go to the standard error stream in the form `file:line:column: severity: message`, which most editors and CI systems can read. The file path starts with the project folder as you gave it. A message without a known place has only the severity and the text. `build` writes the paths of the new files to the standard output.
+  - Exit code 0 is success and 1 is a failure. `check` fails on document errors and on preflight problems. `build` fails on document errors and when a profile cannot write its files. After a profile fails, `build` continues with the other profiles. Preflight problems do not stop `build`, as in the Publish workspace (D182).
+  - Preflight runs one time, with the highest `image-ppi` of the selected profiles. A resolution problem gives the name of the profile with that limit.
+  - The messages of the program are in a Fluent file (D18). The help text comes from clap (D110).
+  - The export rules are in `presswork-project` and `presswork-typst`: the PDF profile of a project without profiles, the output paths, and the refusal of paths outside the project folder. The desktop application and the command-line tool use the same code.
+  - The release packages do not contain the program yet. You can install it with `cargo install --path crates/presswork-cli`. The packages get it after the release of 0.1.0.
+- **Reason:** CI systems need a command that fails on problems and messages in a form that their tools can read. One preflight run gives each problem one time. A change to the release workflow just before the first release can stop that release.
+- **Other options:** Preflight for each profile, with the same problem one time for each profile. JSON output. Exports with managed toolchains through `typst compile`. The commands in the desktop program. The program in the release packages now.
