@@ -6,12 +6,13 @@ use typst::foundations::{Content, NativeElement as _, Smart, StyleChain};
 use typst::introspection::Introspector as _;
 use typst::math::EquationElem;
 use typst::model::{FigureElem, FigureKind, HeadingElem, Numbering, TableElem};
-use typst::syntax::Span;
+use typst::syntax::{DiagSpan, Span};
 use typst::text::RawElem;
 use typst::{World as _, WorldExt as _};
 use typst_layout::PagedDocument;
 
 use crate::ide::{Analysis, PagePoint, project_path};
+use crate::world::World;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceRange {
@@ -102,13 +103,18 @@ impl Analysis {
     }
 
     pub(crate) fn source_range(&self, span: Span) -> Option<SourceRange> {
-        let id = span.id()?;
-        let range = self.world().range(span)?;
-        if id == self.world().main() {
-            Some(SourceRange::Main(range))
-        } else {
-            Some(SourceRange::File(project_path(id)?, range))
-        }
+        source_range(self.world(), span)
+    }
+}
+
+pub(crate) fn source_range(world: &World, span: impl Into<DiagSpan>) -> Option<SourceRange> {
+    let span = span.into();
+    let id = span.id()?;
+    let range = world.range(span)?;
+    if id == world.main() {
+        Some(SourceRange::Main(range))
+    } else {
+        Some(SourceRange::File(project_path(id)?, range))
     }
 }
 

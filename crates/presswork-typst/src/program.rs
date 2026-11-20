@@ -12,6 +12,7 @@ use typst::syntax::Lines;
 
 use crate::compile::{Diagnostic, Severity};
 use crate::job::Output;
+use crate::outline::SourceRange;
 use crate::render::PageImage;
 
 const PIXELS_PER_INCH: &str = "144";
@@ -191,7 +192,7 @@ fn parse_diagnostics(output: &str, text: &str) -> Vec<Diagnostic> {
                 .map(|start| start..start + token_length(&text[start..]));
             Some(Diagnostic {
                 severity,
-                range,
+                source: range.map(SourceRange::Main),
                 message: message.to_owned(),
                 hints: Vec::new(),
             })
@@ -379,7 +380,7 @@ mod tests {
             diagnostics,
             [Diagnostic {
                 severity: Severity::Error,
-                range: Some(11..23),
+                source: Some(SourceRange::Main(11..23)),
                 message: "unknown variable: unknown-name".to_owned(),
                 hints: Vec::new(),
             }]
@@ -397,7 +398,7 @@ mod tests {
         );
 
         assert_eq!(diagnostics[0].severity, Severity::Warning);
-        let range = diagnostics[0].range.clone().unwrap();
+        let range = diagnostics[0].main_range().cloned().unwrap();
         assert_eq!(&text[range], "\"No Such Font\"");
     }
 
@@ -408,11 +409,11 @@ mod tests {
             "Text.",
         );
 
-        let ranges: Vec<_> = diagnostics
+        let sources: Vec<_> = diagnostics
             .iter()
-            .map(|diagnostic| diagnostic.range.clone())
+            .map(|diagnostic| diagnostic.source.clone())
             .collect();
-        assert_eq!(ranges, [None, None]);
+        assert_eq!(sources, [None, None]);
         assert_eq!(diagnostics[1].message, "input file not found");
     }
 
@@ -504,7 +505,7 @@ mod tests {
         let output = program.run(root.path(), text, &stop).unwrap();
 
         assert_eq!(output.pages.map(|pages| pages.len()), Some(2));
-        let range = output.diagnostics[0].range.clone().unwrap();
+        let range = output.diagnostics[0].main_range().cloned().unwrap();
         assert_eq!(&text[range], "\"No Such Font\"");
 
         let failed = program.run(root.path(), "#unknown-name", &stop).unwrap();

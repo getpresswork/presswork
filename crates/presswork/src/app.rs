@@ -300,7 +300,7 @@ impl App {
             .diagnostics
             .iter()
             .filter_map(|diagnostic| {
-                let range = diagnostic.range.as_ref()?;
+                let range = diagnostic.main_range()?;
                 Some(Mark {
                     range: Position::new(range.start)..Position::new(range.end),
                     kind: match diagnostic.severity {
@@ -322,7 +322,7 @@ impl App {
                     .iter()
                     .find(|diagnostic| diagnostic.severity == Severity::Error)
             })
-            .and_then(|diagnostic| diagnostic.range.as_ref())
+            .and_then(Diagnostic::main_range)
             .map(|range| range.start)
         else {
             return;
@@ -1307,7 +1307,7 @@ impl App {
         Output {
             diagnostics: vec![Diagnostic {
                 severity: Severity::Error,
-                range: None,
+                source: None,
                 message: self.localizer.format("preview-program-error", &args),
                 hints: Vec::new(),
             }],
@@ -1322,7 +1322,7 @@ impl App {
             .find(|diagnostic| diagnostic.severity == Severity::Error)?;
         let mut args = FluentArgs::new();
         args.set("message", error.message.clone());
-        let Some(range) = &error.range else {
+        let Some(range) = error.main_range() else {
             return Some(self.localizer.format("preview-error-without-line", &args));
         };
         let line = self
@@ -2075,7 +2075,7 @@ mod tests {
     fn error_at(offset: usize) -> Diagnostic {
         Diagnostic {
             severity: Severity::Error,
-            range: Some(offset..offset + 1),
+            source: Some(SourceRange::Main(offset..offset + 1)),
             message: "unknown variable: x".to_owned(),
             hints: Vec::new(),
         }
@@ -3197,7 +3197,7 @@ mod tests {
         let line_two = app.editor.document().buffer().line_start(1).offset();
         let error = Diagnostic {
             severity: Severity::Error,
-            range: Some(line_two..line_two + 1),
+            source: Some(SourceRange::Main(line_two..line_two + 1)),
             message: "unknown variable: x".to_owned(),
             hints: Vec::new(),
         };
