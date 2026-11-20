@@ -181,6 +181,11 @@ In milestone 1, the preview does these things:
 - If the text has errors, the preview continues to show the last pages without errors. A bar above the pages shows the first error and its line.
 - A button in the toolbar of the preview opens the preview in its own window, for example on a second screen. The editor then uses the full width of the main window. To show the preview beside the editor again, close the preview window or click its button. If you close the main window, Presswork closes.
 
+In milestone 2, the preview also does these things (D180):
+
+- The **Spreads** button (a book) shows facing pages side by side, as in a printed book. The first page is a right-hand page alone. Then each spread has the next page on the left and the page after it on the right. Fit width then fits two pages.
+- The **Thumbnails** button (a panel at the left of the toolbar) shows small images of all pages at the left of the preview. Click a thumbnail to scroll the preview to its page. The thumbnail of the page in the middle of the preview has the accent color.
+
 ## Source and pages
 
 The embedded engine connects the points on the pages to the source, and the source positions to the pages (D169).

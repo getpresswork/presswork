@@ -1314,3 +1314,15 @@ Do not change what an accepted decision says. You can correct its language. To c
   - Folds move with all changes of the text. A change that removes the folded text also removes the fold. Presswork does not save the folds.
 - **Reason:** These are the parts and the keys of Visual Studio Code. The outline already gives the structure of the document, so folding is for the work on one part.
 - **Other options:** Commands that fold or unfold all parts. Folds that the project keeps. The number of hidden lines in the box after a folded line.
+
+## D180. Details of spreads and thumbnails
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - Spreads are for books that open from left to right. The first page is alone on the right. Then each spread has an even page on the left and an odd page on the right. The pages touch at the middle, and pages of different widths align at the middle. Fit width fits the width of two pages.
+  - The thumbnails are in a strip of 120 pixels at the left of the preview. Each thumbnail is 72 pixels wide, with the position of the page below it. A click scrolls the preview until the top of the page is at the top of the view.
+  - The current thumbnail is the page in the middle of the view. In spreads, it is the first page of the spread.
+  - Spreads and thumbnails are off when Presswork starts. Presswork does not save these settings.
+  - The thumbnails use the same page images as the preview. Thus they need no more rendering, but small text in them can look rough.
+- **Reason:** Typesetters check facing pages, and thumbnails give a fast way through a long document. Images that the preview already has keep compilations fast.
+- **Other options:** Spreads for books that open from right to left. Printed page numbers below the thumbnails. Separate small images for the thumbnails. A grid of thumbnails in place of the pages.
