@@ -11,6 +11,7 @@ mod live_session;
 mod log_panel;
 mod logging;
 mod menu;
+mod outline_panel;
 #[cfg(test)]
 mod screens;
 mod server_dialog;

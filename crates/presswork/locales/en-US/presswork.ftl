@@ -161,6 +161,11 @@ label-kind-other = Labeled element
 completion-label-page = { $kind }, page { $page }
 completion-label-text = { $place }: { $text }
 
+outline-title = Outline
+outline-toggle = Outline
+outline-empty = The document has no headings.
+outline-needs-engine = The outline is available only with the built-in Typst engine.
+
 logs-toggle = Logs
 logs-title = Logs
 logs-level-error = Error

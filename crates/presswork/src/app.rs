@@ -24,6 +24,7 @@ use presswork_text::{ChangeSet, Position, Unit};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
     Analysis, Diagnostic, Jump, LabelKind, LabelTarget, Output, PagePoint, Program, Severity,
+    SourceRange,
 };
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
@@ -40,6 +41,7 @@ use crate::library_view::{self, LibraryView};
 use crate::live_session::{self, LiveSession};
 use crate::log_panel::{self, LogPanel};
 use crate::menu;
+use crate::outline_panel::{self, OutlinePanel};
 use crate::server_dialog::{self, ServerDialog};
 use crate::task_list::{self, TaskList};
 use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
@@ -69,6 +71,7 @@ pub(crate) struct App {
     compiled: Option<Arc<Output>>,
     compiled_revision: Option<u64>,
     pages_analysis: Option<Analysis>,
+    outline: OutlinePanel,
     hovered: Option<Position>,
     tooltip: Option<presswork_editor::Tooltip>,
     completions: Option<presswork_editor::CompletionList>,
@@ -124,6 +127,7 @@ pub(crate) enum Message {
         error: String,
     },
     Preview(presswork_preview::Action),
+    Outline(outline_panel::Message),
     OpenFolder,
     FolderPicked(Option<PathBuf>),
     Save,
@@ -166,6 +170,7 @@ impl App {
             compiled: None,
             compiled_revision: None,
             pages_analysis: None,
+            outline: OutlinePanel::default(),
             hovered: None,
             tooltip: None,
             completions: None,
@@ -325,9 +330,7 @@ impl App {
                 self.project = Some(opened.project);
                 let backend = self.backend();
                 self.compiler.open(&root, &main, backend);
-                self.preview = Preview::default();
-                self.compiled = None;
-                self.pages_analysis = None;
+                self.clear_pages();
                 self.notice = None;
                 self.workspace = Workspace::Write;
                 self.request_compile()
@@ -360,13 +363,18 @@ impl App {
         self.saved = self.editor.revision();
         self.project = None;
         self.compiler.scratch();
+        self.clear_pages();
+        self.notice = None;
+        self.workspace = Workspace::Write;
+        Task::batch([self.request_compile(), self.load_library()])
+    }
+
+    fn clear_pages(&mut self) {
         self.preview = Preview::default();
         self.compiled = None;
         self.compiled_revision = None;
         self.pages_analysis = None;
-        self.notice = None;
-        self.workspace = Workspace::Write;
-        Task::batch([self.request_compile(), self.load_library()])
+        self.outline.set_headings(Vec::new());
     }
 
     fn load_library(&self) -> Task<Message> {
@@ -485,6 +493,39 @@ impl App {
             action => self.preview.perform(action),
         }
         Task::none()
+    }
+
+    fn outline_message(&mut self, message: outline_panel::Message) -> Task<Message> {
+        match message {
+            outline_panel::Message::Toggle => {
+                self.outline.toggle();
+                Task::none()
+            }
+            outline_panel::Message::Select(index) => self.go_to_heading(index),
+        }
+    }
+
+    fn go_to_heading(&mut self, index: usize) -> Task<Message> {
+        let Some(heading) = self.outline.heading(index).cloned() else {
+            return Task::none();
+        };
+        let preview = match heading.point {
+            Some(point) => self.preview.show_point(point, Instant::now()),
+            None => Task::none(),
+        };
+        match heading.source {
+            Some(SourceRange::Main(range)) => {
+                self.move_cursor(range.start);
+                Task::batch([operation::focus(EDITOR), preview])
+            }
+            Some(SourceRange::File(path, _)) => {
+                let mut args = FluentArgs::new();
+                args.set("file", path.display().to_string());
+                self.notice = Some(self.localizer.format("preview-jump-other-file", &args));
+                preview
+            }
+            None => preview,
+        }
     }
 
     fn assist_message(&mut self, message: Message) -> Task<Message> {
@@ -927,10 +968,7 @@ impl App {
             return Task::none();
         }
         tracing::info!(backend = ?self.compiler.backend(), "Typst engine changed");
-        self.preview = Preview::default();
-        self.compiled = None;
-        self.compiled_revision = None;
-        self.pages_analysis = None;
+        self.clear_pages();
         self.request_compile()
     }
 
@@ -1011,6 +1049,11 @@ impl App {
         self.preview.set_problem(self.problem(&output));
         if output.pages.is_some() {
             self.pages_analysis.clone_from(&output.analysis);
+            self.outline.set_headings(
+                self.pages_analysis
+                    .as_ref()
+                    .map_or_else(Vec::new, Analysis::outline),
+            );
         }
         self.compiled = Some(output);
         if self.compiler.finish() {
@@ -1116,6 +1159,7 @@ impl App {
                 return self.show_output(generation, revision, output);
             }
             Message::Preview(action) => return self.preview_action(action),
+            Message::Outline(message) => return self.outline_message(message),
             Message::ToggleMenu => self.menu_open = !self.menu_open,
             Message::CloseMenu => self.menu_open = false,
             Message::MenuItem(item) => {
@@ -1412,16 +1456,29 @@ impl App {
                 .on_complete(Message::Complete)
                 .completions(self.completions.as_ref())
                 .on_definition(Message::Definition);
+            let mut panes = row![];
+            if self.outline.is_open() {
+                let note = (self.compiler.backend() != &Backend::Embedded)
+                    .then(|| self.localizer.text("outline-needs-engine"));
+                panes = panes
+                    .push(
+                        self.outline
+                            .view(&self.localizer, self.cursor().offset(), note)
+                            .map(Message::Outline),
+                    )
+                    .push(rule::vertical(1).style(style::hairline));
+            }
             if self.preview_window.is_some() {
-                return container(editor).width(Fill).height(Fill).into();
+                return panes
+                    .push(container(editor).width(Fill).height(Fill))
+                    .into();
             }
             let preview = self.preview.view(self.preview_text(), Message::Preview);
-            return row![
-                container(editor).width(FillPortion(1)).height(Fill),
-                rule::vertical(1).style(style::hairline),
-                container(preview).width(FillPortion(1)).height(Fill),
-            ]
-            .into();
+            return panes
+                .push(container(editor).width(FillPortion(1)).height(Fill))
+                .push(rule::vertical(1).style(style::hairline))
+                .push(container(preview).width(FillPortion(1)).height(Fill))
+                .into();
         }
         let content = column![
             icon(workspace.icon())
@@ -1518,6 +1575,11 @@ impl App {
                     indicators.push(status_text(self.localizer.format("status-compiled", &args)));
             }
             indicators = indicators.push(status_text(self.cursor_position()));
+            indicators = indicators.push(
+                self.outline
+                    .toggle_button(&self.localizer)
+                    .map(Message::Outline),
+            );
         }
         if self.live.as_ref().and_then(LiveSession::chat).is_some() {
             indicators = indicators.push(self.chat_button());
@@ -2145,6 +2207,99 @@ mod tests {
             let id = label_kind_id(kind);
             assert_ne!(localizer.text(id), id);
         }
+    }
+
+    const CHAPTERS: &str = "= One\nText.\n#pagebreak()\n= Two\nMore.";
+
+    fn click_in<S>(app: &mut App, selector: S)
+    where
+        S: iced_test::Selector + Send,
+        S::Output: iced_test::selector::Bounded + Clone + Send + Sync + 'static,
+    {
+        let mut ui = simulator(app.view());
+        ui.click(selector).unwrap();
+        let messages: Vec<Message> = ui.into_messages().collect();
+        for message in messages {
+            send(app, message);
+        }
+    }
+
+    #[test]
+    fn the_outline_shows_the_headings_of_the_pages() {
+        let app = compiled_app(CHAPTERS);
+
+        let mut ui = simulator(app.view());
+
+        assert!(ui.find("One").is_ok());
+        assert!(ui.find("Two").is_ok());
+    }
+
+    #[test]
+    fn a_click_on_a_heading_moves_the_cursor_and_marks_its_page() {
+        let mut app = compiled_app(CHAPTERS);
+
+        click_in(&mut app, "Two");
+
+        assert_eq!(app.cursor(), Position::new(CHAPTERS.find("= Two").unwrap()));
+        assert_eq!(app.preview.marked().map(|point| point.page), Some(1));
+    }
+
+    #[test]
+    fn a_heading_in_another_file_names_the_file() {
+        let folder = project_folder(&[
+            ("presswork.toml", "[project]\nname = \"The Book\"\n"),
+            ("main.typ", "#include \"part.typ\""),
+            ("part.typ", "= Part"),
+        ]);
+        let mut app = app();
+        open(&mut app, &folder);
+        app.compile_now();
+
+        click_in(&mut app, "Part");
+
+        assert!(
+            app.notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("part.typ")),
+            "{:?}",
+            app.notice
+        );
+    }
+
+    #[test]
+    fn the_outline_button_closes_and_opens_the_outline() {
+        let mut app = compiled_app(CHAPTERS);
+
+        click_in(&mut app, iced_test::selector::id(outline_panel::TOGGLE));
+        assert!(simulator(app.view()).find("One").is_err());
+
+        click_in(&mut app, iced_test::selector::id(outline_panel::TOGGLE));
+        assert!(simulator(app.view()).find("One").is_ok());
+    }
+
+    #[test]
+    fn without_the_built_in_engine_the_outline_tells_why_it_is_empty() {
+        let mut app = app();
+        app.compiler.set_backend(Backend::Program(Program::new(
+            PathBuf::from("typst"),
+            Version::new(0, 14, 2),
+        )));
+
+        let mut ui = simulator(app.view());
+
+        assert!(
+            ui.find("The outline is available only with the built-in Typst engine.")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn another_project_clears_the_outline() {
+        let mut app = compiled_app(CHAPTERS);
+
+        open(&mut app, &book());
+
+        assert!(simulator(app.view()).find("One").is_err());
     }
 
     const BINDING: &str = "#let gap = 1pt\n#gap";
