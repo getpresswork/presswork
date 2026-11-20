@@ -64,10 +64,27 @@ Until the project model is ready, the Write workspace shows a scratch document. 
 | Tab | Insert two spaces. |
 | Ctrl+A, Ctrl+C, Ctrl+X, and Ctrl+V | Select all, copy, cut, and paste. |
 | Ctrl+Z, and Ctrl+Y or Ctrl+Shift+Z | Undo and redo. |
+| Ctrl+Space | Show the completions at the cursor. |
 
-On macOS, Cmd replaces Ctrl in shortcuts, and Alt replaces Ctrl for word movement and word deletion. Cmd+Left and Cmd+Right move to the start or the end of the line.
+On macOS, Cmd replaces Ctrl in shortcuts, and Alt replaces Ctrl for word movement and word deletion. Cmd+Left and Cmd+Right move to the start or the end of the line. Ctrl+Space stays Ctrl+Space, because Cmd+Space opens Spotlight.
 
 Click to move the cursor. Double-click to select a word, and triple-click to select a line. Drag to select text. Shift+click extends the selection.
+
+### Tooltips
+
+If the mouse pointer stays on the text for half a second, the editor shows a tooltip for the item below the pointer. The tooltip comes from the embedded engine (D169). For example, it gives a short description of a function, or a length in other units. Code in a tooltip has the monospace font. The tooltip goes above the line, or below the line if there is no space above. If you move the pointer, push a key, or click, the tooltip closes.
+
+### Completion
+
+While you type Typst code, the editor shows completions, for example after `#`. To see the completions at the cursor, also in text, push Ctrl+Space.
+
+- The list shows the completions that start with the typed text, without a difference between capital and small letters. It shows eight items at a time.
+- Up and Down select an item. Enter or Tab inserts the selected item. A click on an item inserts it. Escape closes the list.
+- If a completion has placeholders, the editor selects the first placeholder. If the placeholder is empty, the cursor goes to its position. For example, `text` becomes `text()` with the cursor between the parentheses.
+- A box below the list gives the description of the selected item.
+- If you move the cursor, the list closes.
+
+Tooltips and completions use the text in the editor, also if it changed after the last compilation (D172).
 
 ### Syntax colors
 

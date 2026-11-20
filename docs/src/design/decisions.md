@@ -1222,3 +1222,16 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The jumps use the positions of the last compilation that gave pages, also when the text changed after it. The cursor goes to the nearest valid position.
 - **Reason:** The preview does not move while you type, and a short mark does not hide the text. A jump that is a few characters wrong is more useful than no jump while the text has an error.
 - **Other options:** Follow the cursor also while you type. A mark that stays until the next move. No jumps while the text is different from the compilation.
+
+## D172. Details of tooltips and completion
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - A tooltip shows after the mouse pointer stays on a glyph for 500 ms. It closes when the pointer moves, at a key, at a click, and at a turn of the mouse wheel.
+  - After each typed character, the editor asks for the completions at the cursor. `typst-ide` gives completions only where they apply, for example after `#`. Ctrl+Space asks also in text, on all platforms. A list that Ctrl+Space opened stays open while you type.
+  - The list shows the items that start with the typed text, without a difference between capital and small letters. It shows eight rows. A box below the list gives the description of the selected item.
+  - The editor anchors the list at the start of the typed text. Thus the list does not move while you type.
+  - Tooltips and completions run on a separate thread. A result that comes after the text or the cursor changed is not used.
+  - They use the result of the compilation that gave the shown pages, because its document gives the labels. If there are no pages, they use the last compilation.
+- **Reason:** These are the usual settings of code editors. A thread keeps typing fast, because a completion can compile the document again.
+- **Other options:** A fuzzy match of the typed text. A delay of one second for tooltips. Completions only on request.
