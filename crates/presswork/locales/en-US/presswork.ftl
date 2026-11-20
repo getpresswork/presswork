@@ -191,8 +191,8 @@ publish-no-project = Open a project to export it.
 publish-export = Export
 publish-exporting = Exporting…
 publish-exported = { $count ->
-    [one] Presswork wrote { $file }.
-   *[other] Presswork wrote { $count } files in { $folder }.
+    [one] Presswork wrote { $file } and the build report { $report }.
+   *[other] Presswork wrote { $count } files in { $folder } and the build report { $report }.
 }
 publish-project-folder = the project folder
 publish-needs-engine = The export is available only with the built-in Typst engine.

@@ -7,7 +7,7 @@ use presswork_project::{Colors, ExportProfile, Manifest, Project, ProjectError};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
     Diagnostic, Fonts, Output, Problem, ProblemKind, ProfileError, Rules, Severity, SourceRange,
-    World, analyze, now, today,
+    World, analyze, today,
 };
 
 use crate::cli::{Cli, Command, Target};
@@ -83,14 +83,12 @@ fn work(target: &Target, build: bool, console: &mut Console<'_>) -> Result<(), F
             Err(Failed)
         };
     }
-    let analysis = output.analysis.ok_or(Failed)?;
-    let date = now();
     let mut result = Ok(());
     for profile in &profiles {
-        match analysis.export_profile(profile, project.root(), &manifest.main, date) {
-            Ok(files) => {
-                for file in files {
-                    console.written(&places, &file);
+        match output.export_profile(profile, project.root(), &manifest.main) {
+            Ok(export) => {
+                for file in export.files.iter().chain([&export.report]) {
+                    console.written(&places, file);
                 }
             }
             Err(error) => result = Err(console.export_error(&places, profile, &error)),
@@ -402,7 +400,15 @@ mod tests {
         let ran = presswork(&["build", &argument(&folder)]);
 
         assert_eq!((ran.code, ran.err.as_str()), (SUCCESS, ""));
-        assert_eq!(ran.out, format!("{}\n", place(&folder, "main.pdf")));
+        assert_eq!(
+            ran.out,
+            format!(
+                "{}\n{}\n",
+                place(&folder, "main.pdf"),
+                place(&folder, "PDF.report.json")
+            )
+        );
+        assert!(folder.path().join("PDF.report.json").is_file());
         assert!(folder.path().join("main.pdf").is_file());
     }
 

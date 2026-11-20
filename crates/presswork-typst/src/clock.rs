@@ -1,3 +1,4 @@
+use jiff::Timestamp;
 use typst::foundations::Datetime;
 
 #[must_use]
@@ -10,9 +11,8 @@ pub fn today() -> Option<Datetime> {
     )
 }
 
-#[must_use]
-pub fn now() -> Option<Datetime> {
-    let time = jiff::Timestamp::now().to_zoned_datetime(jiff::tz::TimeZone::UTC);
+pub(crate) fn datetime(timestamp: Timestamp) -> Option<Datetime> {
+    let time = timestamp.to_zoned_datetime(jiff::tz::TimeZone::UTC);
     Datetime::from_ymd_hms(
         i32::from(time.year()),
         u8::try_from(time.month()).ok()?,
@@ -28,8 +28,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_clock_gives_the_date_and_the_time() {
+    fn the_clock_gives_the_date() {
         assert!(today().is_some());
-        assert!(now().is_some_and(|time| time.hour().is_some()));
+    }
+
+    #[test]
+    fn a_timestamp_becomes_a_typst_date_and_time_in_utc() {
+        let time = datetime(Timestamp::from_second(1_795_209_243).unwrap()).unwrap();
+
+        assert_eq!(
+            (
+                time.year(),
+                time.month(),
+                time.day(),
+                time.hour(),
+                time.minute()
+            ),
+            (Some(2026), Some(11), Some(20), Some(21), Some(14))
+        );
     }
 }

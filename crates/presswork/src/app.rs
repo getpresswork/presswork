@@ -2685,11 +2685,8 @@ mod tests {
         app.export_now(0);
 
         assert!(folder.path().join("main.pdf").is_file());
-        assert!(
-            simulator(app.view())
-                .find("Presswork wrote main.pdf.")
-                .is_ok()
-        );
+        assert!(folder.path().join("PDF.report.json").is_file());
+        assert!(simulator(app.view()).find(EXPORTED).is_ok());
     }
 
     #[test]
@@ -2721,16 +2718,15 @@ mod tests {
         open(&mut app, &first);
         publish(&mut app);
         app.export_now(0);
+        assert!(simulator(app.view()).find(EXPORTED).is_ok());
 
         open(&mut app, &second);
         publish(&mut app);
 
-        assert!(
-            simulator(app.view())
-                .find("Presswork wrote main.pdf.")
-                .is_err()
-        );
+        assert!(simulator(app.view()).find(EXPORTED).is_err());
     }
+
+    const EXPORTED: &str = "Presswork wrote main.pdf and the build report PDF.report.json.";
 
     const CATS: &str = "a cat and a cat";
 

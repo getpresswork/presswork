@@ -4,21 +4,15 @@ use std::time::Duration;
 
 use futures::channel::oneshot;
 use presswork_project::ExportProfile;
+pub(crate) use presswork_typst::Export;
 use presswork_typst::{
-    ExportError, Fonts, Output, Problem, ProfileError, Program, Rules, Scheduler, Stop, World,
-    today,
+    ExportError, Fonts, Output, ProfileError, Program, Scheduler, Stop, World, today,
 };
 
 pub(crate) const SCALE: f32 = 2.0;
 const PROGRAM_TIME_LIMIT: Duration = Duration::from_secs(120);
 
 static FONTS: LazyLock<Arc<Fonts>> = LazyLock::new(|| Arc::new(Fonts::embedded()));
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ExportReport {
-    pub(crate) files: Vec<PathBuf>,
-    pub(crate) problems: Vec<Problem>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ExportFailure {
@@ -155,7 +149,7 @@ impl Compiler {
         &self,
         text: &str,
         profile: &ExportProfile,
-    ) -> Result<ExportReport, ExportFailure> {
+    ) -> Result<Export, ExportFailure> {
         self.export_fn(profile.clone())(text)
     }
 
@@ -163,7 +157,7 @@ impl Compiler {
         &self,
         text: String,
         profile: ExportProfile,
-    ) -> impl Future<Output = Result<ExportReport, ExportFailure>> + Send + 'static {
+    ) -> impl Future<Output = Result<Export, ExportFailure>> + Send + 'static {
         let export = self.export_fn(profile);
         async move {
             let (sender, receiver) = oneshot::channel();
@@ -182,7 +176,7 @@ impl Compiler {
     fn export_fn(
         &self,
         profile: ExportProfile,
-    ) -> impl FnOnce(&str) -> Result<ExportReport, ExportFailure> + Send + 'static {
+    ) -> impl FnOnce(&str) -> Result<Export, ExportFailure> + Send + 'static {
         let engine = Arc::clone(&self.engine);
         let root = self.root.clone().unwrap_or_default();
         let main = self.main.clone();
@@ -194,11 +188,7 @@ impl Compiler {
             if let Some(path) = profile.outside(&main) {
                 return Err(ExportFailure::Outside(path));
             }
-            let output = presswork_typst::analyze(&engine, text);
-            let problems = output.preflight(&Rules::of(&profile));
-            let analysis = output.analysis.ok_or(ExportFailure::NoPages)?;
-            let files = analysis.export_profile(&profile, &root, &main, presswork_typst::now())?;
-            Ok(ExportReport { files, problems })
+            Ok(presswork_typst::analyze(&engine, text).export_profile(&profile, &root, &main)?)
         }
     }
 

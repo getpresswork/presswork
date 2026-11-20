@@ -9,7 +9,7 @@ use presswork_typst::{Problem, ProblemKind};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::{font, font_size, space as gap};
 
-use crate::compiler::{ExportFailure, ExportReport};
+use crate::compiler::{Export, ExportFailure};
 use crate::i18n::{FluentArgs, Localizer};
 
 const LIST_WIDTH: f32 = 640.0;
@@ -20,7 +20,7 @@ pub(crate) enum Message {
     Exported {
         index: usize,
         run: u64,
-        result: Result<ExportReport, ExportFailure>,
+        result: Result<Export, ExportFailure>,
     },
     ShowProblem(usize, usize),
 }
@@ -28,7 +28,7 @@ pub(crate) enum Message {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum State {
     Running(u64),
-    Done(ExportReport),
+    Done(Export),
     Failed(ExportFailure),
 }
 
@@ -48,12 +48,7 @@ impl PublishView {
         Some(self.runs)
     }
 
-    pub(crate) fn finish(
-        &mut self,
-        index: usize,
-        run: u64,
-        result: Result<ExportReport, ExportFailure>,
-    ) {
+    pub(crate) fn finish(&mut self, index: usize, run: u64, result: Result<Export, ExportFailure>) {
         if self.states.get(&index) != Some(&State::Running(run)) {
             return;
         }
@@ -232,10 +227,11 @@ fn standard_label(name: &str) -> String {
     }
 }
 
-fn done_text(report: &ExportReport, localizer: &Localizer) -> String {
+fn done_text(export: &Export, localizer: &Localizer) -> String {
     let mut args = FluentArgs::new();
-    args.set("count", report.files.len());
-    let first = report.files.first();
+    args.set("count", export.files.len());
+    args.set("report", export.report.display().to_string());
+    let first = export.files.first();
     args.set(
         "file",
         first.map_or_else(String::new, |path| path.display().to_string()),
@@ -362,8 +358,8 @@ mod tests {
         }
     }
 
-    fn report() -> ExportReport {
-        ExportReport {
+    fn report() -> Export {
+        Export {
             files: vec![PathBuf::from("out/book.pdf")],
             problems: vec![Problem {
                 page: Some(2),
@@ -373,6 +369,7 @@ mod tests {
                 },
                 source: None,
             }],
+            report: PathBuf::from("out/print.report.json"),
         }
     }
 
@@ -448,7 +445,10 @@ mod tests {
 
         let mut ui = simulator(view.view(&localizer, &[print()], Path::new("main.typ"), true));
 
-        assert!(ui.find("Presswork wrote out/book.pdf.").is_ok());
+        assert!(
+            ui.find("Presswork wrote out/book.pdf and the build report out/print.report.json.")
+                .is_ok()
+        );
         assert!(
             ui.find("Page 3: The image has 120 ppi. The profile needs 300 ppi.")
                 .is_ok()

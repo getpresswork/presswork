@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use presswork_project::{Colors, ExportProfile, PageSize};
+use serde::Serialize;
 use typst::foundations::Repr as _;
 use typst::layout::{Abs, Frame, FrameItem, Size};
 use typst::syntax::Span;
@@ -35,7 +36,8 @@ impl Rules {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum ProblemKind {
     LowResolution {
         ppi: u32,
@@ -49,7 +51,9 @@ pub enum ProblemKind {
         characters: String,
     },
     PageSize {
+        #[serde(rename = "width-um")]
         width: u32,
+        #[serde(rename = "height-um")]
         height: u32,
         needed: PageSize,
     },
