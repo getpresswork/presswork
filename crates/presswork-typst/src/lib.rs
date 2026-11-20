@@ -22,7 +22,7 @@ pub use fonts::Fonts;
 pub use ide::{Analysis, Jump, PagePoint};
 pub use job::{Output, analyze, run};
 pub use outline::{Heading, LabelKind, LabelTarget, SourceRange};
-pub use preflight::{Problem, ProblemKind};
+pub use preflight::{Problem, ProblemKind, Rules};
 pub use profile::ProfileError;
 pub use program::{Program, ProgramError, Stop};
 pub use render::{Insets, PageImage, render_page};

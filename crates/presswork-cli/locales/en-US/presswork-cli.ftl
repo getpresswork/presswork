@@ -13,8 +13,16 @@ pin-not-built-in = The project needs Typst { $pin }. The command-line tool has o
 
 profile-unknown = The project has no export profile with the name { $name }.
 
-problem-resolution = Page { $page }: The image has { $ppi } ppi. The profile { $profile } needs { $minimum } ppi.
-problem-alt = Page { $page }: The image has no alternative text.
+problem-on-page = Page { $page }: { $problem }
+problem-resolution = The image has { $ppi } ppi. The profile { $profile } needs { $minimum } ppi.
+problem-alt = The image has no alternative text.
+problem-font = The font family { $family } is not available. Typst uses a different font.
+problem-glyphs = No font has these characters: { $characters }
+problem-page-size = The page is { $width } × { $height } { $unit }. The profile { $profile } needs { $needed_width } × { $needed_height } { $unit }.
+problem-color = The document uses the color { $color }. The profile { $profile } permits only { $permitted }.
+problem-gradient = A gradient uses the color space { $space }. The profile { $profile } permits only { $permitted }.
+colors-cmyk = CMYK, gray, and spot colors
+colors-gray = gray colors
 
 export-outside = The profile { $profile } writes { $path }. This path is outside the project folder.
 export-failed = Presswork cannot export the profile { $profile }. { $error }

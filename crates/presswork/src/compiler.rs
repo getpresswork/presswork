@@ -5,7 +5,8 @@ use std::time::Duration;
 use futures::channel::oneshot;
 use presswork_project::ExportProfile;
 use presswork_typst::{
-    ExportError, Fonts, Output, Problem, ProfileError, Program, Scheduler, Stop, World, today,
+    ExportError, Fonts, Output, Problem, ProfileError, Program, Rules, Scheduler, Stop, World,
+    today,
 };
 
 pub(crate) const SCALE: f32 = 2.0;
@@ -193,10 +194,9 @@ impl Compiler {
             if let Some(path) = profile.outside(&main) {
                 return Err(ExportFailure::Outside(path));
             }
-            let analysis = presswork_typst::analyze(&engine, text)
-                .analysis
-                .ok_or(ExportFailure::NoPages)?;
-            let problems = analysis.preflight(profile.image_ppi);
+            let output = presswork_typst::analyze(&engine, text);
+            let problems = output.preflight(&Rules::of(&profile));
+            let analysis = output.analysis.ok_or(ExportFailure::NoPages)?;
             let files = analysis.export_profile(&profile, &root, &main, presswork_typst::now())?;
             Ok(ExportReport { files, problems })
         }

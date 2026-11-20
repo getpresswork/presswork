@@ -3,11 +3,11 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use presswork_project::{ExportProfile, Manifest, Project, ProjectError};
+use presswork_project::{Colors, ExportProfile, Manifest, Project, ProjectError};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
-    Diagnostic, Fonts, Problem, ProblemKind, ProfileError, Severity, SourceRange, World, analyze,
-    now, today,
+    Diagnostic, Fonts, Output, Problem, ProblemKind, ProfileError, Rules, Severity, SourceRange,
+    World, analyze, now, today,
 };
 
 use crate::cli::{Cli, Command, Target};
@@ -65,15 +65,16 @@ fn work(target: &Target, build: bool, console: &mut Console<'_>) -> Result<(), F
     for diagnostic in &output.diagnostics {
         console.diagnostic(&places, diagnostic);
     }
-    let has_errors = output
+    if output
         .diagnostics
         .iter()
-        .any(|diagnostic| diagnostic.severity == Severity::Error);
-    let analysis = output.analysis.filter(|_| !has_errors).ok_or(Failed)?;
-    let limit = strictest(&profiles);
-    let problems = analysis.preflight(limit.map(|(_, ppi)| ppi));
-    for problem in &problems {
-        console.problem(&places, problem, limit.map_or("", |(name, _)| name));
+        .any(|diagnostic| diagnostic.severity == Severity::Error)
+    {
+        return Err(Failed);
+    }
+    let problems = preflight(&output, &profiles);
+    for (profile, problem) in &problems {
+        console.problem(&places, problem, &profile.name);
     }
     if !build {
         return if problems.is_empty() {
@@ -82,6 +83,7 @@ fn work(target: &Target, build: bool, console: &mut Console<'_>) -> Result<(), F
             Err(Failed)
         };
     }
+    let analysis = output.analysis.ok_or(Failed)?;
     let date = now();
     let mut result = Ok(());
     for profile in &profiles {
@@ -130,11 +132,36 @@ fn select(profiles: Vec<ExportProfile>, names: &[String]) -> Result<Vec<ExportPr
         .collect())
 }
 
-fn strictest(profiles: &[ExportProfile]) -> Option<(&str, u32)> {
-    profiles
-        .iter()
-        .filter_map(|profile| Some((profile.name.as_str(), profile.image_ppi?)))
-        .max_by_key(|(_, ppi)| *ppi)
+fn preflight<'a>(
+    output: &Output,
+    profiles: &'a [ExportProfile],
+) -> Vec<(&'a ExportProfile, Problem)> {
+    let mut found: Vec<(&ExportProfile, Problem)> = Vec::new();
+    for profile in profiles {
+        for problem in output.preflight(&Rules::of(profile)) {
+            if of_the_profile(&problem.kind) || !found.iter().any(|(_, known)| *known == problem) {
+                found.push((profile, problem));
+            }
+        }
+    }
+    found
+}
+
+fn of_the_profile(kind: &ProblemKind) -> bool {
+    matches!(
+        kind,
+        ProblemKind::LowResolution { .. }
+            | ProblemKind::PageSize { .. }
+            | ProblemKind::Color { .. }
+            | ProblemKind::GradientSpace { .. }
+    )
+}
+
+fn colors_id(colors: Colors) -> &'static str {
+    match colors {
+        Colors::Cmyk => "colors-cmyk",
+        Colors::Gray => "colors-gray",
+    }
 }
 
 struct Places<'a> {
@@ -209,17 +236,52 @@ impl Console<'_> {
 
     fn problem(&mut self, places: &Places<'_>, problem: &Problem, profile: &str) {
         let mut args = FluentArgs::new();
-        args.set("page", problem.page + 1);
-        let id = match problem.kind {
+        args.set("profile", profile.to_owned());
+        let id = match &problem.kind {
             ProblemKind::LowResolution { ppi, minimum } => {
-                args.set("ppi", ppi);
-                args.set("minimum", minimum);
-                args.set("profile", profile.to_owned());
+                args.set("ppi", *ppi);
+                args.set("minimum", *minimum);
                 "problem-resolution"
             }
             ProblemKind::MissingAltText => "problem-alt",
+            ProblemKind::MissingFont { family } => {
+                args.set("family", family.clone());
+                "problem-font"
+            }
+            ProblemKind::MissingGlyphs { characters } => {
+                args.set("characters", characters.clone());
+                "problem-glyphs"
+            }
+            ProblemKind::PageSize {
+                width,
+                height,
+                needed,
+            } => {
+                args.set("width", needed.unit.format(*width));
+                args.set("height", needed.unit.format(*height));
+                args.set("needed_width", needed.unit.format(needed.width));
+                args.set("needed_height", needed.unit.format(needed.height));
+                args.set("unit", needed.unit.name());
+                "problem-page-size"
+            }
+            ProblemKind::Color { color, permitted } => {
+                args.set("color", color.clone());
+                args.set("permitted", self.localizer.text(colors_id(*permitted)));
+                "problem-color"
+            }
+            ProblemKind::GradientSpace { space, permitted } => {
+                args.set("space", space.clone());
+                args.set("permitted", self.localizer.text(colors_id(*permitted)));
+                "problem-gradient"
+            }
         };
-        let message = self.localizer.format(id, &args);
+        let mut message = self.localizer.format(id, &args);
+        if let Some(page) = problem.page {
+            let mut args = FluentArgs::new();
+            args.set("page", page + 1);
+            args.set("problem", message);
+            message = self.localizer.format("problem-on-page", &args);
+        }
         let place = problem
             .source
             .as_ref()
@@ -289,7 +351,6 @@ impl Console<'_> {
 #[cfg(test)]
 mod tests {
     use clap::Parser as _;
-    use presswork_project::ExportFormat;
 
     use super::*;
 
@@ -489,19 +550,65 @@ mod tests {
         assert!(folder.path().join("main.pdf").is_file());
     }
 
+    const RULES: &str = "[project]\nname = \"Notes\"\n\n\
+                         [[export]]\nname = \"print\"\npage-size = \"148mm x 210mm\"\ncolors = \"cmyk\"\n\n\
+                         [[export]]\nname = \"screen\"\noutput = \"screen.pdf\"\n";
+
     #[test]
-    fn the_strictest_profile_gives_the_lowest_image_resolution() {
-        let mut print = ExportProfile::named("print", ExportFormat::Pdf);
-        print.image_ppi = Some(300);
-        let mut screen = ExportProfile::named("screen", ExportFormat::Pdf);
-        screen.image_ppi = Some(150);
-        let plain = ExportProfile::named("plain", ExportFormat::Pdf);
+    fn a_check_finds_the_problems_of_each_profile() {
+        let folder = project(&[
+            ("presswork.toml", RULES),
+            (
+                "main.typ",
+                "#set page(width: 100mm, height: 150mm)\n#text(fill: rgb(\"#ff0000\"))[Red]",
+            ),
+        ]);
+
+        let ran = presswork(&["check", &argument(&folder)]);
 
         assert_eq!(
-            strictest(&[screen, print, plain.clone()]),
-            Some(("print", 300))
+            (ran.code, ran.err),
+            (
+                FAILURE,
+                format!(
+                    "warning: Page 1: The page is 100 × 150 mm. The profile print needs 148 × 210 mm.\n\
+                     {}:2:29: warning: Page 1: The document uses the color rgb(\"#ff0000\"). The profile print permits only CMYK, gray, and spot colors.\n",
+                    place(&folder, "main.typ")
+                )
+            )
         );
-        assert_eq!(strictest(&[plain]), None);
+    }
+
+    #[test]
+    fn a_problem_of_the_document_shows_one_time_for_all_profiles() {
+        let folder = project(&[
+            ("presswork.toml", RULES),
+            ("main.typ", "#set text(font: \"No Such Font\")\nText."),
+        ]);
+
+        let ran = presswork(&["check", &argument(&folder)]);
+
+        let problem = format!(
+            "{}:1:17: warning: The font family no such font is not available. Typst uses a different font.\n",
+            place(&folder, "main.typ")
+        );
+        assert_eq!(ran.code, FAILURE);
+        assert_eq!(ran.err.matches(&problem).count(), 1, "{}", ran.err);
+    }
+
+    #[test]
+    fn a_build_writes_the_files_although_preflight_finds_problems() {
+        let folder = project(&[
+            ("presswork.toml", MANIFEST),
+            ("main.typ", "Text.\n#image(\"dot.svg\", width: 1in)"),
+            ("dot.svg", DOT),
+        ]);
+
+        let ran = presswork(&["build", &argument(&folder)]);
+
+        assert_eq!(ran.code, SUCCESS);
+        assert!(ran.err.contains("The image has no alternative text."));
+        assert!(folder.path().join("main.pdf").is_file());
     }
 
     #[test]
