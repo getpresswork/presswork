@@ -5,12 +5,13 @@ use iced::advanced::renderer::{self, Quad, Renderer as _};
 use iced::advanced::widget::{self, Tree, Widget};
 use iced::advanced::{Clipboard, Shell, mouse, overlay};
 use iced::{
-    Border, Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, window,
+    Border, Color, Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, window,
 };
 
 pub(crate) const MARK_TIME: Duration = Duration::from_millis(1500);
 const MARK_RADIUS: f32 = 9.0;
 const MARK_BORDER: f32 = 2.0;
+const MARK_FILL_ALPHA: f32 = 0.2;
 
 pub(crate) struct PageArea<'a, Message> {
     content: Element<'a, Message>,
@@ -178,7 +179,10 @@ impl<Message> Widget<Message, Theme, Renderer> for PageArea<'_, Message> {
                         },
                         ..Quad::default()
                     },
-                    colors.accent_soft,
+                    Color {
+                        a: MARK_FILL_ALPHA,
+                        ..colors.accent
+                    },
                 );
             });
         }
@@ -281,5 +285,33 @@ mod tests {
         snapshot.matches_image(folder.path().join("mark")).unwrap();
 
         assert_ne!(pixel(folder.path(), 40, 40), [255, 255, 255, 255]);
+    }
+
+    fn marked_center(rgba: [u8; 4]) -> [u8; 4] {
+        let page = iced::widget::image(iced::widget::image::Handle::from_rgba(
+            40,
+            40,
+            rgba.repeat(40 * 40),
+        ))
+        .width(40)
+        .height(40);
+        let area =
+            page_area(page, |point| point).mark(Some((Point::new(20.0, 20.0), Instant::now())));
+        let mut ui = simulator(area);
+        let folder = tempfile::tempdir().unwrap();
+        let theme = presswork_ui::theme::light();
+        let _ = ui.snapshot(&theme).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let snapshot = ui.snapshot(&theme).unwrap();
+        snapshot.matches_image(folder.path().join("mark")).unwrap();
+        pixel(folder.path(), 40, 40)
+    }
+
+    #[test]
+    fn the_page_shows_through_the_mark() {
+        let on_white = marked_center([255, 255, 255, 255]);
+        let on_black = marked_center([0, 0, 0, 255]);
+
+        assert_ne!(on_white, on_black);
     }
 }

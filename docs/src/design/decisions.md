@@ -1215,7 +1215,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Status:** Accepted, 2026-11-19. **Origin:** Default.
 - **Decision:**
   - The preview follows the cursor only when the cursor moves and the text does not change.
-  - The mark is a ring in the accent color. It shows for 1.5 seconds.
+  - The mark is a ring in the accent color with a see-through fill, so that the marked characters stay readable. It shows for 1.5 seconds.
   - The preview scrolls only when the position is not in the middle two thirds of the visible part. Then the position goes to one third of the height.
   - After a jump to the source, the editor gets the keyboard focus, and the preview marks the new cursor position.
   - A click on text of another file shows a note with the name of the file, because the editor shows only the main file.
