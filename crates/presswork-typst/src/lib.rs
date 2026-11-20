@@ -9,6 +9,7 @@ mod outline;
 mod preflight;
 mod profile;
 mod program;
+mod quality;
 mod render;
 mod report;
 mod scheduler;

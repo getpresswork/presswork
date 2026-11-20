@@ -21,6 +21,14 @@ problem-glyphs = No font has these characters: { $characters }
 problem-page-size = The page is { $width } × { $height } { $unit }. The profile { $profile } needs { $needed_width } × { $needed_height } { $unit }.
 problem-color = The document uses the color { $color }. The profile { $profile } permits only { $permitted }.
 problem-gradient = A gradient uses the color space { $space }. The profile { $profile } permits only { $permitted }.
+problem-widow = The last line of a paragraph is alone at the top of a page or column.
+problem-orphan = The first line of a paragraph is alone at the bottom of a page or column.
+problem-hyphens = { $lines } lines in sequence end with a hyphen.
+problem-short-line = The last line of a paragraph has only { $characters ->
+    [one] 1 character
+   *[other] { $characters } characters
+}.
+problem-loose-line = The word spaces in this line are { $spacing }% of their normal width.
 colors-cmyk = CMYK, gray, and spot colors
 colors-gray = gray colors
 

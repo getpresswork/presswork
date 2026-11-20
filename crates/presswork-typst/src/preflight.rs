@@ -65,6 +65,17 @@ pub enum ProblemKind {
         space: String,
         permitted: Colors,
     },
+    Widow,
+    Orphan,
+    StackedHyphens {
+        lines: usize,
+    },
+    ShortLastLine {
+        characters: usize,
+    },
+    LooseLine {
+        spacing: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

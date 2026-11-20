@@ -204,16 +204,24 @@ publish-write-failed = Presswork cannot write { $path }. { $error }
 publish-format-pdf = PDF
 publish-format-png = PNG, { $ppi } ppi
 publish-format-svg = SVG
-publish-problem-on-page = Page { $page }: { $problem }
-publish-problem-resolution = The image has { $ppi } ppi. The profile needs { $minimum } ppi.
-publish-problem-alt = The image has no alternative text.
-publish-problem-font = The font family { $family } is not available. Typst uses a different font.
-publish-problem-glyphs = No font has these characters: { $characters }
-publish-problem-page-size = The page is { $width } × { $height } { $unit }. The profile needs { $needed_width } × { $needed_height } { $unit }.
-publish-problem-color = The document uses the color { $color }. The profile permits only { $permitted }.
-publish-problem-gradient = A gradient uses the color space { $space }. The profile permits only { $permitted }.
-publish-colors-cmyk = CMYK, gray, and spot colors
-publish-colors-gray = gray colors
+problem-on-page = Page { $page }: { $problem }
+problem-resolution = The image has { $ppi } ppi. The profile needs { $minimum } ppi.
+problem-alt = The image has no alternative text.
+problem-font = The font family { $family } is not available. Typst uses a different font.
+problem-glyphs = No font has these characters: { $characters }
+problem-page-size = The page is { $width } × { $height } { $unit }. The profile needs { $needed_width } × { $needed_height } { $unit }.
+problem-color = The document uses the color { $color }. The profile permits only { $permitted }.
+problem-gradient = A gradient uses the color space { $space }. The profile permits only { $permitted }.
+problem-widow = The last line of a paragraph is alone at the top of a page or column.
+problem-orphan = The first line of a paragraph is alone at the bottom of a page or column.
+problem-hyphens = { $lines } lines in sequence end with a hyphen.
+problem-short-line = The last line of a paragraph has only { $characters ->
+    [one] 1 character
+   *[other] { $characters } characters
+}.
+problem-loose-line = The word spaces in this line are { $spacing }% of their normal width.
+colors-cmyk = CMYK, gray, and spot colors
+colors-gray = gray colors
 
 logs-toggle = Logs
 logs-title = Logs

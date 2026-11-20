@@ -272,6 +272,20 @@ impl Console<'_> {
                 args.set("permitted", self.localizer.text(colors_id(*permitted)));
                 "problem-gradient"
             }
+            ProblemKind::Widow => "problem-widow",
+            ProblemKind::Orphan => "problem-orphan",
+            ProblemKind::StackedHyphens { lines } => {
+                args.set("lines", *lines);
+                "problem-hyphens"
+            }
+            ProblemKind::ShortLastLine { characters } => {
+                args.set("characters", *characters);
+                "problem-short-line"
+            }
+            ProblemKind::LooseLine { spacing } => {
+                args.set("spacing", *spacing);
+                "problem-loose-line"
+            }
         };
         let mut message = self.localizer.format(id, &args);
         if let Some(page) = problem.page {

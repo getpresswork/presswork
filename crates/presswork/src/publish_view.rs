@@ -4,13 +4,14 @@ use std::path::Path;
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{button, column, container, row, scrollable, space, text};
 use iced::{Element, Fill};
-use presswork_project::{Colors, ExportFormat, ExportProfile};
-use presswork_typst::{Problem, ProblemKind};
+use presswork_project::{ExportFormat, ExportProfile};
+use presswork_typst::Problem;
 use presswork_ui::style::{self, Tone};
 use presswork_ui::{font, font_size, space as gap};
 
 use crate::compiler::{Export, ExportFailure};
 use crate::i18n::{FluentArgs, Localizer};
+use crate::problems::problem_text;
 
 const LIST_WIDTH: f32 = 640.0;
 
@@ -270,63 +271,6 @@ fn failure_text(failure: &ExportFailure, localizer: &Localizer) -> String {
     localizer.format(id, &args)
 }
 
-fn problem_text(problem: &Problem, localizer: &Localizer) -> String {
-    let mut args = FluentArgs::new();
-    let id = match &problem.kind {
-        ProblemKind::LowResolution { ppi, minimum } => {
-            args.set("ppi", *ppi);
-            args.set("minimum", *minimum);
-            "publish-problem-resolution"
-        }
-        ProblemKind::MissingAltText => "publish-problem-alt",
-        ProblemKind::MissingFont { family } => {
-            args.set("family", family.clone());
-            "publish-problem-font"
-        }
-        ProblemKind::MissingGlyphs { characters } => {
-            args.set("characters", characters.clone());
-            "publish-problem-glyphs"
-        }
-        ProblemKind::PageSize {
-            width,
-            height,
-            needed,
-        } => {
-            args.set("width", needed.unit.format(*width));
-            args.set("height", needed.unit.format(*height));
-            args.set("needed_width", needed.unit.format(needed.width));
-            args.set("needed_height", needed.unit.format(needed.height));
-            args.set("unit", needed.unit.name());
-            "publish-problem-page-size"
-        }
-        ProblemKind::Color { color, permitted } => {
-            args.set("color", color.clone());
-            args.set("permitted", localizer.text(colors_id(*permitted)));
-            "publish-problem-color"
-        }
-        ProblemKind::GradientSpace { space, permitted } => {
-            args.set("space", space.clone());
-            args.set("permitted", localizer.text(colors_id(*permitted)));
-            "publish-problem-gradient"
-        }
-    };
-    let text = localizer.format(id, &args);
-    let Some(page) = problem.page else {
-        return text;
-    };
-    let mut args = FluentArgs::new();
-    args.set("page", page + 1);
-    args.set("problem", text);
-    localizer.format("publish-problem-on-page", &args)
-}
-
-fn colors_id(colors: Colors) -> &'static str {
-    match colors {
-        Colors::Cmyk => "publish-colors-cmyk",
-        Colors::Gray => "publish-colors-gray",
-    }
-}
-
 pub(crate) fn no_project<'a>(localizer: &Localizer) -> Element<'a, Message> {
     container(
         text(localizer.text("publish-no-project"))
@@ -343,6 +287,7 @@ mod tests {
     use std::path::PathBuf;
 
     use iced_test::{selector, simulator};
+    use presswork_typst::ProblemKind;
 
     use super::*;
 
@@ -479,72 +424,6 @@ mod tests {
         assert!(ui.find(localizer.text("publish-no-pages")).is_ok());
     }
 
-    fn problem(page: Option<usize>, kind: ProblemKind) -> String {
-        problem_text(
-            &Problem {
-                page,
-                kind,
-                source: None,
-            },
-            &Localizer::english(),
-        )
-    }
-
-    #[test]
-    fn each_problem_has_a_sentence() {
-        let needed = presswork_project::PageSize::parse("6in x 9in").unwrap();
-
-        assert_eq!(
-            problem(
-                None,
-                ProblemKind::MissingFont {
-                    family: "garamond".to_owned()
-                }
-            ),
-            "The font family garamond is not available. Typst uses a different font."
-        );
-        assert_eq!(
-            problem(
-                Some(0),
-                ProblemKind::MissingGlyphs {
-                    characters: "日 本".to_owned()
-                }
-            ),
-            "Page 1: No font has these characters: 日 本"
-        );
-        assert_eq!(
-            problem(
-                Some(4),
-                ProblemKind::PageSize {
-                    width: 155_956,
-                    height: 228_600,
-                    needed
-                }
-            ),
-            "Page 5: The page is 6.14 × 9 in. The profile needs 6 × 9 in."
-        );
-        assert_eq!(
-            problem(
-                Some(1),
-                ProblemKind::Color {
-                    color: "rgb(\"#ff0000\")".to_owned(),
-                    permitted: Colors::Cmyk
-                }
-            ),
-            "Page 2: The document uses the color rgb(\"#ff0000\"). The profile permits only CMYK, gray, and spot colors."
-        );
-        assert_eq!(
-            problem(
-                Some(1),
-                ProblemKind::GradientSpace {
-                    space: "oklab".to_owned(),
-                    permitted: Colors::Gray
-                }
-            ),
-            "Page 2: A gradient uses the color space oklab. The profile permits only gray colors."
-        );
-    }
-
     #[test]
     fn standards_have_the_names_of_the_standards() {
         assert_eq!(standard_label("a-2b"), "PDF/A-2b");
@@ -573,16 +452,6 @@ mod tests {
             "publish-format-pdf",
             "publish-format-png",
             "publish-format-svg",
-            "publish-problem-on-page",
-            "publish-problem-resolution",
-            "publish-problem-alt",
-            "publish-problem-font",
-            "publish-problem-glyphs",
-            "publish-problem-page-size",
-            "publish-problem-color",
-            "publish-problem-gradient",
-            "publish-colors-cmyk",
-            "publish-colors-gray",
         ] {
             assert_ne!(localizer.text(id), id);
         }
