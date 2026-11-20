@@ -145,6 +145,8 @@ preview-error-without-line = { $message }
 preview-needs-typst = This project needs Typst { $pin }. Install it from the Typst item in the status bar.
 preview-invalid-pin = The Typst pin in presswork.toml is not valid. Correct the pin to see the preview.
 preview-program-error = Presswork cannot run the Typst program. { $error }
+preview-jump-other-file = The text is in the file { $file }. The editor shows only the main file.
+preview-jump-needs-engine = A click on the pages goes to the text only with the built-in Typst engine. This project uses a different Typst version.
 preview-window-title = Preview · { $name }
 preview-window-title-scratch = Preview
 

@@ -5,7 +5,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{button, column, container, responsive, row, rule, space, stack, text, tooltip};
+use iced::widget::{
+    button, column, container, operation, responsive, row, rule, space, stack, text, tooltip,
+};
 use iced::{
     Element, Fill, FillPortion, Size, Subscription, Task, Theme, event, keyboard, padding, system,
     window,
@@ -18,7 +20,7 @@ use presswork_preview::Preview;
 use presswork_project::Project;
 use presswork_text::{ChangeSet, Position, Unit};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
-use presswork_typst::{Diagnostic, Output, Program, Severity};
+use presswork_typst::{Analysis, Diagnostic, Jump, Output, PagePoint, Program, Severity};
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::theme::{self as ui_theme, Mode};
@@ -41,6 +43,7 @@ use crate::workspace::Workspace;
 
 const MARK_SIZE: f32 = 10.0;
 const BRAND: &str = "presswork-menu";
+const EDITOR: &str = "editor";
 const LABEL_ADVANCE: f32 = 0.58;
 const DRAG_SPACE: f32 = 48.0;
 const DESCRIPTION_WIDTH: f32 = 380.0;
@@ -60,6 +63,7 @@ pub(crate) struct App {
     preview: Preview,
     compiled: Option<Arc<Output>>,
     compiled_revision: Option<u64>,
+    pages_analysis: Option<Analysis>,
     project: Option<Project>,
     saved: u64,
     notice: Option<String>,
@@ -134,6 +138,7 @@ impl App {
             preview: Preview::default(),
             compiled: None,
             compiled_revision: None,
+            pages_analysis: None,
             project: None,
             notice: None,
             main_window: window::Id::unique(),
@@ -265,19 +270,7 @@ impl App {
         else {
             return;
         };
-        let buffer = self.editor.document().buffer();
-        let position = buffer.position(
-            buffer.line_column(Position::new(start), Unit::Byte),
-            Unit::Byte,
-        );
-        let action = presswork_editor::Action::MoveTo {
-            position,
-            extend: false,
-            goal: None,
-        };
-        if let Err(error) = self.editor.perform(action, Instant::now()) {
-            tracing::warn!(%error, "The cursor did not move to the problem");
-        }
+        self.move_cursor(start);
     }
 
     fn open_folder(&self) -> Task<Message> {
@@ -303,6 +296,7 @@ impl App {
                 self.compiler.open(&root, &main, backend);
                 self.preview = Preview::default();
                 self.compiled = None;
+                self.pages_analysis = None;
                 self.notice = None;
                 self.workspace = Workspace::Write;
                 self.request_compile()
@@ -338,6 +332,7 @@ impl App {
         self.preview = Preview::default();
         self.compiled = None;
         self.compiled_revision = None;
+        self.pages_analysis = None;
         self.notice = None;
         self.workspace = Workspace::Write;
         Task::batch([self.request_compile(), self.load_library()])
@@ -421,15 +416,76 @@ impl App {
 
     fn edit(&mut self, action: presswork_editor::Action) -> Task<Message> {
         let revision = self.editor.revision();
+        let head = self.cursor();
         match self.editor.perform(action, Instant::now()) {
             Ok(Some(changes)) => self.share(&changes),
             Ok(None) => {}
             Err(error) => tracing::warn!(%error, "Editor action failed"),
         }
-        if self.editor.revision() == revision {
+        if self.editor.revision() != revision {
+            return self.request_compile();
+        }
+        if self.cursor() == head {
             return Task::none();
         }
-        self.request_compile()
+        self.follow_cursor()
+    }
+
+    fn cursor(&self) -> Position {
+        self.editor.document().selection().primary().head
+    }
+
+    fn follow_cursor(&mut self) -> Task<Message> {
+        let offset = self.cursor().offset();
+        let point = self
+            .pages_analysis
+            .as_ref()
+            .and_then(|analysis| analysis.jump_from_cursor(offset).first().copied());
+        match point {
+            Some(point) => self.preview.show_point(point, Instant::now()),
+            None => Task::none(),
+        }
+    }
+
+    fn jump_to_source(&mut self, point: PagePoint) -> Task<Message> {
+        let Some(jump) = self
+            .pages_analysis
+            .as_ref()
+            .map(|analysis| analysis.jump_from_click(point))
+        else {
+            if matches!(self.compiler.backend(), Backend::Program(_)) {
+                self.notice = Some(self.localizer.text("preview-jump-needs-engine"));
+            }
+            return Task::none();
+        };
+        match jump {
+            Some(Jump::Main(offset)) => {
+                self.move_cursor(offset);
+                Task::batch([operation::focus(EDITOR), self.follow_cursor()])
+            }
+            Some(Jump::File(path, _)) => {
+                let mut args = FluentArgs::new();
+                args.set("file", path.display().to_string());
+                self.notice = Some(self.localizer.format("preview-jump-other-file", &args));
+                Task::none()
+            }
+            Some(Jump::Page(target)) => self.preview.show_point(target, Instant::now()),
+            None => Task::none(),
+        }
+    }
+
+    fn move_cursor(&mut self, offset: usize) {
+        let buffer = self.editor.document().buffer();
+        let start = Position::new(offset.min(buffer.len()));
+        let position = buffer.position(buffer.line_column(start, Unit::Byte), Unit::Byte);
+        let action = presswork_editor::Action::MoveTo {
+            position,
+            extend: false,
+            goal: None,
+        };
+        if let Err(error) = self.editor.perform(action, Instant::now()) {
+            tracing::warn!(%error, "The cursor did not move");
+        }
     }
 
     fn server(&mut self, message: server_dialog::Message) -> Task<Message> {
@@ -597,6 +653,7 @@ impl App {
         self.preview = Preview::default();
         self.compiled = None;
         self.compiled_revision = None;
+        self.pages_analysis = None;
         self.request_compile()
     }
 
@@ -675,6 +732,9 @@ impl App {
         );
         self.preview.show(&output, compiler::SCALE);
         self.preview.set_problem(self.problem(&output));
+        if output.pages.is_some() {
+            self.pages_analysis.clone_from(&output.analysis);
+        }
         self.compiled = Some(output);
         if self.compiler.finish() {
             return self.start_compile();
@@ -773,6 +833,9 @@ impl App {
                 return self.show_output(generation, revision, output);
             }
             Message::Preview(presswork_preview::Action::ShowProblem) => self.show_problem(),
+            Message::Preview(presswork_preview::Action::Click(point)) => {
+                return self.jump_to_source(point);
+            }
             Message::Preview(presswork_preview::Action::Detach) => return self.detach_preview(),
             Message::Preview(presswork_preview::Action::Attach) => {
                 return self.preview_window.map_or_else(Task::none, window::close);
@@ -1066,6 +1129,7 @@ impl App {
         if workspace == Workspace::Write {
             let colors = ui_theme::colors(&self.theme());
             let editor = presswork_editor::view(&self.editor, colors, Message::Editor)
+                .id(EDITOR)
                 .autofocus(true)
                 .marks(self.marks());
             if self.preview_window.is_some() {
@@ -1389,6 +1453,139 @@ mod tests {
         send(&mut app, insert("x"));
 
         assert_eq!(app.marks(), []);
+    }
+
+    const TWO_PAGES: &str = "First page.\n#pagebreak()\nSecond page.";
+
+    fn compiled_app(text: &str) -> App {
+        let mut app = app();
+        app.editor = Editor::new(text);
+        app.compile_now();
+        app
+    }
+
+    fn page_point(app: &App, offset: usize) -> PagePoint {
+        let point = app
+            .pages_analysis
+            .as_ref()
+            .unwrap()
+            .jump_from_cursor(offset)[0];
+        PagePoint {
+            x: point.x + 0.5,
+            ..point
+        }
+    }
+
+    fn click(point: PagePoint) -> Message {
+        Message::Preview(presswork_preview::Action::Click(point))
+    }
+
+    fn move_to(offset: usize) -> Message {
+        Message::Editor(presswork_editor::Action::MoveTo {
+            position: Position::new(offset),
+            extend: false,
+            goal: None,
+        })
+    }
+
+    #[test]
+    fn a_click_on_the_pages_moves_the_cursor_to_the_text_and_focuses_the_editor() {
+        let mut app = compiled_app(TWO_PAGES);
+        let offset = TWO_PAGES.find("Second").unwrap() + 2;
+        let point = page_point(&app, offset);
+
+        let task = app.update(click(point));
+
+        assert_eq!(app.cursor(), Position::new(offset));
+        assert!(task.units() > 0);
+    }
+
+    #[test]
+    fn a_click_on_text_of_another_file_names_the_file() {
+        let folder = project_folder(&[
+            ("presswork.toml", "[project]\nname = \"The Book\"\n"),
+            ("main.typ", "#include \"part.typ\""),
+            ("part.typ", "Included words."),
+        ]);
+        let mut app = app();
+        open(&mut app, &folder);
+        app.compile_now();
+
+        send(
+            &mut app,
+            click(PagePoint {
+                page: 0,
+                x: 72.0,
+                y: 75.0,
+            }),
+        );
+
+        assert!(
+            app.notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("part.typ")),
+            "{:?}",
+            app.notice
+        );
+    }
+
+    #[test]
+    fn a_click_without_the_built_in_engine_tells_why_nothing_happens() {
+        let mut app = app();
+        app.compiler.set_backend(Backend::Program(Program::new(
+            PathBuf::from("typst"),
+            Version::new(0, 14, 2),
+        )));
+        let output = Output {
+            pages: Some(vec![presswork_typst::PageImage {
+                width: 20,
+                height: 30,
+                rgba: vec![255; 20 * 30 * 4],
+            }]),
+            ..Output::default()
+        };
+        let generation = app.compiler.generation();
+        let revision = app.editor.revision();
+        send(
+            &mut app,
+            Message::Compiled {
+                generation,
+                revision,
+                output: Arc::new(output),
+            },
+        );
+
+        send(
+            &mut app,
+            click(PagePoint {
+                page: 0,
+                x: 5.0,
+                y: 5.0,
+            }),
+        );
+
+        assert_eq!(
+            app.notice.as_deref(),
+            Some(app.localizer.text("preview-jump-needs-engine").as_str())
+        );
+    }
+
+    #[test]
+    fn moving_the_cursor_marks_its_place_in_the_preview() {
+        let mut app = compiled_app(TWO_PAGES);
+
+        send(&mut app, move_to(TWO_PAGES.find("Second").unwrap()));
+
+        assert_eq!(app.preview.marked().map(|point| point.page), Some(1));
+    }
+
+    #[test]
+    fn typing_does_not_mark_the_preview() {
+        let mut app = compiled_app(TWO_PAGES);
+
+        send(&mut app, insert("x"));
+
+        assert_eq!(app.preview.marked(), None);
     }
 
     fn project_folder(files: &[(&str, &str)]) -> tempfile::TempDir {

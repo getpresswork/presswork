@@ -117,6 +117,11 @@ impl Preview {
         self.zoom
     }
 
+    #[must_use]
+    pub fn marked(&self) -> Option<PagePoint> {
+        self.mark.map(|(point, _)| point)
+    }
+
     pub fn perform(&mut self, action: Action) {
         let current = match self.zoom {
             Zoom::Percent(percent) => percent,
