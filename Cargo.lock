@@ -5418,8 +5418,10 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "iced_test",
+ "png",
  "presswork-typst",
  "presswork-ui",
+ "tempfile",
 ]
 
 [[package]]

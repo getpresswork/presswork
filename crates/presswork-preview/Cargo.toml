@@ -19,3 +19,5 @@ presswork-ui.workspace = true
 
 [dev-dependencies]
 iced_test.workspace = true
+png.workspace = true
+tempfile.workspace = true

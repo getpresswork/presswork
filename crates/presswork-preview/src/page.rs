@@ -154,27 +154,33 @@ impl<Message> Widget<Message, Theme, Renderer> for PageArea<'_, Message> {
             cursor,
             viewport,
         );
+        let bounds = layout.bounds();
         if let Some((point, since)) = self.mark
             && shows(since, Instant::now())
+            && let Some(clip) = bounds.intersection(viewport)
         {
             let colors = presswork_ui::theme::colors(theme);
-            let bounds = layout.bounds();
             let corner = Point::new(
                 bounds.x + point.x - MARK_RADIUS,
                 bounds.y + point.y - MARK_RADIUS,
             );
-            renderer.fill_quad(
-                Quad {
-                    bounds: Rectangle::new(corner, Size::new(2.0 * MARK_RADIUS, 2.0 * MARK_RADIUS)),
-                    border: Border {
-                        color: colors.accent,
-                        width: MARK_BORDER,
-                        radius: MARK_RADIUS.into(),
+            renderer.with_layer(clip, |renderer| {
+                renderer.fill_quad(
+                    Quad {
+                        bounds: Rectangle::new(
+                            corner,
+                            Size::new(2.0 * MARK_RADIUS, 2.0 * MARK_RADIUS),
+                        ),
+                        border: Border {
+                            color: colors.accent,
+                            width: MARK_BORDER,
+                            radius: MARK_RADIUS.into(),
+                        },
+                        ..Quad::default()
                     },
-                    ..Quad::default()
-                },
-                colors.accent_soft,
-            );
+                    colors.accent_soft,
+                );
+            });
         }
     }
 
@@ -240,5 +246,40 @@ mod tests {
 
         assert!(shows(now, now + Duration::from_millis(100)));
         assert!(!shows(now, now + MARK_TIME));
+    }
+
+    fn pixel(folder: &std::path::Path, x: usize, y: usize) -> [u8; 4] {
+        let file = std::fs::read_dir(folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.extension().is_some_and(|extension| extension == "png"))
+            .unwrap();
+        let decoder =
+            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(file).unwrap()));
+        let mut reader = decoder.read_info().unwrap();
+        let mut bytes = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut bytes).unwrap();
+        let at = (y * info.width as usize + x) * 4;
+        [bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]
+    }
+
+    #[test]
+    fn the_mark_shows_over_the_page_image() {
+        let page = iced::widget::image(iced::widget::image::Handle::from_rgba(
+            40,
+            40,
+            vec![255; 40 * 40 * 4],
+        ))
+        .width(40)
+        .height(40);
+        let area =
+            page_area(page, |point| point).mark(Some((Point::new(20.0, 20.0), Instant::now())));
+        let mut ui = simulator(area);
+        let folder = tempfile::tempdir().unwrap();
+
+        let snapshot = ui.snapshot(&presswork_ui::theme::light()).unwrap();
+        snapshot.matches_image(folder.path().join("mark")).unwrap();
+
+        assert_ne!(pixel(folder.path(), 40, 40), [255, 255, 255, 255]);
     }
 }
