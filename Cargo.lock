@@ -5365,8 +5365,10 @@ version = "0.1.0"
 dependencies = [
  "iced",
  "iced_test",
+ "png",
  "presswork-text",
  "presswork-ui",
+ "tempfile",
  "typst-syntax",
  "unicode-segmentation",
 ]

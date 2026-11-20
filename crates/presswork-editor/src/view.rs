@@ -33,6 +33,7 @@ const MIN_TEXT_WIDTH: f32 = 80.0;
 const CARET_WIDTH: f32 = 2.0;
 const BLINK: Duration = Duration::from_millis(500);
 const WHEEL_LINES: f32 = 3.0;
+const SELECTION_RADIUS: f32 = 2.0;
 const MARK_THICKNESS: f32 = 1.5;
 const MARK_OFFSET: f32 = 4.0;
 const EMPTY_MARK_WIDTH: f32 = 6.0;
@@ -68,6 +69,7 @@ pub struct Tooltip {
 pub enum MarkKind {
     Error,
     Warning,
+    Match,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +147,51 @@ impl<'a, Message> EditorView<'a, Message> {
         self
     }
 
+    fn shown_marks(
+        &self,
+        state: &State,
+        visible: &std::ops::Range<f32>,
+    ) -> impl Iterator<Item = &Mark> {
+        let mut lines = state.layout.visible(visible.clone()).map(|(_, line)| line);
+        let shown = match lines.next() {
+            Some(first) => {
+                let last = lines.last().unwrap_or(first);
+                first.start..last.start + last.len
+            }
+            None => 0..0,
+        };
+        self.marks.iter().filter(move |mark| {
+            mark.range.end.offset() >= shown.start && mark.range.start.offset() <= shown.end
+        })
+    }
+
+    fn draw_matches(
+        &self,
+        state: &State,
+        renderer: &mut Renderer,
+        offset: Vector,
+        visible: &std::ops::Range<f32>,
+    ) {
+        for mark in self
+            .shown_marks(state, visible)
+            .filter(|mark| mark.kind == MarkKind::Match)
+        {
+            for row in state.layout.selection(mark.range.clone()) {
+                renderer.fill_quad(
+                    Quad {
+                        bounds: row + offset,
+                        border: Border {
+                            radius: SELECTION_RADIUS.into(),
+                            ..Border::default()
+                        },
+                        ..Quad::default()
+                    },
+                    self.colors.editor.find_match,
+                );
+            }
+        }
+    }
+
     fn draw_marks(
         &self,
         state: &State,
@@ -152,10 +199,11 @@ impl<'a, Message> EditorView<'a, Message> {
         origin: Point,
         visible: &std::ops::Range<f32>,
     ) {
-        for mark in &self.marks {
+        for mark in self.shown_marks(state, visible) {
             let color = match mark.kind {
                 MarkKind::Error => self.colors.editor.error,
                 MarkKind::Warning => self.colors.warning,
+                MarkKind::Match => continue,
             };
             let rows = if mark.range.start < mark.range.end {
                 state.layout.selection(mark.range.clone())
@@ -886,6 +934,7 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
                     colors.editor.current_line,
                 );
             }
+            self.draw_matches(state, renderer, offset, &visible);
             for range in selection.ranges().iter().filter(|range| !range.is_empty()) {
                 for row in state.layout.selection(range.start()..range.end()) {
                     if row.y + row.height < visible.start || row.y > visible.end {
@@ -895,7 +944,7 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
                         Quad {
                             bounds: row + offset,
                             border: Border {
-                                radius: 2.0.into(),
+                                radius: SELECTION_RADIUS.into(),
                                 ..Border::default()
                             },
                             ..Quad::default()
@@ -1234,6 +1283,76 @@ mod tests {
         let mut ui = simulator(view(&editor, &LIGHT, |action| action).marks(marks));
 
         assert!(ui.snapshot(&presswork_ui::theme::light()).is_ok());
+    }
+
+    fn pixels_with_color(view: EditorView<'_, Action>, color: iced::Color) -> usize {
+        let mut ui = simulator(view);
+        let folder = tempfile::tempdir().unwrap();
+        ui.snapshot(&presswork_ui::theme::light())
+            .unwrap()
+            .matches_image(folder.path().join("editor"))
+            .unwrap();
+        let file = std::fs::read_dir(folder.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.extension().is_some_and(|extension| extension == "png"))
+            .unwrap();
+        let decoder =
+            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(file).unwrap()));
+        let mut reader = decoder.read_info().unwrap();
+        let mut bytes = vec![0; reader.output_buffer_size().unwrap()];
+        reader.next_frame(&mut bytes).unwrap();
+        let wanted = color.into_rgba8();
+        let (pixels, _) = bytes.as_chunks::<4>();
+        pixels.iter().filter(|pixel| **pixel == wanted).count()
+    }
+
+    fn found(start: usize, end: usize) -> Vec<Mark> {
+        vec![Mark {
+            range: Position::new(start)..Position::new(end),
+            kind: MarkKind::Match,
+        }]
+    }
+
+    #[test]
+    fn a_match_has_its_own_background() {
+        load_fonts();
+        let editor = Editor::new("        \nmore text");
+        let find_match = LIGHT.editor.find_match;
+
+        let plain = pixels_with_color(view(&editor, &LIGHT, |action| action), find_match);
+        let marked = pixels_with_color(
+            view(&editor, &LIGHT, |action| action).marks(found(0, 8)),
+            find_match,
+        );
+
+        assert_eq!(plain, 0);
+        assert!(marked > 100, "{marked}");
+    }
+
+    #[test]
+    fn the_selection_covers_a_selected_match() {
+        load_fonts();
+        let mut editor = Editor::new("        \nmore text");
+        for (offset, extend) in [(0, false), (8, true)] {
+            editor
+                .perform(
+                    Action::MoveTo {
+                        position: Position::new(offset),
+                        extend,
+                        goal: None,
+                    },
+                    Instant::now(),
+                )
+                .unwrap();
+        }
+
+        let marked = pixels_with_color(
+            view(&editor, &LIGHT, |action| action).marks(found(0, 8)),
+            LIGHT.editor.find_match,
+        );
+
+        assert_eq!(marked, 0);
     }
 
     #[test]

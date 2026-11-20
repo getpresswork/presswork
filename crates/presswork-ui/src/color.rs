@@ -28,6 +28,7 @@ pub struct Colors {
 pub struct EditorColors {
     pub current_line: Color,
     pub selection: Color,
+    pub find_match: Color,
     pub line_number: Color,
     pub comment: Color,
     pub keyword: Color,
@@ -62,6 +63,7 @@ pub const LIGHT: Colors = Colors {
     editor: EditorColors {
         current_line: rgb(0xF4, 0xF1, 0xEB),
         selection: rgb(0xF2, 0xE3, 0xE4),
+        find_match: rgb(0xF7, 0xE9, 0xBF),
         line_number: rgb(0x77, 0x6F, 0x64),
         comment: rgb(0x6B, 0x63, 0x58),
         keyword: rgb(0x8C, 0x2F, 0x39),
@@ -97,6 +99,7 @@ pub const DARK: Colors = Colors {
     editor: EditorColors {
         current_line: rgb(0x21, 0x1F, 0x1D),
         selection: rgb(0x3B, 0x25, 0x28),
+        find_match: rgb(0x34, 0x2C, 0x1C),
         line_number: rgb(0x91, 0x8A, 0x7E),
         comment: rgb(0xA3, 0x9B, 0x8E),
         keyword: rgb(0xE0, 0x7A, 0x84),
@@ -201,6 +204,7 @@ pub(crate) mod tests {
                 ("page", colors.page),
                 ("current line", editor.current_line),
                 ("selection", editor.selection),
+                ("find match", editor.find_match),
             ] {
                 for (role, foreground) in [
                     ("ink", colors.ink),
