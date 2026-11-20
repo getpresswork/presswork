@@ -8,7 +8,7 @@ Presswork uses Typst in two ways:
 
 | Engine | Use | Typst version |
 | --- | --- | --- |
-| Embedded engine | Live preview, exports, diagnostics, completion, tooltips, and jumps between source and pages | The version in this Presswork release, now 0.15 |
+| Embedded engine | Live preview, exports, diagnostics, completion, tooltips, the outline, and jumps between source and pages | The version in this Presswork release, now 0.15 |
 | Managed toolchain | Live preview, exports, and diagnostics of projects that pin a different Typst version | Each version that the toolchain manager installs |
 
 The embedded engine links the Typst crates into Presswork. It gives access to the document model. Thus the interface can connect each element on a page to its source.
@@ -20,7 +20,7 @@ The managed toolchain runs the official Typst command-line tool. It gives the ex
 1. A project can pin a Typst version in its manifest, for example `typst = "0.14"`.
 2. If the project has no pin, Presswork uses the embedded engine for all functions.
 3. If the pin accepts the embedded version, Presswork uses the embedded engine for all functions.
-4. If the pin does not accept the embedded version, Presswork uses the managed toolchain for the preview and the exports. Thus you proof the same output that goes to print. The preview is slower. The editor functions that need the document model, such as completion, tooltips, and jumps from the pages to the source, are off, and a note tells why.
+4. If the pin does not accept the embedded version, Presswork uses the managed toolchain for the preview and the exports. Thus you proof the same output that goes to print. The preview is slower. The editor functions that need the document model, such as completion, tooltips, the outline, and jumps from the pages to the source, are off, and a note tells why.
 5. If no installed version agrees with the pin, Presswork shows no preview. The Toolchains panel shows the versions that you can install.
 
 The preview and the exports of a project always use the same Typst version. Refer to D100 in [Decisions](decisions.md).
@@ -94,12 +94,14 @@ The engine uses `typst-ide` for these functions:
 | Definition | The location of the definition of a function, a variable, or a label. |
 | Jump from pages | The source location of a point that you click in the preview. |
 | Jump from source | The position of the cursor in the pages. |
-| Outline | The headings of the document, for the outline panel. |
-| Labels | All labels and their positions, for references. |
+| Outline | The headings of the document with their numbers and pages, for the outline panel. |
+| Labels | All labels with the kind, the text, and the page of their elements, for the completion of references. |
 
 These functions use the result of the last compilation. Each compilation keeps a copy of the world and of the document. Thus the functions do not wait for a compilation that runs (D169).
 
-In milestone 2, the jumps, the tooltips, the completions, and the definitions are available. The outline and the labels come later. Tooltips and completions use a copy of the world with the text of the editor, because the text can be newer than the compilation. They run on a separate thread, because `typst-ide` can compile the document again to find a value.
+In milestone 2, all these functions are available. Tooltips and completions use a copy of the world with the text of the editor, because the text can be newer than the compilation. They run on a separate thread, because `typst-ide` can compile the document again to find a value.
+
+The outline and the labels come from the introspector of the document. Typst keeps the number of each heading in the heading element, so the outline needs no other compilation. The page of an element is its printed page number if the page has a numbering pattern. Otherwise, it is the position of the page in the document (D174, D175).
 
 The jump from the source has its own search for the glyph at the cursor. The search of `typst-ide` gives only the first glyph of a text node, and in Typst 0.15 a text node contains a full line of text with its spaces. If a paragraph continues on the next page, the search gives only the page of the cursor.
 

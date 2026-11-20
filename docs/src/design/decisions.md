@@ -1246,3 +1246,23 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The request runs on the separate thread of the editor functions (D172).
 - **Reason:** These are the usual keys of code editors. The editor shows only the main file, so a note is the only possible answer for other files.
 - **Other options:** Open the documentation of library items on the Typst website. Alt+click in place of Ctrl+click.
+
+## D174. Labels in the completion of references
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Project owner.
+- **Decision:** The engine gives all labels of the document with the kind, the text, and the page of their elements. The completion list uses them: after `@`, the description of each label gives the kind of the element, its page, and its text, for example "Figure, page 4: A cat". The page is the printed page number if the page has a numbering pattern. Otherwise, it is the position of the page in the document.
+- **Reason:** A reference must go to the correct element. The kind and the page help you to select the correct label. F12 on a reference already goes to the element (D173).
+- **Other options:** Also list the labeled figures, tables, and equations in the outline, below their headings. A separate list of all labels with a filter, which puts a reference at the cursor.
+
+## D175. Details of the outline
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - The outline panel is at the left of the editor, as in the layout of the Write workspace. It is open by default and 260 pixels wide. The **Outline** button in the status bar opens or closes it.
+  - The outline shows all headings of the last compilation that gave pages. This includes the headings of other files and the headings that are not in the table of contents (`outlined: false`).
+  - Each heading shows its number, its text, and its page (D174). The indent of each level is 12 pixels.
+  - The heading that contains the cursor has the accent color.
+  - A click on a heading moves the cursor to the start of the heading, gives the keyboard focus to the editor, and marks the heading in the preview. For a heading in another file, the preview shows the heading, and a note gives the name of the file.
+  - With the managed toolchain, the outline shows a note, because it needs the document model.
+- **Reason:** The outline shows the structure of the document as the reader sees it, also when code or other files make the headings. The page numbers help typesetters to find the pages.
+- **Other options:** Only the headings of the table of contents. The headings of the source text of the main file, without page numbers. A panel that is closed by default.

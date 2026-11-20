@@ -83,6 +83,7 @@ While you type Typst code, the editor shows completions, for example after `#`. 
 - Up and Down select an item. Enter or Tab inserts the selected item. A click on an item inserts it. Escape closes the list.
 - If a completion has placeholders, the editor selects the first placeholder. If the placeholder is empty, the cursor goes to its position. For example, `text` becomes `text()` with the cursor between the parentheses.
 - A box below the list gives the description of the selected item.
+- For a label after `@`, the description gives the kind of the element, its page, and its text, for example "Figure, page 4: A cat" (D174).
 - If you move the cursor, the list closes.
 
 Tooltips and completions use the text in the editor, also if it changed after the last compilation (D172).
@@ -148,3 +149,15 @@ The embedded engine connects the points on the pages to the source, and the sour
 - If you move the cursor with the keys or the mouse, the preview marks the cursor position in the pages for 1.5 seconds. If the position is not in the visible part of the preview, the preview scrolls until the position is at one third of its height. While you type, the preview does not move (D171).
 - The positions come from the last compilation that gave pages. If you changed the text after that compilation, a position can be a few characters away from the correct position.
 - With the managed toolchain, the jumps are not available. A click on the pages shows a note that tells why.
+
+## Outline
+
+The outline panel shows the headings of the document at the left of the editor (D175).
+
+- Each heading shows its number, its text, and its page. The indent shows the level of the heading.
+- The page is the printed page number. If the page has no numbering, it is the position of the page in the document.
+- The heading that contains the cursor has the accent color.
+- Click a heading to move the cursor to the start of the heading. The editor gets the keyboard focus, and the preview shows and marks the heading.
+- If the heading is in another file, the preview shows the heading, and a note gives the name of the file.
+- The **Outline** button in the status bar opens or closes the panel. In a narrow window, close the panel to give more space to the editor.
+- The outline comes from the last compilation that gave pages. With the managed toolchain, the outline is not available, and a note tells why.

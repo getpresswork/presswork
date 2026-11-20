@@ -150,6 +150,8 @@ In milestone 1, the status bar shows these items:
 - The Typst version that the project uses. If no installed version agrees with the pin of the project, the item shows a warning. Click it to open the Toolchains panel.
 - The number of log errors and warnings, and the Logs button.
 
+In milestone 2, the status bar of the Write workspace also shows the **Outline** button. It opens or closes the outline panel at the left of the editor. Refer to [Editor and preview](editor.md#outline).
+
 The Toolchains panel, the log panel, and the chat panel open at the bottom of the window. Only one of them is open at a time.
 
 ## Projects
