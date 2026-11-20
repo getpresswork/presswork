@@ -69,10 +69,14 @@ Until the project model is ready, the Write workspace shows a scratch document. 
 | Ctrl+F | Open the find bar. |
 | Ctrl+H | Open the find bar with the replace row. |
 | F3 and Shift+F3 | Go to the next or the previous result of the find bar. |
+| Ctrl+D | Select the word at the cursor. Then add the next place of the same text. |
+| Ctrl+Shift+L | Select all places of the selected text. |
+| Ctrl+Alt+Up and Ctrl+Alt+Down | Add a cursor on the line above or below. |
+| Escape | With many cursors, keep only the primary cursor. |
 
-On macOS, Cmd replaces Ctrl in shortcuts, and Alt replaces Ctrl for word movement and word deletion. Cmd+Left and Cmd+Right move to the start or the end of the line. Ctrl+Space stays Ctrl+Space, because Cmd+Space opens Spotlight. Cmd+Option+F opens the replace row, because Cmd+H hides the application.
+On macOS, Cmd replaces Ctrl in shortcuts, and Alt replaces Ctrl for word movement and word deletion. Cmd+Left and Cmd+Right move to the start or the end of the line. Ctrl+Space stays Ctrl+Space, because Cmd+Space opens Spotlight. Cmd+Option+F opens the replace row, because Cmd+H hides the application. Cmd+Option+Up and Cmd+Option+Down add cursors.
 
-Click to move the cursor. Double-click to select a word, and triple-click to select a line. Drag to select text. Shift+click extends the selection. Ctrl+click a name to go to its definition. On macOS, use Cmd+click.
+Click to move the cursor. Double-click to select a word, and triple-click to select a line. Drag to select text. Shift+click extends the selection. Ctrl+click a name to go to its definition. On macOS, use Cmd+click. Alt+click adds a cursor. On macOS, use Option+click.
 
 ### Tooltips
 
@@ -109,6 +113,18 @@ Push Ctrl+F to find text in the document (D176, D177). The find bar opens above 
 - To replace text, push Ctrl+H or click the arrow at the left of the bar. **Replace** changes the selected result and selects the next result. **Replace all** changes all results in one step, and one undo restores them. With a regular expression, `$1` in the replacement gives the first group of the result.
 - The results follow all changes of the text, also the changes of other persons.
 - Escape closes the bar and gives the keyboard focus back to the editor.
+
+### Many cursors
+
+You can edit the text at many places at the same time (D178).
+
+- Alt+click a place to add a cursor. Alt+click a cursor to remove it. Some Linux desktops use Alt+click to move windows. Then use the keys.
+- Ctrl+Alt+Up adds a cursor above the first cursor, and Ctrl+Alt+Down adds a cursor below the last cursor, at the same column.
+- Ctrl+D selects the word at the cursor. Push Ctrl+D again to add the next place of the same word. If you selected the text in a different way, Ctrl+D also finds the text in longer words. Ctrl+Shift+L selects all places at one time. These keys find only text with the same capital and small letters.
+- Typing, deletion, new lines, and movement apply at each cursor. A new line keeps the indent of its own line.
+- If you paste as many lines as there are cursors, each cursor gets one line. Otherwise, each cursor gets all of the text.
+- Escape keeps only the primary cursor. The primary cursor is the cursor that you added last. Undo restores all the cursors.
+- A click without Alt, the find bar, completion, and go to definition use the primary cursor and go back to one cursor.
 
 ### Syntax colors
 

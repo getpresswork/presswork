@@ -1286,3 +1286,17 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The search runs again after each change of the text or of the query. Escape closes the bar and focuses the editor.
 - **Reason:** These are the usual keys and functions of code editors and word processors.
 - **Other options:** Find in all files of the project. A search only in the selected text. A list of all results in a panel.
+
+## D178. Details of many cursors
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - Alt+click adds a cursor, and Alt+click on a cursor removes it. The last cursor stays. On macOS, Option+click.
+  - Ctrl+Alt+Up and Ctrl+Alt+Down add a cursor above the first cursor or below the last cursor, at the same character column of the text line. On macOS, Cmd+Option+Up and Cmd+Option+Down.
+  - Ctrl+D (Cmd+D on macOS) from a cursor selects the word, and then adds the next place of the same full word. From another selection, it adds the next place of the same text, also inside longer words. Ctrl+Shift+L selects all places. The search uses the case of the text, goes around at the end, and skips the places that are already selected.
+  - The cursor that you added last is the primary cursor. Escape keeps only the primary cursor.
+  - With many cursors, Up and Down move each cursor by one row, and each cursor keeps its own column.
+  - A paste with one line for each cursor gives each cursor one line.
+  - Completion, the find bar, and go to definition use the primary cursor.
+- **Reason:** These are the keys of Visual Studio Code, which many writers of Typst use. Text lines and character columns do not change when the width of the editor changes.
+- **Other options:** Alt+drag for a column of cursors. Shift+Alt+Up and Shift+Alt+Down on Linux, where some desktops use Ctrl+Alt+Up and Ctrl+Alt+Down. Find text without a difference between capital and small letters.
