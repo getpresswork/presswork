@@ -1,5 +1,13 @@
 use futures::channel::oneshot;
-use presswork_typst::{Analysis, Completions, Tooltip};
+use presswork_typst::{Analysis, Completions, Definition, Tooltip};
+
+pub(crate) fn definition(
+    analysis: Analysis,
+    text: String,
+    offset: usize,
+) -> impl Future<Output = Option<Definition>> + Send + 'static {
+    run(move || analysis.definition(&text, offset))
+}
 
 pub(crate) fn tooltip(
     analysis: Analysis,
@@ -56,6 +64,19 @@ mod tests {
             matches!(&tooltip, Some(Tooltip::Code(code)) if code.starts_with("10pt")),
             "{tooltip:?}"
         );
+    }
+
+    #[test]
+    fn the_definition_job_gives_the_definition_of_a_name() {
+        let text = "#let gap = 1pt\n#gap";
+
+        let definition = futures::executor::block_on(definition(
+            analysis(text),
+            text.to_owned(),
+            text.rfind("gap").unwrap() + 1,
+        ));
+
+        assert_eq!(definition, Some(Definition::Main(5..8)));
     }
 
     #[test]

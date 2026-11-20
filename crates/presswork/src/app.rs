@@ -94,6 +94,11 @@ pub(crate) enum Message {
     SystemTheme(Mode),
     Editor(presswork_editor::Action),
     Hover(Option<Position>),
+    Definition(Position),
+    DefinitionFound {
+        revision: u64,
+        definition: Option<presswork_typst::Definition>,
+    },
     Complete(presswork_editor::CompletionEvent),
     CompletionsFound {
         revision: u64,
@@ -488,6 +493,11 @@ impl App {
                 revision,
                 tooltip,
             } => self.tooltip_found(position, revision, tooltip),
+            Message::Definition(position) => return self.find_definition(position),
+            Message::DefinitionFound {
+                revision,
+                definition,
+            } => return self.definition_found(revision, definition),
             Message::Complete(event) => return self.complete(event),
             Message::CompletionsFound {
                 revision,
@@ -498,6 +508,61 @@ impl App {
             _ => {}
         }
         Task::none()
+    }
+
+    fn find_definition(&self, position: Position) -> Task<Message> {
+        let Some(analysis) = self.assist_analysis() else {
+            return Task::none();
+        };
+        let text = self.editor.document().buffer().to_string();
+        let revision = self.editor.revision();
+        Task::perform(
+            assist::definition(analysis, text, position.offset()),
+            move |definition| Message::DefinitionFound {
+                revision,
+                definition,
+            },
+        )
+    }
+
+    fn definition_found(
+        &mut self,
+        revision: u64,
+        definition: Option<presswork_typst::Definition>,
+    ) -> Task<Message> {
+        if revision != self.editor.revision() {
+            return Task::none();
+        }
+        match definition {
+            Some(presswork_typst::Definition::Main(range)) => {
+                let start = self.snapped(range.start);
+                let end = self.snapped(range.end);
+                let at_start = self.edit(presswork_editor::Action::MoveTo {
+                    position: start,
+                    extend: false,
+                    goal: None,
+                });
+                let to_end = self.edit(presswork_editor::Action::MoveTo {
+                    position: end,
+                    extend: true,
+                    goal: None,
+                });
+                Task::batch([at_start, to_end])
+            }
+            Some(presswork_typst::Definition::File(path, _)) => {
+                let mut args = FluentArgs::new();
+                args.set("file", path.display().to_string());
+                self.notice = Some(self.localizer.format("definition-other-file", &args));
+                Task::none()
+            }
+            Some(presswork_typst::Definition::Library(name)) => {
+                let mut args = FluentArgs::new();
+                args.set("name", name);
+                self.notice = Some(self.localizer.format("definition-in-library", &args));
+                Task::none()
+            }
+            None => Task::none(),
+        }
     }
 
     fn complete(&mut self, event: CompletionEvent) -> Task<Message> {
@@ -678,12 +743,15 @@ impl App {
         }
     }
 
-    fn move_cursor(&mut self, offset: usize) {
+    fn snapped(&self, offset: usize) -> Position {
         let buffer = self.editor.document().buffer();
         let start = Position::new(offset.min(buffer.len()));
-        let position = buffer.position(buffer.line_column(start, Unit::Byte), Unit::Byte);
+        buffer.position(buffer.line_column(start, Unit::Byte), Unit::Byte)
+    }
+
+    fn move_cursor(&mut self, offset: usize) {
         let action = presswork_editor::Action::MoveTo {
-            position,
+            position: self.snapped(offset),
             extend: false,
             goal: None,
         };
@@ -1019,6 +1087,8 @@ impl App {
             Message::Editor(action) => return self.edit(action),
             message @ (Message::Hover(_)
             | Message::TooltipFound { .. }
+            | Message::Definition(_)
+            | Message::DefinitionFound { .. }
             | Message::Complete(_)
             | Message::CompletionsFound { .. }) => return self.assist_message(message),
             Message::Server(message) => return self.server(message),
@@ -1335,7 +1405,8 @@ impl App {
                 .on_hover(Message::Hover)
                 .tooltip(self.tooltip.as_ref())
                 .on_complete(Message::Complete)
-                .completions(self.completions.as_ref());
+                .completions(self.completions.as_ref())
+                .on_definition(Message::Definition);
             if self.preview_window.is_some() {
                 return container(editor).width(Fill).height(Fill).into();
             }
@@ -1966,6 +2037,93 @@ mod tests {
                 > 0
         );
         assert!(app.update(insert("e")).units() > 1);
+    }
+
+    const BINDING: &str = "#let gap = 1pt\n#gap";
+
+    fn definition_found(app: &App, definition: presswork_typst::Definition) -> Message {
+        Message::DefinitionFound {
+            revision: app.editor.revision(),
+            definition: Some(definition),
+        }
+    }
+
+    #[test]
+    fn a_definition_request_asks_the_engine() {
+        let mut app = compiled_app(BINDING);
+
+        let task = app.update(Message::Definition(Position::new(17)));
+
+        assert!(task.units() > 0);
+    }
+
+    #[test]
+    fn a_definition_in_the_main_file_selects_its_name() {
+        let mut app = typed_app(BINDING);
+
+        let found = definition_found(&app, presswork_typst::Definition::Main(5..8));
+        send(&mut app, found);
+
+        let selection = app.editor.document().selection().primary();
+        assert_eq!(
+            (selection.anchor, selection.head),
+            (Position::new(5), Position::new(8))
+        );
+    }
+
+    #[test]
+    fn a_definition_in_another_file_names_the_file() {
+        let mut app = typed_app(BINDING);
+
+        let found = definition_found(
+            &app,
+            presswork_typst::Definition::File(PathBuf::from("part.typ"), None),
+        );
+        send(&mut app, found);
+
+        assert!(
+            app.notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("part.typ")),
+            "{:?}",
+            app.notice
+        );
+    }
+
+    #[test]
+    fn a_definition_in_the_library_tells_its_name() {
+        let mut app = typed_app(BINDING);
+
+        let found = definition_found(
+            &app,
+            presswork_typst::Definition::Library("text".to_owned()),
+        );
+        send(&mut app, found);
+
+        assert!(
+            app.notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("text")),
+            "{:?}",
+            app.notice
+        );
+    }
+
+    #[test]
+    fn a_definition_for_other_text_is_dropped() {
+        let mut app = typed_app(BINDING);
+        let head = app.cursor();
+        let revision = app.editor.revision() + 1;
+
+        send(
+            &mut app,
+            Message::DefinitionFound {
+                revision,
+                definition: Some(presswork_typst::Definition::Main(5..8)),
+            },
+        );
+
+        assert_eq!(app.cursor(), head);
     }
 
     #[test]

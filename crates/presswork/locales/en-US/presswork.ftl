@@ -147,6 +147,8 @@ preview-invalid-pin = The Typst pin in presswork.toml is not valid. Correct the 
 preview-program-error = Presswork cannot run the Typst program. { $error }
 preview-jump-other-file = The text is in the file { $file }. The editor shows only the main file.
 preview-jump-needs-engine = A click on the pages goes to the text only with the built-in Typst engine. This project uses a different Typst version.
+definition-other-file = The definition is in the file { $file }. The editor shows only the main file.
+definition-in-library = { $name } is part of the Typst library.
 preview-window-title = Preview · { $name }
 preview-window-title-scratch = Preview
 
