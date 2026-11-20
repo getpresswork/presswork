@@ -99,7 +99,7 @@ The engine uses `typst-ide` for these functions:
 
 These functions use the result of the last compilation. Each compilation keeps a copy of the world and of the document. Thus the functions do not wait for a compilation that runs (D169).
 
-In milestone 2, the jumps, the tooltips, and the completions are available. The definition, the outline, and the labels come later. Tooltips and completions use a copy of the world with the text of the editor, because the text can be newer than the compilation. They run on a separate thread, because `typst-ide` can compile the document again to find a value.
+In milestone 2, the jumps, the tooltips, the completions, and the definitions are available. The outline and the labels come later. Tooltips and completions use a copy of the world with the text of the editor, because the text can be newer than the compilation. They run on a separate thread, because `typst-ide` can compile the document again to find a value.
 
 The jump from the source has its own search for the glyph at the cursor. The search of `typst-ide` gives only the first glyph of a text node, and in Typst 0.15 a text node contains a full line of text with its spaces. If a paragraph continues on the next page, the search gives only the page of the cursor.
 

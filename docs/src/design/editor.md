@@ -65,10 +65,11 @@ Until the project model is ready, the Write workspace shows a scratch document. 
 | Ctrl+A, Ctrl+C, Ctrl+X, and Ctrl+V | Select all, copy, cut, and paste. |
 | Ctrl+Z, and Ctrl+Y or Ctrl+Shift+Z | Undo and redo. |
 | Ctrl+Space | Show the completions at the cursor. |
+| F12 | Go to the definition of the item at the cursor. |
 
 On macOS, Cmd replaces Ctrl in shortcuts, and Alt replaces Ctrl for word movement and word deletion. Cmd+Left and Cmd+Right move to the start or the end of the line. Ctrl+Space stays Ctrl+Space, because Cmd+Space opens Spotlight.
 
-Click to move the cursor. Double-click to select a word, and triple-click to select a line. Drag to select text. Shift+click extends the selection.
+Click to move the cursor. Double-click to select a word, and triple-click to select a line. Drag to select text. Shift+click extends the selection. Ctrl+click a name to go to its definition. On macOS, use Cmd+click.
 
 ### Tooltips
 
@@ -85,6 +86,14 @@ While you type Typst code, the editor shows completions, for example after `#`. 
 - If you move the cursor, the list closes.
 
 Tooltips and completions use the text in the editor, also if it changed after the last compilation (D172).
+
+### Go to definition
+
+Push F12 or Ctrl+click a name to go to the definition of the item (D173).
+
+- If the definition is in the main file, the editor selects the name in the definition. For a reference, the editor selects the element with the label.
+- If the definition is in another file, a note gives the name of the file, because the editor shows only the main file.
+- If the item is part of the Typst library, for example `text`, a note tells this.
 
 ### Syntax colors
 

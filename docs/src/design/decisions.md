@@ -1235,3 +1235,14 @@ Do not change what an accepted decision says. You can correct its language. To c
   - They use the result of the compilation that gave the shown pages, because its document gives the labels. If there are no pages, they use the last compilation.
 - **Reason:** These are the usual settings of code editors. A thread keeps typing fast, because a completion can compile the document again.
 - **Other options:** A fuzzy match of the typed text. A delay of one second for tooltips. Completions only on request.
+
+## D173. Details of go to definition
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - F12 and Ctrl+click ask for the definition of the item. On macOS, Cmd+click replaces Ctrl+click.
+  - The engine examines the character after the cursor, and then the character before it. Thus the cursor at the end of a name also finds its definition.
+  - A definition in the main file selects its name. A definition in another file or in the Typst library shows a note.
+  - The request runs on the separate thread of the editor functions (D172).
+- **Reason:** These are the usual keys of code editors. The editor shows only the main file, so a note is the only possible answer for other files.
+- **Other options:** Open the documentation of library items on the Typst website. Alt+click in place of Ctrl+click.
