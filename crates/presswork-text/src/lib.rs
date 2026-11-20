@@ -4,6 +4,7 @@ mod document;
 mod error;
 mod history;
 mod position;
+mod search;
 mod selection;
 #[cfg(test)]
 mod testing;
@@ -15,5 +16,6 @@ pub use document::Document;
 pub use error::TextError;
 pub use history::{GROUP_DELAY, History};
 pub use position::{LineColumn, Position, Unit};
+pub use search::{PatternError, Query, Search};
 pub use selection::{Selection, SelectionRange};
 pub use transaction::Transaction;
