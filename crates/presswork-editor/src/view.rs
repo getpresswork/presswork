@@ -17,6 +17,7 @@ use presswork_ui::color::Colors;
 use presswork_ui::font;
 
 use crate::action::{Action, Deletion, Motion};
+use crate::boundary;
 use crate::editor::Editor;
 use crate::highlight::Highlighter;
 use crate::layout::{LINE_HEIGHT, Layout, TEXT_SIZE, row_height};
@@ -35,6 +36,11 @@ const MARK_THICKNESS: f32 = 1.5;
 const MARK_OFFSET: f32 = 4.0;
 const EMPTY_MARK_WIDTH: f32 = 6.0;
 const TAB: &str = "  ";
+const HOVER_DELAY: Duration = Duration::from_millis(500);
+const TOOLTIP_WIDTH: f32 = 420.0;
+const TOOLTIP_PADDING: f32 = 8.0;
+const TOOLTIP_GAP: f32 = 4.0;
+const TOOLTIP_TEXT_SIZE: f32 = 13.0;
 
 pub struct EditorView<'a, Message> {
     editor: &'a Editor,
@@ -43,6 +49,15 @@ pub struct EditorView<'a, Message> {
     autofocus: bool,
     marks: Vec<Mark>,
     id: Option<widget::Id>,
+    on_hover: Option<Box<dyn Fn(Option<Position>) -> Message + 'a>>,
+    tooltip: Option<&'a Tooltip>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tooltip {
+    pub position: Position,
+    pub text: String,
+    pub code: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,10 +84,12 @@ pub fn view<'a, Message>(
         autofocus: false,
         marks: Vec::new(),
         id: None,
+        on_hover: None,
+        tooltip: None,
     }
 }
 
-impl<Message> EditorView<'_, Message> {
+impl<'a, Message> EditorView<'a, Message> {
     #[must_use]
     pub fn autofocus(mut self, autofocus: bool) -> Self {
         self.autofocus = autofocus;
@@ -88,6 +105,18 @@ impl<Message> EditorView<'_, Message> {
     #[must_use]
     pub fn id(mut self, id: impl Into<widget::Id>) -> Self {
         self.id = Some(id.into());
+        self
+    }
+
+    #[must_use]
+    pub fn on_hover(mut self, on_hover: impl Fn(Option<Position>) -> Message + 'a) -> Self {
+        self.on_hover = Some(Box::new(on_hover));
+        self
+    }
+
+    #[must_use]
+    pub fn tooltip(mut self, tooltip: Option<&'a Tooltip>) -> Self {
+        self.tooltip = tooltip;
         self
     }
 
@@ -136,6 +165,167 @@ impl<Message> EditorView<'_, Message> {
     fn snap(&self, position: Position) -> Position {
         let buffer = self.editor.document().buffer();
         buffer.position(buffer.line_column(position, Unit::Byte), Unit::Byte)
+    }
+
+    fn press(
+        &self,
+        state: &mut State,
+        bounds: Rectangle,
+        point: Option<Point>,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let Some(point) = point else {
+            if state.focus.is_some() {
+                state.focus = None;
+                state.dragging = false;
+                shell.request_redraw();
+            }
+            return;
+        };
+        let click = mouse::Click::new(point, mouse::Button::Left, state.last_click);
+        let position = self.snap(state.layout.hit(state.to_content(bounds, point)));
+        let action = match click.kind() {
+            mouse::click::Kind::Single => Action::MoveTo {
+                position,
+                extend: state.modifiers.shift(),
+                goal: None,
+            },
+            mouse::click::Kind::Double => Action::SelectWord(position),
+            mouse::click::Kind::Triple => Action::SelectLine(position),
+        };
+        state.dragging = click.kind() == mouse::click::Kind::Single;
+        state.last_click = Some(click);
+        state.focus = Some(Focus::new());
+        shell.publish((self.on_action)(action));
+        shell.capture_event();
+    }
+
+    fn text_at(&self, state: &State, bounds: Rectangle, point: Point) -> Option<Position> {
+        if !bounds.contains(point) || point.x < bounds.x + state.gutter {
+            return None;
+        }
+        let content = state.to_content(bounds, point);
+        let position = self.snap(state.layout.hit(content));
+        let caret = state.layout.caret(position);
+        let near = content.x <= caret.x + row_height()
+            && content.y <= caret.y + caret.height + row_height();
+        if !near {
+            return None;
+        }
+        if content.x < caret.x {
+            Some(boundary::previous_grapheme(
+                self.editor.document().buffer(),
+                position,
+            ))
+        } else {
+            Some(position)
+        }
+    }
+
+    fn hover(
+        &self,
+        state: &mut State,
+        bounds: Rectangle,
+        point: Option<Point>,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        if self.on_hover.is_none() {
+            return;
+        }
+        let target = point.and_then(|point| self.text_at(state, bounds, point));
+        if state.hover.map(|hover| hover.position) == target {
+            return;
+        }
+        self.end_hover(state, shell);
+        if let Some(position) = target {
+            let since = Instant::now();
+            state.hover = Some(Hover {
+                position,
+                since,
+                reported: false,
+            });
+            shell.request_redraw_at(since + HOVER_DELAY);
+        }
+    }
+
+    fn end_hover(&self, state: &mut State, shell: &mut Shell<'_, Message>) {
+        if let Some(hover) = state.hover.take()
+            && hover.reported
+            && let Some(on_hover) = &self.on_hover
+        {
+            shell.publish(on_hover(None));
+        }
+    }
+
+    fn report_hover(&self, state: &mut State, now: Instant, shell: &mut Shell<'_, Message>) {
+        let Some(on_hover) = &self.on_hover else {
+            return;
+        };
+        if let Some(hover) = &mut state.hover
+            && !hover.reported
+        {
+            if now.saturating_duration_since(hover.since) >= HOVER_DELAY {
+                hover.reported = true;
+                shell.publish(on_hover(Some(hover.position)));
+            } else {
+                shell.request_redraw_at(hover.since + HOVER_DELAY);
+            }
+        }
+    }
+
+    fn draw_tooltip(
+        &self,
+        state: &State,
+        renderer: &mut Renderer,
+        bounds: Rectangle,
+        tooltip: &Tooltip,
+    ) {
+        let origin = state.origin(bounds);
+        let caret = state.layout.caret(tooltip.position);
+        let anchor = Rectangle::new(
+            Point::new(origin.x + caret.x, origin.y + caret.y),
+            Size::new(CARET_WIDTH, caret.height),
+        );
+        if !bounds.intersects(&anchor) {
+            return;
+        }
+        let paragraph = Paragraph::with_text(Text {
+            content: tooltip.text.as_str(),
+            bounds: Size::new(TOOLTIP_WIDTH - 2.0 * TOOLTIP_PADDING, f32::INFINITY),
+            size: Pixels(TOOLTIP_TEXT_SIZE),
+            line_height: text::LineHeight::Relative(LINE_HEIGHT),
+            font: if tooltip.code { font::MONO } else { font::UI },
+            align_x: text::Alignment::Left,
+            align_y: Vertical::Top,
+            shaping: text::Shaping::Advanced,
+            wrapping: text::Wrapping::WordOrGlyph,
+        });
+        let text_size = paragraph.min_bounds();
+        let size = Size::new(
+            text_size.width + 2.0 * TOOLTIP_PADDING,
+            text_size.height + 2.0 * TOOLTIP_PADDING,
+        );
+        let placed = tooltip_bounds(anchor, size, bounds);
+        renderer.with_layer(bounds, |renderer| {
+            renderer.fill_quad(
+                Quad {
+                    bounds: placed,
+                    border: Border {
+                        color: self.colors.rule,
+                        width: 1.0,
+                        radius: 6.0.into(),
+                    },
+                    ..Quad::default()
+                },
+                self.colors.raised,
+            );
+            renderer.fill_paragraph(
+                &paragraph,
+                Point::new(placed.x + TOOLTIP_PADDING, placed.y + TOOLTIP_PADDING),
+                self.colors.ink,
+                bounds,
+            );
+        });
     }
 
     fn input_method(&self, state: &State, bounds: Rectangle) -> InputMethod<&'static str> {
@@ -283,6 +473,27 @@ fn command(
 }
 
 #[derive(Debug, Clone, Copy)]
+struct Hover {
+    position: Position,
+    since: Instant,
+    reported: bool,
+}
+
+fn tooltip_bounds(anchor: Rectangle, size: Size, bounds: Rectangle) -> Rectangle {
+    let above = anchor.y - TOOLTIP_GAP - size.height;
+    let y = if above >= bounds.y {
+        above
+    } else {
+        anchor.y + anchor.height + TOOLTIP_GAP
+    };
+    let x = anchor
+        .x
+        .min(bounds.x + bounds.width - size.width)
+        .max(bounds.x);
+    Rectangle::new(Point::new(x, y), size)
+}
+
+#[derive(Debug, Clone, Copy)]
 struct Focus {
     since: Instant,
     now: Instant,
@@ -318,6 +529,7 @@ struct State {
     dragging: bool,
     modifiers: keyboard::Modifiers,
     revealed: Option<(u64, u64, Position)>,
+    hover: Option<Hover>,
 }
 
 impl State {
@@ -523,6 +735,9 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
                 }
             }
         });
+        if let Some(tooltip) = self.tooltip {
+            self.draw_tooltip(state, renderer, bounds, tooltip);
+        }
     }
 
     fn update(
@@ -538,6 +753,13 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
     ) {
         let state = tree.state.downcast_mut::<State>();
         let bounds = layout.bounds();
+        if matches!(
+            event,
+            Event::Keyboard(keyboard::Event::KeyPressed { .. })
+                | Event::Mouse(mouse::Event::ButtonPressed(_) | mouse::Event::WheelScrolled { .. })
+        ) {
+            self.end_hover(state, shell);
+        }
         match event {
             Event::Window(window::Event::Unfocused) => {
                 if let Some(focus) = &mut state.focus {
@@ -562,33 +784,13 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
                     shell.request_redraw_at(focus.since + next);
                     shell.request_input_method(&self.input_method(state, bounds));
                 }
+                self.report_hover(state, *now, shell);
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.modifiers = *modifiers;
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                if let Some(point) = cursor.position_over(bounds) {
-                    let click = mouse::Click::new(point, mouse::Button::Left, state.last_click);
-                    let position = self.snap(state.layout.hit(state.to_content(bounds, point)));
-                    let action = match click.kind() {
-                        mouse::click::Kind::Single => Action::MoveTo {
-                            position,
-                            extend: state.modifiers.shift(),
-                            goal: None,
-                        },
-                        mouse::click::Kind::Double => Action::SelectWord(position),
-                        mouse::click::Kind::Triple => Action::SelectLine(position),
-                    };
-                    state.dragging = click.kind() == mouse::click::Kind::Single;
-                    state.last_click = Some(click);
-                    state.focus = Some(Focus::new());
-                    shell.publish((self.on_action)(action));
-                    shell.capture_event();
-                } else if state.focus.is_some() {
-                    state.focus = None;
-                    state.dragging = false;
-                    shell.request_redraw();
-                }
+                self.press(state, bounds, cursor.position_over(bounds), shell);
             }
             Event::Mouse(mouse::Event::CursorMoved { position }) if state.dragging => {
                 let target = self.snap(state.layout.hit(state.to_content(bounds, *position)));
@@ -598,6 +800,10 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
                     goal: None,
                 }));
             }
+            Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                self.hover(state, bounds, Some(*position), shell);
+            }
+            Event::Mouse(mouse::Event::CursorLeft) => self.hover(state, bounds, None, shell),
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 state.dragging = false;
             }
@@ -826,6 +1032,152 @@ mod tests {
         let mut ui = simulator(view(&editor, &LIGHT, |action| action).id("editor"));
 
         assert!(ui.find(widget::Id::from("editor")).is_ok());
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Report {
+        Act(Action),
+        Hover(Option<Position>),
+    }
+
+    fn hovers(
+        text: &str,
+        interact: impl FnOnce(&mut Simulator<'_, Report>),
+    ) -> Vec<Option<Position>> {
+        load_fonts();
+        let editor = Editor::new(text);
+        let mut ui = simulator(
+            view(&editor, &LIGHT, Report::Act)
+                .autofocus(true)
+                .on_hover(Report::Hover),
+        );
+        interact(&mut ui);
+        ui.into_messages()
+            .filter_map(|report| match report {
+                Report::Hover(hover) => Some(hover),
+                Report::Act(_) => None,
+            })
+            .collect()
+    }
+
+    fn rest(ui: &mut Simulator<'_, Report>, point: Point, wait: Duration) {
+        ui.point_at(point);
+        ui.simulate([Event::Mouse(mouse::Event::CursorMoved { position: point })]);
+        ui.simulate([Event::Window(window::Event::RedrawRequested(
+            Instant::now() + wait,
+        ))]);
+    }
+
+    const ALPHABET: &str = "abcdefghijklmnopqrstuvwxyz";
+    const REST: Duration = Duration::from_millis(600);
+
+    fn first_line(x: f32) -> Point {
+        Point::new(x, PADDING_TOP + row_height() * 0.5)
+    }
+
+    #[test]
+    fn resting_the_mouse_on_text_reports_its_position() {
+        let hovers = hovers(ALPHABET, |ui| rest(ui, first_line(200.0), REST));
+
+        assert!(
+            matches!(
+                hovers.as_slice(),
+                [Some(position)] if position.offset() > 0 && position.offset() < ALPHABET.len()
+            ),
+            "{hovers:?}"
+        );
+    }
+
+    #[test]
+    fn a_short_rest_reports_nothing() {
+        let hovers = hovers(ALPHABET, |ui| {
+            rest(ui, first_line(200.0), Duration::from_millis(100));
+        });
+
+        assert_eq!(hovers, []);
+    }
+
+    #[test]
+    fn a_rest_after_the_end_of_a_line_reports_nothing() {
+        let hovers = hovers("ab", |ui| rest(ui, first_line(600.0), REST));
+
+        assert_eq!(hovers, []);
+    }
+
+    #[test]
+    fn moving_the_mouse_away_ends_a_reported_hover() {
+        let hovers = hovers(ALPHABET, |ui| {
+            rest(ui, first_line(200.0), REST);
+            let away = Point::new(200.0, 600.0);
+            ui.point_at(away);
+            ui.simulate([Event::Mouse(mouse::Event::CursorMoved { position: away })]);
+        });
+
+        assert_eq!(hovers.len(), 2, "{hovers:?}");
+        assert_eq!(hovers[1], None);
+    }
+
+    #[test]
+    fn a_key_ends_a_reported_hover() {
+        let hovers = hovers(ALPHABET, |ui| {
+            rest(ui, first_line(200.0), REST);
+            ui.tap_key(Named::ArrowLeft);
+        });
+
+        assert_eq!(hovers.len(), 2, "{hovers:?}");
+        assert_eq!(hovers[1], None);
+    }
+
+    fn screen() -> Rectangle {
+        Rectangle::new(Point::ORIGIN, Size::new(800.0, 600.0))
+    }
+
+    fn caret_at(x: f32, y: f32) -> Rectangle {
+        Rectangle::new(Point::new(x, y), Size::new(1.0, 22.0))
+    }
+
+    #[test]
+    fn a_tooltip_goes_above_its_line() {
+        let placed = tooltip_bounds(caret_at(100.0, 300.0), Size::new(200.0, 50.0), screen());
+
+        assert_eq!(
+            placed,
+            Rectangle::new(
+                Point::new(100.0, 300.0 - TOOLTIP_GAP - 50.0),
+                Size::new(200.0, 50.0)
+            )
+        );
+    }
+
+    #[test]
+    fn a_tooltip_without_room_above_goes_below_its_line() {
+        let placed = tooltip_bounds(caret_at(100.0, 10.0), Size::new(200.0, 50.0), screen());
+
+        assert!(
+            (placed.y - (10.0 + 22.0 + TOOLTIP_GAP)).abs() < 0.01,
+            "{placed:?}"
+        );
+    }
+
+    #[test]
+    fn a_tooltip_stays_inside_the_right_edge() {
+        let placed = tooltip_bounds(caret_at(700.0, 300.0), Size::new(200.0, 50.0), screen());
+
+        assert!((placed.x - 600.0).abs() < 0.01, "{placed:?}");
+    }
+
+    #[test]
+    fn a_view_with_a_tooltip_draws() {
+        load_fonts();
+        let editor = Editor::new("#text(red)[Hi]");
+        let tooltip = Tooltip {
+            position: Position::new(1),
+            text: "Customizes the look and layout of text.".to_owned(),
+            code: false,
+        };
+        let mut ui = simulator(view(&editor, &LIGHT, |action| action).tooltip(Some(&tooltip)));
+
+        assert!(ui.snapshot(&presswork_ui::theme::light()).is_ok());
     }
 
     #[test]

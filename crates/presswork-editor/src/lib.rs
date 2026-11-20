@@ -8,4 +8,4 @@ mod view;
 pub use action::{Action, Deletion, Motion};
 pub use editor::Editor;
 pub use highlight::{Highlighter, Role, Style};
-pub use view::{EditorView, Mark, MarkKind, view};
+pub use view::{EditorView, Mark, MarkKind, Tooltip, view};
