@@ -1,0 +1,232 @@
+use std::ops::Range;
+
+use typst::World as _;
+use typst::syntax::Side;
+
+use crate::ide::Analysis;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Tooltip {
+    Text(String),
+    Code(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompletionKind {
+    Syntax,
+    Function,
+    Type,
+    Parameter,
+    Constant,
+    Path,
+    Package,
+    Label,
+    Font,
+    Symbol(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Completion {
+    pub kind: CompletionKind,
+    pub label: String,
+    pub detail: Option<String>,
+    pub text: String,
+    pub select: Range<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Completions {
+    pub from: usize,
+    pub items: Vec<Completion>,
+}
+
+impl Analysis {
+    #[must_use]
+    pub fn tooltip(&self, text: &str, offset: usize) -> Option<Tooltip> {
+        let world = self.world_with(text);
+        let source = world.source(world.main()).ok()?;
+        match typst_ide::tooltip(&world, self.document(), &source, offset, Side::After)? {
+            typst_ide::Tooltip::Text(text) => Some(Tooltip::Text(text.to_string())),
+            typst_ide::Tooltip::Code(code) => Some(Tooltip::Code(code.to_string())),
+        }
+    }
+
+    #[must_use]
+    pub fn completions(&self, text: &str, offset: usize, explicit: bool) -> Option<Completions> {
+        let world = self.world_with(text);
+        let source = world.source(world.main()).ok()?;
+        let (from, items) =
+            typst_ide::autocomplete(&world, self.document(), &source, offset, explicit)?;
+        if items.is_empty() {
+            return None;
+        }
+        Some(Completions {
+            from,
+            items: items.into_iter().map(completion).collect(),
+        })
+    }
+}
+
+fn completion(completion: typst_ide::Completion) -> Completion {
+    let (text, select) = expand(completion.apply.as_deref().unwrap_or(&completion.label));
+    Completion {
+        kind: kind(completion.kind),
+        label: completion.label.to_string(),
+        detail: completion.detail.map(|detail| detail.to_string()),
+        text,
+        select,
+    }
+}
+
+fn kind(kind: typst_ide::CompletionKind) -> CompletionKind {
+    match kind {
+        typst_ide::CompletionKind::Syntax => CompletionKind::Syntax,
+        typst_ide::CompletionKind::Func => CompletionKind::Function,
+        typst_ide::CompletionKind::Type => CompletionKind::Type,
+        typst_ide::CompletionKind::Param => CompletionKind::Parameter,
+        typst_ide::CompletionKind::Constant => CompletionKind::Constant,
+        typst_ide::CompletionKind::Path => CompletionKind::Path,
+        typst_ide::CompletionKind::Package => CompletionKind::Package,
+        typst_ide::CompletionKind::Label => CompletionKind::Label,
+        typst_ide::CompletionKind::Font => CompletionKind::Font,
+        typst_ide::CompletionKind::Symbol(symbol) => CompletionKind::Symbol(symbol.to_string()),
+    }
+}
+
+fn expand(snippet: &str) -> (String, Range<usize>) {
+    let mut text = String::with_capacity(snippet.len());
+    let mut first: Option<Range<usize>> = None;
+    let mut rest = snippet;
+    while let Some(start) = rest.find("${") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find('}') else {
+            break;
+        };
+        text.push_str(&rest[..start]);
+        let at = text.len();
+        text.push_str(&after[..end]);
+        first.get_or_insert(at..text.len());
+        rest = &after[end + 1..];
+    }
+    text.push_str(rest);
+    let select = first.unwrap_or(text.len()..text.len());
+    (text, select)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use typst::foundations::Datetime;
+
+    use super::*;
+    use crate::fonts::Fonts;
+    use crate::job::run;
+    use crate::world::World;
+
+    fn analysis(text: &str) -> Analysis {
+        let today = Datetime::from_ymd(2026, 11, 19);
+        let world = Mutex::new(World::new(Arc::new(Fonts::embedded()), today));
+        run(&world, text, 1.0).analysis.unwrap()
+    }
+
+    fn inside(text: &str, word: &str) -> usize {
+        text.find(word).unwrap() + 1
+    }
+
+    #[test]
+    fn a_tooltip_tells_about_a_function() {
+        let text = "#text(fill: red)[Hi]";
+
+        let tooltip = analysis(text).tooltip(text, inside(text, "text"));
+
+        assert!(
+            matches!(&tooltip, Some(Tooltip::Text(about)) if !about.is_empty()),
+            "{tooltip:?}"
+        );
+    }
+
+    #[test]
+    fn a_tooltip_converts_a_length() {
+        let text = "#let gap = 10pt";
+
+        let tooltip = analysis(text).tooltip(text, inside(text, "10pt"));
+
+        assert!(
+            matches!(&tooltip, Some(Tooltip::Code(code)) if code.starts_with("10pt =")),
+            "{tooltip:?}"
+        );
+    }
+
+    #[test]
+    fn a_tooltip_uses_the_text_of_the_editor() {
+        let newer = "#let gap = 2cm";
+
+        let tooltip = analysis("Hello.").tooltip(newer, inside(newer, "2cm"));
+
+        assert!(
+            matches!(&tooltip, Some(Tooltip::Code(code)) if code.contains("20mm")),
+            "{tooltip:?}"
+        );
+    }
+
+    #[test]
+    fn plain_text_has_no_tooltip() {
+        let text = "Hello world.";
+
+        assert_eq!(analysis(text).tooltip(text, 3), None);
+    }
+
+    #[test]
+    fn completions_after_a_hash_offer_functions() {
+        let text = "#te";
+
+        let completions = analysis(text).completions(text, text.len(), false).unwrap();
+
+        assert_eq!(completions.from, 1);
+        assert!(
+            completions
+                .items
+                .iter()
+                .any(|item| item.label == "text" && item.kind == CompletionKind::Function),
+            "{completions:?}"
+        );
+    }
+
+    #[test]
+    fn plain_text_gives_no_completions_without_a_request() {
+        let text = "Hello";
+
+        assert_eq!(analysis(text).completions(text, text.len(), false), None);
+    }
+
+    #[test]
+    fn a_request_in_plain_text_gives_completions() {
+        let text = "Hello ";
+
+        let completions = analysis(text).completions(text, text.len(), true);
+
+        assert!(
+            completions.is_some_and(|completions| !completions.items.is_empty()),
+            "no completions"
+        );
+    }
+
+    #[test]
+    fn a_snippet_without_placeholders_puts_the_cursor_at_its_end() {
+        assert_eq!(expand("text"), ("text".to_owned(), 4..4));
+    }
+
+    #[test]
+    fn an_empty_placeholder_puts_the_cursor_at_its_place() {
+        assert_eq!(expand("text(${})"), ("text()".to_owned(), 5..5));
+    }
+
+    #[test]
+    fn the_first_named_placeholder_is_selected() {
+        assert_eq!(
+            expand("rgb(${r}, ${g}, ${b})"),
+            ("rgb(r, g, b)".to_owned(), 4..5)
+        );
+    }
+}

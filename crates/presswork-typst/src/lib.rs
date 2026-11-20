@@ -1,3 +1,4 @@
+mod assist;
 mod compile;
 mod fonts;
 mod ide;
@@ -8,6 +9,7 @@ mod scheduler;
 mod version;
 mod world;
 
+pub use assist::{Completion, CompletionKind, Completions, Tooltip};
 pub use compile::{Compilation, Diagnostic, Severity, compile};
 pub use fonts::Fonts;
 pub use ide::{Analysis, Jump, PagePoint};

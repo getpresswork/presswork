@@ -48,6 +48,16 @@ impl Analysis {
         }
     }
 
+    pub(crate) fn world_with(&self, text: &str) -> World {
+        let mut world = (*self.world).clone();
+        world.set_main_text(text);
+        world
+    }
+
+    pub(crate) fn document(&self) -> Option<&PagedDocument> {
+        self.document.as_deref()
+    }
+
     #[must_use]
     pub fn jump_from_click(&self, point: PagePoint) -> Option<Jump> {
         let document = self.document.as_deref()?;
