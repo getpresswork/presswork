@@ -125,6 +125,7 @@ impl Editor {
                 text,
                 select,
             } => self.replace(range, &text, select, now),
+            Action::ReplaceAll(replacements) => self.replace_all(replacements, now),
             Action::Newline => {
                 let head = self.document.selection().primary().head;
                 let text = format!(
@@ -221,6 +222,21 @@ impl Editor {
             Transaction::new(changes).with_selection(Selection::single(selection)),
             now,
         )
+    }
+
+    fn replace_all(
+        &mut self,
+        replacements: Vec<(std::ops::Range<Position>, String)>,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
+        if replacements.is_empty() {
+            return Ok(None);
+        }
+        let edits = replacements
+            .into_iter()
+            .map(|(range, text)| Edit::replace(range, text));
+        let changes = ChangeSet::new(self.document.buffer().len(), edits)?;
+        self.change(Transaction::new(changes), now)
     }
 
     fn delete(&mut self, deletion: Deletion, now: Instant) -> Result<Option<ChangeSet>, TextError> {
@@ -631,5 +647,52 @@ mod tests {
             after("#te|", &[replace(1, 3, "text()", 5..5), Action::Undo]),
             "#te|"
         );
+    }
+
+    fn replace_all(ranges: &[(usize, usize, &str)]) -> Action {
+        Action::ReplaceAll(
+            ranges
+                .iter()
+                .map(|(start, end, text)| {
+                    (
+                        Position::new(*start)..Position::new(*end),
+                        (*text).to_owned(),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn replace_all_changes_each_range_and_keeps_the_cursor() {
+        assert_eq!(
+            after(
+                "cat, |and cat",
+                &[replace_all(&[(0, 3, "dog"), (9, 12, "dog")])]
+            ),
+            "dog, |and dog"
+        );
+    }
+
+    #[test]
+    fn replace_all_is_one_undo_step() {
+        assert_eq!(
+            after(
+                "cat, |and cat",
+                &[replace_all(&[(0, 3, "dog"), (9, 12, "dog")]), Action::Undo]
+            ),
+            "cat, |and cat"
+        );
+    }
+
+    #[test]
+    fn replace_all_without_ranges_changes_nothing() {
+        let mut editor = editor("cat|");
+        let revision = editor.revision();
+
+        let changes = editor.perform(replace_all(&[]), Instant::now()).unwrap();
+
+        assert_eq!(changes, None);
+        assert_eq!(editor.revision(), revision);
     }
 }

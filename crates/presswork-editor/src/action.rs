@@ -9,6 +9,7 @@ pub enum Action {
         text: String,
         select: Range<usize>,
     },
+    ReplaceAll(Vec<(Range<Position>, String)>),
     Move {
         motion: Motion,
         extend: bool,
