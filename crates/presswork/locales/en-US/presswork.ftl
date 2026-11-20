@@ -152,6 +152,15 @@ definition-in-library = { $name } is part of the Typst library.
 preview-window-title = Preview · { $name }
 preview-window-title-scratch = Preview
 
+label-kind-heading = Heading
+label-kind-figure = Figure
+label-kind-table = Table
+label-kind-code = Code
+label-kind-equation = Equation
+label-kind-other = Labeled element
+completion-label-page = { $kind }, page { $page }
+completion-label-text = { $place }: { $text }
+
 logs-toggle = Logs
 logs-title = Logs
 logs-level-error = Error

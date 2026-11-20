@@ -22,7 +22,9 @@ use presswork_preview::Preview;
 use presswork_project::Project;
 use presswork_text::{ChangeSet, Position, Unit};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
-use presswork_typst::{Analysis, Diagnostic, Jump, Output, PagePoint, Program, Severity};
+use presswork_typst::{
+    Analysis, Diagnostic, Jump, LabelKind, LabelTarget, Output, PagePoint, Program, Severity,
+};
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::theme::{self as ui_theme, Mode};
@@ -645,8 +647,11 @@ impl App {
             .into_iter()
             .filter(|item| item.label.to_lowercase().starts_with(&typed))
             .map(|item| CompletionItem {
+                detail: match &item.target {
+                    Some(target) => Some(label_detail(&self.localizer, target)),
+                    None => item.detail,
+                },
                 label: item.label,
-                detail: item.detail,
                 text: item.text,
                 select: item.select,
             })
@@ -1583,6 +1588,39 @@ fn hairline<'a>() -> Element<'a, Message> {
     rule::horizontal(1).style(style::hairline).into()
 }
 
+fn label_detail(localizer: &Localizer, target: &LabelTarget) -> String {
+    let kind = localizer.text(label_kind_id(target.kind));
+    let place = match &target.page {
+        Some(page) => {
+            let mut args = FluentArgs::new();
+            args.set("kind", kind);
+            args.set("page", page.clone());
+            localizer.format("completion-label-page", &args)
+        }
+        None => kind,
+    };
+    match target.text.as_deref().filter(|text| !text.is_empty()) {
+        Some(text) => {
+            let mut args = FluentArgs::new();
+            args.set("place", place);
+            args.set("text", text.to_owned());
+            localizer.format("completion-label-text", &args)
+        }
+        None => place,
+    }
+}
+
+fn label_kind_id(kind: LabelKind) -> &'static str {
+    match kind {
+        LabelKind::Heading => "label-kind-heading",
+        LabelKind::Figure => "label-kind-figure",
+        LabelKind::Table => "label-kind-table",
+        LabelKind::Listing => "label-kind-code",
+        LabelKind::Equation => "label-kind-equation",
+        LabelKind::Other => "label-kind-other",
+    }
+}
+
 fn label_width(words: &str, size: f32) -> f32 {
     let characters = u16::try_from(words.chars().count()).unwrap_or(u16::MAX);
     f32::from(characters) * LABEL_ADVANCE * size
@@ -2038,6 +2076,75 @@ mod tests {
                 > 0
         );
         assert!(app.update(insert("e")).units() > 1);
+    }
+
+    fn label_completion(
+        kind: presswork_typst::LabelKind,
+        text: Option<&str>,
+        page: Option<&str>,
+    ) -> presswork_typst::Completion {
+        presswork_typst::Completion {
+            kind: presswork_typst::CompletionKind::Label,
+            target: Some(presswork_typst::LabelTarget {
+                name: "cat".to_owned(),
+                kind,
+                text: text.map(str::to_owned),
+                page: page.map(str::to_owned),
+            }),
+            ..completion("cat", "cat", 3..3)
+        }
+    }
+
+    fn label_details(items: Vec<presswork_typst::Completion>) -> Vec<Option<String>> {
+        let mut app = typed_app("See @");
+        let found = Message::CompletionsFound {
+            revision: app.editor.revision(),
+            offset: app.cursor().offset(),
+            explicit: false,
+            completions: Some(presswork_typst::Completions { from: 5, items }),
+        };
+        send(&mut app, found);
+        app.completions.map_or_else(Vec::new, |list| {
+            list.items.into_iter().map(|item| item.detail).collect()
+        })
+    }
+
+    #[test]
+    fn a_label_completion_tells_the_kind_the_page_and_the_text() {
+        use presswork_typst::LabelKind;
+
+        let details = label_details(vec![
+            label_completion(LabelKind::Figure, Some("A cat"), Some("4")),
+            label_completion(LabelKind::Heading, None, Some("iv")),
+            label_completion(LabelKind::Listing, Some("Code"), None),
+        ]);
+
+        assert_eq!(
+            details,
+            [
+                Some("Figure, page 4: A cat".to_owned()),
+                Some("Heading, page iv".to_owned()),
+                Some("Code: Code".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn each_label_kind_has_english_text() {
+        use presswork_typst::LabelKind;
+        let localizer = Localizer::english();
+
+        for kind in [
+            LabelKind::Heading,
+            LabelKind::Figure,
+            LabelKind::Table,
+            LabelKind::Listing,
+            LabelKind::Equation,
+            LabelKind::Other,
+        ] {
+            let id = label_kind_id(kind);
+            assert_ne!(localizer.text(id), id);
+        }
     }
 
     const BINDING: &str = "#let gap = 1pt\n#gap";
