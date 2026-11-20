@@ -1,5 +1,5 @@
 use futures::channel::oneshot;
-use presswork_typst::{Analysis, Tooltip};
+use presswork_typst::{Analysis, Completions, Tooltip};
 
 pub(crate) fn tooltip(
     analysis: Analysis,
@@ -7,6 +7,15 @@ pub(crate) fn tooltip(
     offset: usize,
 ) -> impl Future<Output = Option<Tooltip>> + Send + 'static {
     run(move || analysis.tooltip(&text, offset))
+}
+
+pub(crate) fn completions(
+    analysis: Analysis,
+    text: String,
+    offset: usize,
+    explicit: bool,
+) -> impl Future<Output = Option<Completions>> + Send + 'static {
+    run(move || analysis.completions(&text, offset, explicit))
 }
 
 fn run<T: Send + 'static>(
@@ -46,6 +55,26 @@ mod tests {
         assert!(
             matches!(&tooltip, Some(Tooltip::Code(code)) if code.starts_with("10pt")),
             "{tooltip:?}"
+        );
+    }
+
+    #[test]
+    fn the_completion_job_gives_the_completions_at_the_cursor() {
+        let text = "#te";
+
+        let completions = futures::executor::block_on(completions(
+            analysis(text),
+            text.to_owned(),
+            text.len(),
+            false,
+        ));
+
+        assert!(
+            completions.is_some_and(|completions| completions
+                .items
+                .iter()
+                .any(|item| item.label == "text")),
+            "no completion for text"
         );
     }
 }

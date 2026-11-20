@@ -14,7 +14,9 @@ use iced::{
 };
 use presswork_api::live::ServerMessage;
 use presswork_api::{Document, SearchHit};
-use presswork_editor::{Editor, Mark, MarkKind, Motion};
+use presswork_editor::{
+    CompletionEvent, CompletionItem, CompletionList, Editor, Mark, MarkKind, Motion,
+};
 use presswork_log::{Level, LogStore};
 use presswork_preview::Preview;
 use presswork_project::Project;
@@ -67,6 +69,8 @@ pub(crate) struct App {
     pages_analysis: Option<Analysis>,
     hovered: Option<Position>,
     tooltip: Option<presswork_editor::Tooltip>,
+    completions: Option<presswork_editor::CompletionList>,
+    explicit_completion: bool,
     project: Option<Project>,
     saved: u64,
     notice: Option<String>,
@@ -90,6 +94,13 @@ pub(crate) enum Message {
     SystemTheme(Mode),
     Editor(presswork_editor::Action),
     Hover(Option<Position>),
+    Complete(presswork_editor::CompletionEvent),
+    CompletionsFound {
+        revision: u64,
+        offset: usize,
+        explicit: bool,
+        completions: Option<presswork_typst::Completions>,
+    },
     TooltipFound {
         position: Position,
         revision: u64,
@@ -150,6 +161,8 @@ impl App {
             pages_analysis: None,
             hovered: None,
             tooltip: None,
+            completions: None,
+            explicit_completion: false,
             project: None,
             notice: None,
             main_window: window::Id::unique(),
@@ -426,6 +439,7 @@ impl App {
     }
 
     fn edit(&mut self, action: presswork_editor::Action) -> Task<Message> {
+        let typed = matches!(action, presswork_editor::Action::Insert(_));
         let revision = self.editor.revision();
         let head = self.cursor();
         match self.editor.perform(action, Instant::now()) {
@@ -435,11 +449,17 @@ impl App {
         }
         if self.editor.revision() != revision {
             self.tooltip = None;
-            return self.request_compile();
+            let compile = self.request_compile();
+            if !typed && self.completions.is_none() {
+                return compile;
+            }
+            let explicit = self.completions.is_some() && self.explicit_completion;
+            return Task::batch([compile, self.request_completions(explicit)]);
         }
         if self.cursor() == head {
             return Task::none();
         }
+        self.completions = None;
         self.follow_cursor()
     }
 
@@ -458,6 +478,119 @@ impl App {
             action => self.preview.perform(action),
         }
         Task::none()
+    }
+
+    fn assist_message(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::Hover(position) => return self.hover(position),
+            Message::TooltipFound {
+                position,
+                revision,
+                tooltip,
+            } => self.tooltip_found(position, revision, tooltip),
+            Message::Complete(event) => return self.complete(event),
+            Message::CompletionsFound {
+                revision,
+                offset,
+                explicit,
+                completions,
+            } => self.completions_found(revision, offset, explicit, completions),
+            _ => {}
+        }
+        Task::none()
+    }
+
+    fn complete(&mut self, event: CompletionEvent) -> Task<Message> {
+        match event {
+            CompletionEvent::Request => return self.request_completions(true),
+            CompletionEvent::Next => {
+                if let Some(list) = &mut self.completions {
+                    list.next();
+                }
+            }
+            CompletionEvent::Previous => {
+                if let Some(list) = &mut self.completions {
+                    list.previous();
+                }
+            }
+            CompletionEvent::Accept => {
+                if let Some(index) = self.completions.as_ref().map(|list| list.selected) {
+                    return self.apply_completion(index);
+                }
+            }
+            CompletionEvent::Choose(index) => return self.apply_completion(index),
+            CompletionEvent::Close => self.completions = None,
+        }
+        Task::none()
+    }
+
+    fn apply_completion(&mut self, index: usize) -> Task<Message> {
+        let Some(list) = self.completions.take() else {
+            return Task::none();
+        };
+        match list.apply(index, self.cursor()) {
+            Some(action) => self.edit(action),
+            None => Task::none(),
+        }
+    }
+
+    fn request_completions(&self, explicit: bool) -> Task<Message> {
+        let Some(analysis) = self.assist_analysis() else {
+            return Task::none();
+        };
+        let text = self.editor.document().buffer().to_string();
+        let revision = self.editor.revision();
+        let offset = self.cursor().offset();
+        Task::perform(
+            assist::completions(analysis, text, offset, explicit),
+            move |completions| Message::CompletionsFound {
+                revision,
+                offset,
+                explicit,
+                completions,
+            },
+        )
+    }
+
+    fn completions_found(
+        &mut self,
+        revision: u64,
+        offset: usize,
+        explicit: bool,
+        completions: Option<presswork_typst::Completions>,
+    ) {
+        if revision != self.editor.revision() || offset != self.cursor().offset() {
+            return;
+        }
+        self.completions = completions.and_then(|completions| self.completion_list(completions));
+        self.explicit_completion = explicit && self.completions.is_some();
+    }
+
+    fn completion_list(&self, completions: presswork_typst::Completions) -> Option<CompletionList> {
+        let cursor = self.cursor().offset();
+        let from = completions.from.min(cursor);
+        let typed = self
+            .editor
+            .document()
+            .buffer()
+            .slice(Position::new(from)..Position::new(cursor))
+            .to_lowercase();
+        let items: Vec<CompletionItem> = completions
+            .items
+            .into_iter()
+            .filter(|item| item.label.to_lowercase().starts_with(&typed))
+            .map(|item| CompletionItem {
+                label: item.label,
+                detail: item.detail,
+                text: item.text,
+                select: item.select,
+            })
+            .collect();
+        (!items.is_empty()).then(|| CompletionList {
+            from: Position::new(from),
+            items,
+            selected: 0,
+        })
     }
 
     fn hover(&mut self, position: Option<Position>) -> Task<Message> {
@@ -884,12 +1017,10 @@ impl App {
             }
             Message::Editor(_) if self.quitting => {}
             Message::Editor(action) => return self.edit(action),
-            Message::Hover(position) => return self.hover(position),
-            Message::TooltipFound {
-                position,
-                revision,
-                tooltip,
-            } => self.tooltip_found(position, revision, tooltip),
+            message @ (Message::Hover(_)
+            | Message::TooltipFound { .. }
+            | Message::Complete(_)
+            | Message::CompletionsFound { .. }) => return self.assist_message(message),
             Message::Server(message) => return self.server(message),
             Message::Live(event) => return self.live_event(event),
             Message::Chat(message) => self.chat_message(message),
@@ -1202,7 +1333,9 @@ impl App {
                 .autofocus(true)
                 .marks(self.marks())
                 .on_hover(Message::Hover)
-                .tooltip(self.tooltip.as_ref());
+                .tooltip(self.tooltip.as_ref())
+                .on_complete(Message::Complete)
+                .completions(self.completions.as_ref());
             if self.preview_window.is_some() {
                 return container(editor).width(Fill).height(Fill).into();
             }
@@ -1719,6 +1852,120 @@ mod tests {
         send(&mut app, other_text);
 
         assert_eq!(app.tooltip, None);
+    }
+
+    fn typed_app(text: &str) -> App {
+        let mut app = compiled_app(text);
+        send(&mut app, move_to(text.len()));
+        app
+    }
+
+    fn completion(
+        label: &str,
+        text: &str,
+        select: std::ops::Range<usize>,
+    ) -> presswork_typst::Completion {
+        presswork_typst::Completion {
+            kind: presswork_typst::CompletionKind::Function,
+            label: label.to_owned(),
+            detail: None,
+            text: text.to_owned(),
+            select,
+        }
+    }
+
+    fn completions_found(app: &App, from: usize) -> Message {
+        Message::CompletionsFound {
+            revision: app.editor.revision(),
+            offset: app.cursor().offset(),
+            explicit: false,
+            completions: Some(presswork_typst::Completions {
+                from,
+                items: vec![
+                    completion("text", "text()", 5..5),
+                    completion("table", "table()", 6..6),
+                    completion("rgb", "rgb()", 4..4),
+                ],
+            }),
+        }
+    }
+
+    fn labels(app: &App) -> Vec<String> {
+        app.completions.as_ref().map_or_else(Vec::new, |list| {
+            list.items.iter().map(|item| item.label.clone()).collect()
+        })
+    }
+
+    fn open_completions(text: &str) -> App {
+        let mut app = typed_app(text);
+        let found = completions_found(&app, 1);
+        send(&mut app, found);
+        app
+    }
+
+    #[test]
+    fn found_completions_show_the_items_that_match_the_typed_text() {
+        let app = open_completions("#t");
+
+        assert_eq!(labels(&app), ["text", "table"]);
+    }
+
+    #[test]
+    fn completions_for_other_text_are_dropped() {
+        let mut app = typed_app("#t");
+        let mut found = completions_found(&app, 1);
+        if let Message::CompletionsFound { revision, .. } = &mut found {
+            *revision += 1;
+        }
+
+        send(&mut app, found);
+
+        assert_eq!(app.completions, None);
+    }
+
+    #[test]
+    fn accepting_the_next_item_puts_it_into_the_text() {
+        let mut app = open_completions("#t");
+
+        send(&mut app, Message::Complete(CompletionEvent::Next));
+        send(&mut app, Message::Complete(CompletionEvent::Accept));
+
+        assert_eq!(app.editor.document().buffer().to_string(), "#table()");
+        assert_eq!(app.cursor(), Position::new(7));
+        assert_eq!(app.completions, None);
+    }
+
+    #[test]
+    fn a_chosen_item_goes_into_the_text() {
+        let mut app = open_completions("#t");
+
+        send(&mut app, Message::Complete(CompletionEvent::Choose(0)));
+
+        assert_eq!(app.editor.document().buffer().to_string(), "#text()");
+        assert_eq!(app.cursor(), Position::new(6));
+    }
+
+    #[test]
+    fn escape_and_cursor_moves_close_the_list() {
+        let mut app = open_completions("#t");
+        send(&mut app, Message::Complete(CompletionEvent::Close));
+        assert_eq!(app.completions, None);
+
+        let mut app = open_completions("#t");
+        send(&mut app, move_to(0));
+        assert_eq!(app.completions, None);
+    }
+
+    #[test]
+    fn typing_and_control_space_ask_for_completions() {
+        let mut app = typed_app("#t");
+
+        assert!(
+            app.update(Message::Complete(CompletionEvent::Request))
+                .units()
+                > 0
+        );
+        assert!(app.update(insert("e")).units() > 1);
     }
 
     #[test]
