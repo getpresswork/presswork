@@ -101,7 +101,7 @@ impl Analysis {
             .collect()
     }
 
-    fn source_range(&self, span: Span) -> Option<SourceRange> {
+    pub(crate) fn source_range(&self, span: Span) -> Option<SourceRange> {
         let id = span.id()?;
         let range = self.world().range(span)?;
         if id == self.world().main() {
