@@ -10,6 +10,18 @@ pub enum Action {
         select: Range<usize>,
     },
     ReplaceAll(Vec<(Range<Position>, String)>),
+    AddCursor(Position),
+    AddCursorLine {
+        down: bool,
+    },
+    SelectNext,
+    SelectEvery,
+    SingleCursor,
+    MoveEach {
+        heads: Vec<Position>,
+        extend: bool,
+    },
+    Paste(String),
     Move {
         motion: Motion,
         extend: bool,

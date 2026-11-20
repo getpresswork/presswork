@@ -1,9 +1,11 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
+use std::ops::Range;
+
 use presswork_text::{
-    Assoc, Buffer, ChangeSet, Document, Edit, Position, Selection, SelectionRange, TextError,
-    Transaction,
+    Assoc, Buffer, ChangeSet, Document, Edit, LineColumn, Position, Query, Search, Selection,
+    SelectionRange, TextError, Transaction, Unit,
 };
 
 use crate::action::{Action, Deletion, Motion};
@@ -17,6 +19,7 @@ pub struct Editor {
     document: Document,
     revision: u64,
     goal: Option<f32>,
+    word_search: bool,
 }
 
 impl Editor {
@@ -27,6 +30,7 @@ impl Editor {
             document: Document::new(text),
             revision: 0,
             goal: None,
+            word_search: false,
         }
     }
 
@@ -79,6 +83,7 @@ impl Editor {
         now: Instant,
     ) -> Result<Option<ChangeSet>, TextError> {
         self.goal = None;
+        let word_search = std::mem::take(&mut self.word_search);
         let buffer = self.document.buffer();
         match action {
             Action::Move { motion, extend } => {
@@ -126,15 +131,26 @@ impl Editor {
                 select,
             } => self.replace(range, &text, select, now),
             Action::ReplaceAll(replacements) => self.replace_all(replacements, now),
-            Action::Newline => {
-                let head = self.document.selection().primary().head;
-                let text = format!(
-                    "{}{}",
-                    boundary::line_break(buffer),
-                    boundary::indentation(buffer, head)
-                );
-                self.replace_selection(&text, now)
+            Action::AddCursor(position) => self.add_cursor(position, now),
+            Action::AddCursorLine { down } => self.add_cursor_line(down, now),
+            Action::SelectNext => self.select_next(word_search, now),
+            Action::SelectEvery => self.select_every(word_search, now),
+            Action::SingleCursor => {
+                let primary = self.document.selection().primary();
+                self.select(Selection::single(primary), now)
             }
+            Action::MoveEach { heads, extend } => self.move_each(&heads, extend, now),
+            Action::Paste(text) => self.paste(&text, now),
+            Action::Newline => self.replace_each(
+                |_, buffer, range| {
+                    format!(
+                        "{}{}",
+                        boundary::line_break(buffer),
+                        boundary::indentation(buffer, range.head)
+                    )
+                },
+                now,
+            ),
             Action::Delete(deletion) => self.delete(deletion, now),
             Action::Undo => {
                 let changes = self.document.undo()?;
@@ -182,12 +198,20 @@ impl Editor {
         text: &str,
         now: Instant,
     ) -> Result<Option<ChangeSet>, TextError> {
+        self.replace_each(|_, _, _| text.to_owned(), now)
+    }
+
+    fn replace_each(
+        &mut self,
+        text_for: impl Fn(usize, &Buffer, SelectionRange) -> String,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
         let selection = self.document.selection().clone();
-        let edits = selection
-            .ranges()
-            .iter()
-            .map(|range| Edit::replace(range.start()..range.end(), text));
-        let changes = ChangeSet::new(self.document.buffer().len(), edits)?;
+        let buffer = self.document.buffer();
+        let edits = selection.ranges().iter().enumerate().map(|(index, range)| {
+            Edit::replace(range.start()..range.end(), text_for(index, buffer, *range))
+        });
+        let changes = ChangeSet::new(buffer.len(), edits)?;
         let cursors = selection
             .ranges()
             .iter()
@@ -195,6 +219,184 @@ impl Editor {
             .collect();
         let selection = Selection::new(cursors, selection.primary_index());
         self.change(Transaction::new(changes).with_selection(selection), now)
+    }
+
+    fn paste(&mut self, text: &str, now: Instant) -> Result<Option<ChangeSet>, TextError> {
+        let count = self.document.selection().ranges().len();
+        let lines: Vec<&str> = text.lines().collect();
+        if count > 1 && lines.len() == count {
+            return self.replace_each(|index, _, _| lines[index].to_owned(), now);
+        }
+        self.replace_selection(text, now)
+    }
+
+    fn add_cursor(
+        &mut self,
+        position: Position,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
+        let selection = self.document.selection();
+        let mut ranges = selection.ranges().to_vec();
+        let primary = selection.primary_index();
+        match ranges
+            .iter()
+            .position(|range| range.is_empty() && range.head == position)
+        {
+            Some(_) if ranges.len() == 1 => Ok(None),
+            Some(index) => {
+                ranges.remove(index);
+                let primary = match index.cmp(&primary) {
+                    std::cmp::Ordering::Less => primary - 1,
+                    std::cmp::Ordering::Equal => ranges.len() - 1,
+                    std::cmp::Ordering::Greater => primary,
+                };
+                self.select(Selection::new(ranges, primary), now)
+            }
+            None => {
+                ranges.push(SelectionRange::cursor(position));
+                let primary = ranges.len() - 1;
+                self.select(Selection::new(ranges, primary), now)
+            }
+        }
+    }
+
+    fn add_cursor_line(
+        &mut self,
+        down: bool,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
+        let buffer = self.document.buffer();
+        let ranges = self.document.selection().ranges();
+        let edge = if down { ranges.last() } else { ranges.first() };
+        let Some(edge) = edge else {
+            return Ok(None);
+        };
+        let place = buffer.line_column(edge.head, Unit::Char);
+        let line = if down {
+            place.line + 1
+        } else if let Some(line) = place.line.checked_sub(1) {
+            line
+        } else {
+            return Ok(None);
+        };
+        if line >= buffer.line_count() {
+            return Ok(None);
+        }
+        let column = place.column;
+        let position = buffer.position(LineColumn { line, column }, Unit::Char);
+        self.add_cursor(position, now)
+    }
+
+    fn word_range(&self, at: Position) -> Option<SelectionRange> {
+        let buffer = self.document.buffer();
+        let word = boundary::word_at(buffer, at);
+        buffer
+            .slice(word.clone())
+            .chars()
+            .any(char::is_alphanumeric)
+            .then(|| SelectionRange::new(word.start, word.end))
+    }
+
+    fn places_of(&self, range: SelectionRange, whole_word: bool) -> Vec<Range<usize>> {
+        let text = self.document.buffer().to_string();
+        let query = Query {
+            text: text[range.start().offset()..range.end().offset()].to_owned(),
+            match_case: true,
+            whole_word,
+            pattern: false,
+        };
+        match Search::new(&query) {
+            Ok(Some(search)) => search.find(&text),
+            _ => Vec::new(),
+        }
+    }
+
+    fn select_next(
+        &mut self,
+        word_search: bool,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
+        let selection = self.document.selection().clone();
+        let primary = selection.primary();
+        let mut ranges = selection.ranges().to_vec();
+        if primary.is_empty() {
+            let Some(word) = self.word_range(primary.head) else {
+                return Ok(None);
+            };
+            ranges[selection.primary_index()] = word;
+            self.word_search = true;
+            return self.select(Selection::new(ranges, selection.primary_index()), now);
+        }
+        self.word_search = word_search;
+        let places = self.places_of(primary, word_search);
+        let free = |place: &&Range<usize>| {
+            !ranges.iter().any(|taken| {
+                place.start < taken.end().offset() && taken.start().offset() < place.end
+            })
+        };
+        let after = primary.end().offset();
+        let Some(next) = places
+            .iter()
+            .filter(|place| place.start >= after)
+            .find(free)
+            .or_else(|| places.iter().find(free))
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        ranges.push(SelectionRange::new(
+            Position::new(next.start),
+            Position::new(next.end),
+        ));
+        let primary = ranges.len() - 1;
+        self.select(Selection::new(ranges, primary), now)
+    }
+
+    fn select_every(
+        &mut self,
+        word_search: bool,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
+        let mut primary = self.document.selection().primary();
+        let mut whole_word = word_search;
+        if primary.is_empty() {
+            let Some(word) = self.word_range(primary.head) else {
+                return Ok(None);
+            };
+            primary = word;
+            whole_word = true;
+        }
+        let ranges: Vec<SelectionRange> = self
+            .places_of(primary, whole_word)
+            .into_iter()
+            .map(|place| SelectionRange::new(Position::new(place.start), Position::new(place.end)))
+            .collect();
+        let Some(index) = ranges
+            .iter()
+            .position(|range| range.start() == primary.start())
+        else {
+            return Ok(None);
+        };
+        self.word_search = whole_word;
+        self.select(Selection::new(ranges, index), now)
+    }
+
+    fn move_each(
+        &mut self,
+        heads: &[Position],
+        extend: bool,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
+        let selection = self.document.selection();
+        let ranges = selection
+            .ranges()
+            .iter()
+            .zip(heads)
+            .map(|(range, head)| {
+                SelectionRange::new(if extend { range.anchor } else { *head }, *head)
+            })
+            .collect();
+        self.select(Selection::new(ranges, selection.primary_index()), now)
     }
 
     fn replace(
@@ -646,6 +848,207 @@ mod tests {
         assert_eq!(
             after("#te|", &[replace(1, 3, "text()", 5..5), Action::Undo]),
             "#te|"
+        );
+    }
+
+    fn editor_with(marked: &str) -> Editor {
+        let mut text = String::new();
+        let mut ranges = Vec::new();
+        let mut anchor = None;
+        for char in marked.chars() {
+            match char {
+                '[' => anchor = Some(text.len()),
+                '|' => {
+                    let head = Position::new(text.len());
+                    let start = anchor.take().map_or(head, Position::new);
+                    ranges.push(SelectionRange::new(start, head));
+                }
+                _ => text.push(char),
+            }
+        }
+        let mut editor = Editor::new(&text);
+        let primary = ranges.len() - 1;
+        editor
+            .select(Selection::new(ranges, primary), Instant::now())
+            .unwrap();
+        editor
+    }
+
+    fn all_marked(editor: &Editor) -> String {
+        let mut text = editor.document().buffer().to_string();
+        let mut markers = Vec::new();
+        for range in editor.document().selection().ranges() {
+            markers.push((range.head.offset(), '|'));
+            if !range.is_empty() {
+                markers.push((range.anchor.offset(), '['));
+            }
+        }
+        markers.sort_by_key(|(offset, marker)| (std::cmp::Reverse(*offset), *marker == '|'));
+        for (offset, marker) in markers {
+            text.insert(offset, marker);
+        }
+        text
+    }
+
+    fn after_all(marked_text: &str, actions: &[Action]) -> String {
+        let mut editor = editor_with(marked_text);
+        for action in actions {
+            perform(&mut editor, action.clone());
+        }
+        all_marked(&editor)
+    }
+
+    fn primary_of(marked_text: &str, actions: &[Action]) -> String {
+        let mut editor = editor_with(marked_text);
+        for action in actions {
+            perform(&mut editor, action.clone());
+        }
+        marked(&editor)
+    }
+
+    #[test]
+    fn a_new_cursor_joins_the_others_and_becomes_the_primary_cursor() {
+        let add = Action::AddCursor(Position::new(5));
+
+        assert_eq!(
+            after_all("ab|c def", std::slice::from_ref(&add)),
+            "ab|c d|ef"
+        );
+        assert_eq!(primary_of("ab|c def", &[add]), "abc d|ef");
+    }
+
+    #[test]
+    fn a_new_cursor_on_a_cursor_removes_it() {
+        assert_eq!(
+            after_all("a|b|c", &[Action::AddCursor(Position::new(1))]),
+            "ab|c"
+        );
+    }
+
+    #[test]
+    fn the_only_cursor_stays() {
+        assert_eq!(
+            after_all("a|bc", &[Action::AddCursor(Position::new(1))]),
+            "a|bc"
+        );
+    }
+
+    #[test]
+    fn typing_puts_the_text_at_each_cursor() {
+        assert_eq!(after_all("a|b|c", &[insert("x")]), "ax|bx|c");
+    }
+
+    #[test]
+    fn a_new_line_keeps_the_indent_of_each_line() {
+        assert_eq!(after_all("  a|\nb|", &[Action::Newline]), "  a\n  |\nb\n|");
+    }
+
+    #[test]
+    fn undo_gives_back_all_cursors() {
+        assert_eq!(after_all("a|b|c", &[insert("x"), Action::Undo]), "a|b|c");
+    }
+
+    #[test]
+    fn a_cursor_line_goes_below_the_last_cursor_at_the_same_column() {
+        let down = Action::AddCursorLine { down: true };
+
+        assert_eq!(
+            after_all("ab|c\ndef\ng", std::slice::from_ref(&down)),
+            "ab|c\nde|f\ng"
+        );
+        assert_eq!(
+            after_all("ab|c\ndef\ng", &[down.clone(), down]),
+            "ab|c\nde|f\ng|"
+        );
+    }
+
+    #[test]
+    fn a_cursor_line_goes_above_the_first_cursor() {
+        assert_eq!(
+            after_all("abc\nde|f", &[Action::AddCursorLine { down: false }]),
+            "ab|c\nde|f"
+        );
+    }
+
+    #[test]
+    fn no_cursor_line_goes_above_the_first_line() {
+        assert_eq!(
+            after_all("ab|c\ndef", &[Action::AddCursorLine { down: false }]),
+            "ab|c\ndef"
+        );
+    }
+
+    #[test]
+    fn select_next_selects_the_word_and_then_the_next_word() {
+        let text = "ca|t and cat and catalog";
+
+        assert_eq!(
+            after_all(text, &[Action::SelectNext]),
+            "[cat| and cat and catalog"
+        );
+        assert_eq!(
+            after_all(text, &[Action::SelectNext, Action::SelectNext]),
+            "[cat| and [cat| and catalog"
+        );
+        assert_eq!(
+            after_all(
+                text,
+                &[Action::SelectNext, Action::SelectNext, Action::SelectNext]
+            ),
+            "[cat| and [cat| and catalog"
+        );
+    }
+
+    #[test]
+    fn select_next_after_a_selection_also_finds_parts_of_words() {
+        assert_eq!(
+            after_all("[cat| and catalog", &[Action::SelectNext]),
+            "[cat| and [cat|alog"
+        );
+    }
+
+    #[test]
+    fn select_next_goes_around_to_the_start() {
+        assert_eq!(after_all("ab x [ab|", &[Action::SelectNext]), "[ab| x [ab|");
+        assert_eq!(primary_of("ab x [ab|", &[Action::SelectNext]), "[ab| x ab");
+    }
+
+    #[test]
+    fn select_every_selects_all_places_of_the_text() {
+        assert_eq!(
+            after_all("[ab| x ab y ab", &[Action::SelectEvery]),
+            "[ab| x [ab| y [ab|"
+        );
+    }
+
+    #[test]
+    fn single_cursor_keeps_only_the_primary_range() {
+        assert_eq!(after_all("a|b|c", &[Action::SingleCursor]), "ab|c");
+    }
+
+    #[test]
+    fn move_each_moves_the_head_of_each_range() {
+        let moves = Action::MoveEach {
+            heads: vec![Position::new(0), Position::new(3)],
+            extend: false,
+        };
+
+        assert_eq!(after_all("a|b|cd", &[moves]), "|abc|d");
+    }
+
+    #[test]
+    fn a_paste_with_one_line_for_each_cursor_puts_one_line_at_each() {
+        assert_eq!(
+            after_all("a|\nb|", &[Action::Paste("x\ny".to_owned())]),
+            "ax|\nby|"
+        );
+    }
+
+    #[test]
+    fn a_paste_with_other_lines_puts_all_text_at_each_cursor() {
+        assert_eq!(
+            after_all("a|\nb|", &[Action::Paste("x".to_owned())]),
+            "ax|\nbx|"
         );
     }
 
