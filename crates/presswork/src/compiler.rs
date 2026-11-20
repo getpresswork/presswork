@@ -1,18 +1,15 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
 use futures::channel::oneshot;
-use presswork_project::{ExportFormat, ExportProfile};
+use presswork_project::ExportProfile;
 use presswork_typst::{
-    Datetime, ExportError, ExportSettings, Fonts, Format, Output, Problem, Program, Scheduler,
-    Stop, World,
+    ExportError, Fonts, Output, Problem, ProfileError, Program, Scheduler, Stop, World, today,
 };
 
 pub(crate) const SCALE: f32 = 2.0;
 const PROGRAM_TIME_LIMIT: Duration = Duration::from_secs(120);
-const DEFAULT_PPI: u32 = 144;
-const POINTS_PER_INCH: f32 = 72.0;
 
 static FONTS: LazyLock<Arc<Fonts>> = LazyLock::new(|| Arc::new(Fonts::embedded()));
 
@@ -29,7 +26,7 @@ pub(crate) enum ExportFailure {
     Stopped,
     Outside(PathBuf),
     Export(String),
-    Write(String),
+    Write(PathBuf, String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,45 +190,15 @@ impl Compiler {
             if !embedded {
                 return Err(ExportFailure::NeedsEngine);
             }
-            if let Some(outside) = profile
-                .files(&main, 1)
-                .into_iter()
-                .find(|path| !inside(path))
-            {
-                return Err(ExportFailure::Outside(outside));
+            if let Some(path) = profile.outside(&main) {
+                return Err(ExportFailure::Outside(path));
             }
             let analysis = presswork_typst::analyze(&engine, text)
                 .analysis
                 .ok_or(ExportFailure::NoPages)?;
             let problems = analysis.preflight(profile.image_ppi);
-            let settings = ExportSettings {
-                format: match profile.format {
-                    ExportFormat::Pdf => Format::Pdf,
-                    ExportFormat::Png => Format::Png,
-                    ExportFormat::Svg => Format::Svg,
-                },
-                standards: profile.standards.clone(),
-                pixel_per_pt: pixels_per_point(profile.ppi.unwrap_or(DEFAULT_PPI)),
-                date: now(),
-            };
-            let files = analysis.export(&settings).map_err(|error| match error {
-                ExportError::NoPages => ExportFailure::NoPages,
-                error => ExportFailure::Export(error.to_string()),
-            })?;
-            let paths = profile.files(&main, files.len());
-            for (path, bytes) in paths.iter().zip(&files) {
-                let full = root.join(path);
-                if let Some(parent) = full.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|error| ExportFailure::Write(error.to_string()))?;
-                }
-                std::fs::write(&full, bytes)
-                    .map_err(|error| ExportFailure::Write(error.to_string()))?;
-            }
-            Ok(ExportReport {
-                files: paths,
-                problems,
-            })
+            let files = analysis.export_profile(&profile, &root, &main, presswork_typst::now())?;
+            Ok(ExportReport { files, problems })
         }
     }
 
@@ -251,38 +218,21 @@ impl Compiler {
     }
 }
 
-fn inside(path: &Path) -> bool {
-    path.components()
-        .all(|part| matches!(part, Component::Normal(_) | Component::CurDir))
-}
-
-fn pixels_per_point(ppi: u32) -> f32 {
-    f32::from(u16::try_from(ppi).unwrap_or(u16::MAX)) / POINTS_PER_INCH
-}
-
-fn now() -> Option<Datetime> {
-    let time = jiff::Timestamp::now().to_zoned_datetime(jiff::tz::TimeZone::UTC);
-    Datetime::from_ymd_hms(
-        i32::from(time.year()),
-        u8::try_from(time.month()).ok()?,
-        u8::try_from(time.day()).ok()?,
-        u8::try_from(time.hour()).ok()?,
-        u8::try_from(time.minute()).ok()?,
-        u8::try_from(time.second()).ok()?,
-    )
-}
-
-fn today() -> Option<Datetime> {
-    let date = jiff::ZonedDateTime::now().date();
-    Datetime::from_ymd(
-        i32::from(date.year()),
-        u8::try_from(date.month()).ok()?,
-        u8::try_from(date.day()).ok()?,
-    )
+impl From<ProfileError> for ExportFailure {
+    fn from(error: ProfileError) -> Self {
+        match error {
+            ProfileError::Outside(path) => Self::Outside(path),
+            ProfileError::Export(ExportError::NoPages) => Self::NoPages,
+            ProfileError::Export(error) => Self::Export(error.to_string()),
+            ProfileError::Write { path, source } => Self::Write(path, source.to_string()),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use presswork_project::ExportFormat;
+
     use super::*;
 
     #[test]

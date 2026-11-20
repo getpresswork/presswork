@@ -19,7 +19,7 @@ use presswork_editor::{
 };
 use presswork_log::{Level, LogStore};
 use presswork_preview::Preview;
-use presswork_project::{ExportFormat, ExportProfile, Project};
+use presswork_project::{ExportProfile, Project};
 use presswork_text::{ChangeSet, Position, Unit};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
@@ -1992,11 +1992,8 @@ fn window_event((id, event): (window::Id, window::Event)) -> Option<Message> {
 }
 
 fn export_profiles(project: &Project) -> (Vec<ExportProfile>, bool) {
-    let exports = &project.manifest().exports;
-    if exports.is_empty() {
-        return (vec![ExportProfile::named("PDF", ExportFormat::Pdf)], false);
-    }
-    (exports.clone(), true)
+    let manifest = project.manifest();
+    (manifest.export_profiles(), !manifest.exports.is_empty())
 }
 
 #[cfg(test)]

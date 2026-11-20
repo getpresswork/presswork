@@ -13,7 +13,6 @@ use crate::compiler::{ExportFailure, ExportReport};
 use crate::i18n::{FluentArgs, Localizer};
 
 const LIST_WIDTH: f32 = 640.0;
-const DEFAULT_PPI: u32 = 144;
 
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
@@ -216,7 +215,7 @@ fn summary(profile: &ExportProfile, localizer: &Localizer) -> String {
             .join(", "),
         ExportFormat::Png => {
             let mut args = FluentArgs::new();
-            args.set("ppi", profile.ppi.unwrap_or(DEFAULT_PPI));
+            args.set("ppi", profile.resolution());
             localizer.format("publish-format-png", &args)
         }
         ExportFormat::Svg => localizer.text("publish-format-svg"),
@@ -266,7 +265,8 @@ fn failure_text(failure: &ExportFailure, localizer: &Localizer) -> String {
             args.set("error", message.clone());
             "publish-failed"
         }
-        ExportFailure::Write(message) => {
+        ExportFailure::Write(path, message) => {
+            args.set("path", path.display().to_string());
             args.set("error", message.clone());
             "publish-write-failed"
         }
