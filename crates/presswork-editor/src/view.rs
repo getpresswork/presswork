@@ -18,6 +18,7 @@ use presswork_ui::font;
 
 use crate::action::{Action, Deletion, Motion};
 use crate::boundary;
+use crate::complete::{self, CompletionEvent, CompletionList};
 use crate::editor::Editor;
 use crate::highlight::Highlighter;
 use crate::layout::{LINE_HEIGHT, Layout, TEXT_SIZE, row_height};
@@ -51,6 +52,8 @@ pub struct EditorView<'a, Message> {
     id: Option<widget::Id>,
     on_hover: Option<Box<dyn Fn(Option<Position>) -> Message + 'a>>,
     tooltip: Option<&'a Tooltip>,
+    on_complete: Option<Box<dyn Fn(CompletionEvent) -> Message + 'a>>,
+    completions: Option<&'a CompletionList>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +89,8 @@ pub fn view<'a, Message>(
         id: None,
         on_hover: None,
         tooltip: None,
+        on_complete: None,
+        completions: None,
     }
 }
 
@@ -117,6 +122,18 @@ impl<'a, Message> EditorView<'a, Message> {
     #[must_use]
     pub fn tooltip(mut self, tooltip: Option<&'a Tooltip>) -> Self {
         self.tooltip = tooltip;
+        self
+    }
+
+    #[must_use]
+    pub fn on_complete(mut self, on_complete: impl Fn(CompletionEvent) -> Message + 'a) -> Self {
+        self.on_complete = Some(Box::new(on_complete));
+        self
+    }
+
+    #[must_use]
+    pub fn completions(mut self, completions: Option<&'a CompletionList>) -> Self {
+        self.completions = completions;
         self
     }
 
@@ -198,6 +215,133 @@ impl<'a, Message> EditorView<'a, Message> {
         state.focus = Some(Focus::new());
         shell.publish((self.on_action)(action));
         shell.capture_event();
+    }
+
+    fn list_area(
+        &self,
+        state: &State,
+        bounds: Rectangle,
+    ) -> Option<(Rectangle, std::ops::Range<usize>)> {
+        let list = self.completions.filter(|list| !list.items.is_empty())?;
+        let origin = state.origin(bounds);
+        let caret = state.layout.caret(list.from);
+        let anchor = Rectangle::new(
+            Point::new(origin.x + caret.x, origin.y + caret.y),
+            Size::new(CARET_WIDTH, caret.height),
+        );
+        let visible = list.visible();
+        Some((
+            complete::list_bounds(anchor, visible.len(), bounds),
+            visible,
+        ))
+    }
+
+    fn choose(
+        &self,
+        state: &State,
+        bounds: Rectangle,
+        point: Point,
+        shell: &mut Shell<'_, Message>,
+    ) -> bool {
+        let Some((area, visible)) = self.list_area(state, bounds) else {
+            return false;
+        };
+        if !area.contains(point) {
+            return false;
+        }
+        let chosen = visible
+            .enumerate()
+            .find(|(row, _)| {
+                point.y < area.y + complete::LIST_PADDING + complete::rows_height(row + 1)
+            })
+            .map(|(_, index)| index);
+        if let (Some(index), Some(on_complete)) = (chosen, &self.on_complete) {
+            shell.publish(on_complete(CompletionEvent::Choose(index)));
+        }
+        shell.capture_event();
+        true
+    }
+
+    fn draw_completions(&self, state: &State, renderer: &mut Renderer, bounds: Rectangle) {
+        let (Some(list), Some((area, visible))) = (self.completions, self.list_area(state, bounds))
+        else {
+            return;
+        };
+        let colors = self.colors;
+        let detail = list
+            .items
+            .get(list.selected)
+            .and_then(|item| item.detail.as_deref())
+            .map(|detail| {
+                Paragraph::with_text(small_text(
+                    detail,
+                    font::UI,
+                    complete::LIST_WIDTH - 2.0 * TOOLTIP_PADDING,
+                    text::Wrapping::WordOrGlyph,
+                ))
+            });
+        renderer.with_layer(bounds, |renderer| {
+            fill_box(renderer, area, colors);
+            for (row, index) in visible.enumerate() {
+                let Some(item) = list.items.get(index) else {
+                    continue;
+                };
+                let top = area.y + complete::LIST_PADDING + complete::rows_height(row);
+                let row_bounds = Rectangle::new(
+                    Point::new(area.x + complete::LIST_PADDING, top),
+                    Size::new(
+                        area.width - 2.0 * complete::LIST_PADDING,
+                        complete::ROW_HEIGHT,
+                    ),
+                );
+                if index == list.selected {
+                    renderer.fill_quad(
+                        Quad {
+                            bounds: row_bounds,
+                            border: Border {
+                                radius: 4.0.into(),
+                                ..Border::default()
+                            },
+                            ..Quad::default()
+                        },
+                        colors.accent_soft,
+                    );
+                }
+                let inset = (complete::ROW_HEIGHT - TOOLTIP_TEXT_SIZE * LINE_HEIGHT) / 2.0;
+                renderer.fill_text(
+                    small_text(
+                        item.label.clone(),
+                        font::MONO,
+                        row_bounds.width - 2.0 * TOOLTIP_PADDING,
+                        text::Wrapping::None,
+                    ),
+                    Point::new(row_bounds.x + TOOLTIP_PADDING, top + inset),
+                    colors.ink,
+                    row_bounds,
+                );
+            }
+            if let Some(paragraph) = &detail {
+                let text_size = paragraph.min_bounds();
+                let size = Size::new(
+                    complete::LIST_WIDTH,
+                    text_size.height + 2.0 * TOOLTIP_PADDING,
+                );
+                let below = area.y + area.height + complete::LIST_GAP;
+                let y = if below + size.height <= bounds.y + bounds.height {
+                    below
+                } else {
+                    area.y - complete::LIST_GAP - size.height
+                };
+                let detail_box = Rectangle::new(Point::new(area.x, y), size);
+                fill_box(renderer, detail_box, colors);
+                renderer.fill_paragraph(
+                    paragraph,
+                    Point::new(detail_box.x + TOOLTIP_PADDING, y + TOOLTIP_PADDING),
+                    colors.ink_muted,
+                    bounds,
+                );
+            }
+        });
     }
 
     fn text_at(&self, state: &State, bounds: Rectangle, point: Point) -> Option<Position> {
@@ -289,17 +433,12 @@ impl<'a, Message> EditorView<'a, Message> {
         if !bounds.intersects(&anchor) {
             return;
         }
-        let paragraph = Paragraph::with_text(Text {
-            content: tooltip.text.as_str(),
-            bounds: Size::new(TOOLTIP_WIDTH - 2.0 * TOOLTIP_PADDING, f32::INFINITY),
-            size: Pixels(TOOLTIP_TEXT_SIZE),
-            line_height: text::LineHeight::Relative(LINE_HEIGHT),
-            font: if tooltip.code { font::MONO } else { font::UI },
-            align_x: text::Alignment::Left,
-            align_y: Vertical::Top,
-            shaping: text::Shaping::Advanced,
-            wrapping: text::Wrapping::WordOrGlyph,
-        });
+        let paragraph = Paragraph::with_text(small_text(
+            tooltip.text.as_str(),
+            if tooltip.code { font::MONO } else { font::UI },
+            TOOLTIP_WIDTH - 2.0 * TOOLTIP_PADDING,
+            text::Wrapping::WordOrGlyph,
+        ));
         let text_size = paragraph.min_bounds();
         let size = Size::new(
             text_size.width + 2.0 * TOOLTIP_PADDING,
@@ -307,18 +446,7 @@ impl<'a, Message> EditorView<'a, Message> {
         );
         let placed = tooltip_bounds(anchor, size, bounds);
         renderer.with_layer(bounds, |renderer| {
-            renderer.fill_quad(
-                Quad {
-                    bounds: placed,
-                    border: Border {
-                        color: self.colors.rule,
-                        width: 1.0,
-                        radius: 6.0.into(),
-                    },
-                    ..Quad::default()
-                },
-                self.colors.raised,
-            );
+            fill_box(renderer, placed, self.colors);
             renderer.fill_paragraph(
                 &paragraph,
                 Point::new(placed.x + TOOLTIP_PADDING, placed.y + TOOLTIP_PADDING),
@@ -591,6 +719,40 @@ impl operation::Focusable for State {
     }
 }
 
+fn small_text<Content>(
+    content: Content,
+    font: iced::Font,
+    width: f32,
+    wrapping: text::Wrapping,
+) -> Text<Content> {
+    Text {
+        content,
+        bounds: Size::new(width, f32::INFINITY),
+        size: Pixels(TOOLTIP_TEXT_SIZE),
+        line_height: text::LineHeight::Relative(LINE_HEIGHT),
+        font,
+        align_x: text::Alignment::Left,
+        align_y: Vertical::Top,
+        shaping: text::Shaping::Advanced,
+        wrapping,
+    }
+}
+
+fn fill_box(renderer: &mut Renderer, bounds: Rectangle, colors: &Colors) {
+    renderer.fill_quad(
+        Quad {
+            bounds,
+            border: Border {
+                color: colors.rule,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Quad::default()
+        },
+        colors.raised,
+    );
+}
+
 fn number_text<Content>(content: Content, width: f32) -> Text<Content> {
     Text {
         content,
@@ -738,6 +900,7 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
         if let Some(tooltip) = self.tooltip {
             self.draw_tooltip(state, renderer, bounds, tooltip);
         }
+        self.draw_completions(state, renderer, bounds);
     }
 
     fn update(
@@ -790,7 +953,10 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
                 state.modifiers = *modifiers;
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                self.press(state, bounds, cursor.position_over(bounds), shell);
+                let point = cursor.position_over(bounds);
+                if !point.is_some_and(|point| self.choose(state, bounds, point, shell)) {
+                    self.press(state, bounds, point, shell);
+                }
             }
             Event::Mouse(mouse::Event::CursorMoved { position }) if state.dragging => {
                 let target = self.snap(state.layout.hit(state.to_content(bounds, *position)));
@@ -827,7 +993,15 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
                 text,
                 ..
             }) if state.focus.is_some() => {
-                if let Some(command) = command(key, *physical_key, *modifiers, text.as_deref()) {
+                let open = self.completions.is_some_and(|list| !list.items.is_empty());
+                if let Some(event) = complete::completion_key(key, *modifiers, open)
+                    && let Some(on_complete) = &self.on_complete
+                {
+                    shell.publish(on_complete(event));
+                    shell.capture_event();
+                } else if let Some(command) =
+                    command(key, *physical_key, *modifiers, text.as_deref())
+                {
                     self.run(command, state, clipboard, shell);
                     if let Some(focus) = &mut state.focus {
                         focus.since = Instant::now();
@@ -1038,6 +1212,116 @@ mod tests {
     enum Report {
         Act(Action),
         Hover(Option<Position>),
+        Complete(CompletionEvent),
+    }
+
+    fn completion_list(from: usize, labels: &[&str]) -> CompletionList {
+        CompletionList {
+            from: Position::new(from),
+            items: labels
+                .iter()
+                .map(|label| crate::complete::CompletionItem {
+                    label: (*label).to_owned(),
+                    detail: Some(format!("About {label}.")),
+                    text: (*label).to_owned(),
+                    select: label.len()..label.len(),
+                })
+                .collect(),
+            selected: 0,
+        }
+    }
+
+    fn completion_reports(
+        text: &str,
+        list: Option<&CompletionList>,
+        interact: impl FnOnce(&mut Simulator<'_, Report>),
+    ) -> Vec<Report> {
+        load_fonts();
+        let mut editor = Editor::new(text);
+        editor
+            .perform(
+                Action::Move {
+                    motion: Motion::DocumentEnd,
+                    extend: false,
+                },
+                Instant::now(),
+            )
+            .unwrap();
+        let mut ui = simulator(
+            view(&editor, &LIGHT, Report::Act)
+                .autofocus(true)
+                .on_complete(Report::Complete)
+                .completions(list),
+        );
+        interact(&mut ui);
+        ui.into_messages().collect()
+    }
+
+    #[test]
+    fn keys_go_to_an_open_completion_list() {
+        let list = completion_list(1, &["text", "table"]);
+
+        let reports = completion_reports("#te", Some(&list), |ui| {
+            ui.tap_key(Named::ArrowDown);
+            ui.tap_key(Named::Enter);
+            ui.tap_key(Named::Escape);
+        });
+
+        assert_eq!(
+            reports,
+            [
+                Report::Complete(CompletionEvent::Next),
+                Report::Complete(CompletionEvent::Accept),
+                Report::Complete(CompletionEvent::Close)
+            ]
+        );
+    }
+
+    #[test]
+    fn control_space_asks_for_completions() {
+        let reports = completion_reports("#te", None, |ui| {
+            ui.simulate([Event::Keyboard(keyboard::Event::KeyPressed {
+                key: Key::Named(Named::Space),
+                modified_key: Key::Named(Named::Space),
+                physical_key: Physical::Code(Code::Space),
+                location: Location::Standard,
+                modifiers: Modifiers::CTRL,
+                text: Some(" ".into()),
+                repeat: false,
+            })]);
+        });
+
+        assert_eq!(reports, [Report::Complete(CompletionEvent::Request)]);
+    }
+
+    #[test]
+    fn a_click_on_a_completion_row_chooses_it() {
+        let list = completion_list(1, &["text", "table", "terms"]);
+        let row = PADDING_TOP
+            + row_height()
+            + complete::LIST_GAP
+            + complete::LIST_PADDING
+            + complete::ROW_HEIGHT * 1.5;
+
+        let reports = completion_reports("#te", Some(&list), |ui| {
+            ui.point_at(Point::new(200.0, row));
+            ui.simulate([
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            ]);
+        });
+
+        assert_eq!(reports, [Report::Complete(CompletionEvent::Choose(1))]);
+    }
+
+    #[test]
+    fn a_view_with_completions_draws() {
+        load_fonts();
+        let editor = Editor::new("#te");
+        let list = completion_list(1, &["text", "table", "terms"]);
+        let mut ui = simulator(view(&editor, &LIGHT, |action| action).completions(Some(&list)));
+
+        assert!(ui.snapshot(&presswork_ui::theme::light()).is_ok());
     }
 
     fn hovers(
@@ -1055,7 +1339,7 @@ mod tests {
         ui.into_messages()
             .filter_map(|report| match report {
                 Report::Hover(hover) => Some(hover),
-                Report::Act(_) => None,
+                Report::Act(_) | Report::Complete(_) => None,
             })
             .collect()
     }
