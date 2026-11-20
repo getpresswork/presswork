@@ -49,6 +49,8 @@ The desktop application uses the Elm architecture of iced. It has a state, messa
 - Tests use the `iced_test` simulator to click, type, and find text in a view.
 - Widget tests compare rendered images with approved snapshots.
 
+In CI, the interface tests draw with the processor renderer tiny-skia (`ICED_TEST_BACKEND=tiny-skia`). The CI runners have no graphics processor. On Windows, the software graphics driver stopped the test process with an access violation when many tests drew at the same time.
+
 ## Deterministic tests
 
 - Typst tests use only the fonts of `typst-assets`, not system fonts. Thus the output is the same on all platforms.
