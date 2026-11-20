@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::ProjectError;
+use crate::measure::PageSize;
 use crate::project::is_inside;
 
 pub const MANIFEST: &str = "presswork.toml";
@@ -36,6 +37,15 @@ pub struct ExportProfile {
     pub output: Option<PathBuf>,
     pub ppi: Option<u32>,
     pub image_ppi: Option<u32>,
+    pub page_size: Option<PageSize>,
+    pub colors: Option<Colors>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Colors {
+    Cmyk,
+    Gray,
 }
 
 impl ExportProfile {
@@ -48,6 +58,8 @@ impl ExportProfile {
             output: None,
             ppi: None,
             image_ppi: None,
+            page_size: None,
+            colors: None,
         }
     }
 
@@ -259,6 +271,8 @@ mod tests {
                     output: Some(PathBuf::from("out/book.pdf")),
                     ppi: None,
                     image_ppi: Some(300),
+                    page_size: None,
+                    colors: None,
                 },
                 ExportProfile {
                     name: "screen".to_owned(),
@@ -267,6 +281,8 @@ mod tests {
                     output: None,
                     ppi: Some(144),
                     image_ppi: None,
+                    page_size: None,
+                    colors: None,
                 },
             ]
         );
@@ -296,6 +312,33 @@ mod tests {
                 PathBuf::from("chapters/book-2.png")
             ]
         );
+    }
+
+    #[test]
+    fn export_tables_take_the_page_size_and_the_colors() {
+        let manifest = Manifest::parse(
+            "[project]\nname = \"Book\"\n\n\
+             [[export]]\nname = \"print\"\npage-size = \"148mm x 210mm\"\ncolors = \"cmyk\"\n",
+        )
+        .unwrap();
+
+        let profile = &manifest.exports[0];
+        assert_eq!(profile.page_size.map(|size| size.width), Some(148_000));
+        assert_eq!(profile.colors, Some(Colors::Cmyk));
+    }
+
+    #[test]
+    fn a_wrong_page_size_or_color_rule_is_not_valid() {
+        for table in ["page-size = \"a5\"", "colors = \"rgb\""] {
+            let result = Manifest::parse(&format!(
+                "[project]\nname = \"Book\"\n\n[[export]]\nname = \"print\"\n{table}\n"
+            ));
+
+            assert!(
+                matches!(result, Err(ProjectError::InvalidManifest(_))),
+                "{table}"
+            );
+        }
     }
 
     #[test]

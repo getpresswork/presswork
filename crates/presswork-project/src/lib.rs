@@ -1,7 +1,9 @@
 mod error;
 mod manifest;
+mod measure;
 mod project;
 
 pub use error::ProjectError;
-pub use manifest::{ExportFormat, ExportProfile, MANIFEST, Manifest};
+pub use manifest::{Colors, ExportFormat, ExportProfile, MANIFEST, Manifest};
+pub use measure::{LengthUnit, PageSize};
 pub use project::Project;
