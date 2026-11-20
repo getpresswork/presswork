@@ -172,6 +172,7 @@ Some words have a different meaning in daily language. In Presswork text, use th
 | direct message | A chat conversation between two or more persons, outside of channels. |
 | edition | One published form of a work, for example an original, a translation, or a reprint. It has its own page numbers. |
 | embedding model | A model that changes text into vectors for semantic search. |
+| export profile | A named set of export settings in the manifest, for example the format, the PDF standards, and the output path. |
 | folding | An editor function that hides parts of the text and shows them again. |
 | follow mode | A mode in which your view follows the view of a different member. |
 | heading | The title of a part, a chapter, or a section in a document. |
@@ -189,6 +190,7 @@ Some words have a different meaning in daily language. In Presswork text, use th
 | page map | The relation between the pages of a file and the printed page numbers of its edition. |
 | pin | A Typst version requirement in a project manifest. |
 | portal | The web site of a Presswork server for persons who do not use the desktop application. |
+| ppi | Pixels per inch. The resolution of an image at its size on the page. |
 | preflight | The checks before an export. |
 | print plan | The division of the page count into signatures, with the cost estimates. |
 | prompt caching | An API function that keeps the start of a request, so that later requests with the same start cost less. |

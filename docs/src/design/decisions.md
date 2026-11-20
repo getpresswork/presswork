@@ -1334,3 +1334,18 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Reason:** The bleed and the trim line come exactly from the Typst output. A text area that is correct on only some pages can give typesetters wrong information.
 - **Other options:** The text area as the box around the content of each page. Margins from the project manifest. The text area only on the pages where the output gives it.
 - **Later:** After this finding, the project owner chose to continue without the text area. Look at it again with the baseline grid check, or when Typst gives the margins of a page.
+
+## D182. Details of export and preflight
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - If the manifest has no `[[export]]` tables, the Publish workspace shows one profile with the name PDF. It writes a PDF file with the name of the main file, next to the main file. A note tells how to add profiles.
+  - PNG and SVG profiles write one file for each page. If the output path has no `{p}` or `{0p}` and the document has more than one page, `-{p}` goes before the extension. The workspace shows the output path with its pattern, not the first file.
+  - Presswork writes export files only in the project folder. An absolute output path or a path with `..` stops the export before the compilation.
+  - Only the built-in Typst engine exports. If the project uses a managed toolchain, the profile shows a note.
+  - The export uses the text of the editor, also changes that are not saved. It compiles the document again on its own thread, without page images.
+  - Preflight problems do not stop an export. The workspace shows them below the profile after the export. A click on a problem in the main file opens the Write workspace and selects the image call. A problem in a different file shows a notice with the name of the file.
+  - A PDF file gets the current time in UTC as its creation date, because PDF/A needs a date. The PNG resolution is 144 ppi if the profile does not give one.
+  - The result of an export stays until the next export with the same profile or until you open a different project. A result that comes after you open a different project does not show.
+- **Reason:** Most projects need only one PDF file, so a project without profiles can export without a change to the manifest. A profile must not write over files outside the project. Preflight needs the document model of the built-in engine. Problems are information for the typesetter, and a proof with problems is frequently necessary.
+- **Other options:** Exports with a managed toolchain through `typst compile`. Exports of the saved files only. A fixed date from the manifest for reproducible files. Preflight problems that stop an export. A dialog that asks for the output path.

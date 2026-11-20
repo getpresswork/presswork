@@ -171,6 +171,46 @@ Presswork ignores the keys that it does not know. Thus an older Presswork releas
 - To save the main file, push Ctrl+S.
 - If the folder is not a project, a notice tells the problem.
 
+The manifest can also have `[[export]]` tables. Each table is an export profile:
+
+| Key | Value | Default |
+| --- | --- | --- |
+| `name` | The name of the profile, for example `print`. | No default. The key is necessary. |
+| `format` | `pdf`, `png`, or `svg`. | `pdf` |
+| `standards` | The PDF standards of the file, for example `["a-2b", "ua-1"]`. | No standards |
+| `output` | The path of the file, relative to the project folder. For PNG and SVG, `{p}` is the page number. `{0p}` is the page number with zeros at the start, so that all names have the same length. | The name of the main file next to the main file, with the extension of the format. For PNG and SVG, `-{p}` comes before the extension. |
+| `ppi` | The resolution of PNG files. | `144` |
+| `image-ppi` | The lowest resolution of images that preflight accepts. | No check |
+
+The names of the standards are `1.4`, `1.5`, `1.6`, `1.7`, `2.0`, `a-1b`, `a-1a`, `a-2b`, `a-2u`, `a-2a`, `a-3b`, `a-3u`, `a-3a`, `a-4`, `a-4f`, `a-4e`, and `ua-1`.
+
+```toml
+[project]
+name = "Field Notes"
+
+[[export]]
+name = "print"
+standards = ["a-2b"]
+image-ppi = 300
+output = "out/field-notes-print.pdf"
+
+[[export]]
+name = "pages"
+format = "png"
+output = "out/pages/page-{0p}.png"
+```
+
+### Export
+
+The Publish workspace shows the export profiles of the project. If the manifest has no `[[export]]` tables, the workspace shows one PDF profile.
+
+1. Select the **Publish** workspace.
+2. Click **Export** next to the profile.
+3. Read the result below the profile. It gives the files and the preflight problems.
+4. To see the source of a problem, click the problem. The Write workspace opens and selects the image in the editor.
+
+The export uses the text in the editor, also the changes that you did not save. Presswork writes export files only in the project folder. In milestone 2, only the built-in Typst engine can export (D182).
+
 ## Server documents
 
 In milestone 1, you can edit one text document of a server project with other persons at the same time (D130, D132).

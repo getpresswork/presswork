@@ -118,6 +118,10 @@ Each project has export profiles in its manifest. A profile has these parts:
 
 HTML export is experimental in Typst. Presswork shows it only if you turn on experimental functions.
 
+In milestone 2, a profile has a name, a format (PDF, PNG, or SVG), PDF standards, an output path, the resolution of PNG files, and the lowest resolution of images. Inputs and HTML export come later. The keys of the manifest are in [Interface](interface.md).
+
+An export runs on its own thread. It compiles the text of the editor without page images, does the preflight checks, and writes the files. `typst-pdf` makes the PDF files, `typst-render` the PNG files, and `typst-svg` the SVG files. A PDF/A file must have a creation date, so the export gives the current time in UTC (D182).
+
 ## Preflight
 
 Preflight finds problems before an export. The engine examines the compiled document for these problems:
@@ -127,6 +131,8 @@ Preflight finds problems before an export. The engine examines the compiled docu
 - Fonts that are not available.
 - Colors in a color space that the profile does not allow, for example RGB colors in a CMYK print profile.
 - Pages with a size that is different from the profile.
+
+In milestone 2, preflight finds the first two problems. The resolution of a raster image is its number of pixels for each inch of its size on the page. Scales and other transformations of the image count. If the resolutions across and down are different, preflight uses the lower one. Vector images have no resolution. Each problem has its page and, if possible, the source of the image. Problems do not stop an export.
 
 After an export, veraPDF can validate PDF/A and PDF/UA files. Refer to [Toolchains](toolchains.md).
 
