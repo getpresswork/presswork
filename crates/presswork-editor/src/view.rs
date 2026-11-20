@@ -260,6 +260,11 @@ impl<'a, Message> EditorView<'a, Message> {
         {
             shell.publish(on_complete(event));
             shell.capture_event();
+        } else if *key == Key::Named(Named::Escape)
+            && self.editor.document().selection().ranges().len() > 1
+        {
+            shell.publish((self.on_action)(Action::SingleCursor));
+            shell.capture_event();
         } else if let Some(command) = command(key, physical_key, modifiers, text) {
             self.run(command, state, clipboard, shell);
             if let Some(focus) = &mut state.focus {
@@ -293,8 +298,14 @@ impl<'a, Message> EditorView<'a, Message> {
             shell.capture_event();
             return;
         }
-        let click = mouse::Click::new(point, mouse::Button::Left, state.last_click);
         let position = self.snap(state.layout.hit(state.to_content(bounds, point)));
+        if state.modifiers.alt() {
+            state.focus = Some(Focus::new());
+            shell.publish((self.on_action)(Action::AddCursor(position)));
+            shell.capture_event();
+            return;
+        }
+        let click = mouse::Click::new(point, mouse::Button::Left, state.last_click);
         let action = match click.kind() {
             mouse::click::Kind::Single => Action::MoveTo {
                 position,
@@ -572,28 +583,15 @@ impl<'a, Message> EditorView<'a, Message> {
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
     ) {
-        let head = self.editor.document().selection().primary().head;
         let action = match command {
             Command::Act(action) => action,
-            Command::Vertical { rows, extend } => {
-                let delta = rows * row_height();
-                let (position, goal) = state.layout.vertical(head, self.editor.goal(), delta);
-                Action::MoveTo {
-                    position: self.snap(position),
-                    extend,
-                    goal: Some(goal),
-                }
-            }
+            Command::Vertical { rows, extend } => self.vertical(state, rows * row_height(), extend),
             Command::Page { down, extend } => {
                 let page = (state.viewport.height - row_height()).max(row_height());
                 let delta = if down { page } else { -page };
-                let (position, goal) = state.layout.vertical(head, self.editor.goal(), delta);
+                let action = self.vertical(state, delta, extend);
                 state.scroll_by(delta);
-                Action::MoveTo {
-                    position: self.snap(position),
-                    extend,
-                    goal: Some(goal),
-                }
+                action
             }
             Command::Copy | Command::Cut => {
                 let text = self.editor.selected_text();
@@ -607,11 +605,30 @@ impl<'a, Message> EditorView<'a, Message> {
                 Action::Delete(Deletion::Backward)
             }
             Command::Paste => match clipboard.read(clipboard::Kind::Standard) {
-                Some(text) => Action::Insert(text),
+                Some(text) => Action::Paste(text),
                 None => return,
             },
         };
         shell.publish((self.on_action)(action));
+    }
+
+    fn vertical(&self, state: &State, delta: f32, extend: bool) -> Action {
+        let selection = self.editor.document().selection();
+        if selection.ranges().len() > 1 {
+            let heads = selection
+                .ranges()
+                .iter()
+                .map(|range| self.snap(state.layout.vertical(range.head, None, delta).0))
+                .collect();
+            return Action::MoveEach { heads, extend };
+        }
+        let head = selection.primary().head;
+        let (position, goal) = state.layout.vertical(head, self.editor.goal(), delta);
+        Action::MoveTo {
+            position: self.snap(position),
+            extend,
+            goal: Some(goal),
+        }
     }
 }
 
@@ -635,6 +652,8 @@ fn command(
     if modifiers.command() {
         let shortcut = match key.to_latin(physical_key) {
             Some('a') => Some(Command::Act(Action::SelectAll)),
+            Some('d') => Some(Command::Act(Action::SelectNext)),
+            Some('l') if extend => Some(Command::Act(Action::SelectEvery)),
             Some('c') => Some(Command::Copy),
             Some('x') => Some(Command::Cut),
             Some('v') if !modifiers.alt() => Some(Command::Paste),
@@ -657,7 +676,14 @@ fn command(
             single
         })))
     };
+    let cursor_line = modifiers.command() && modifiers.alt();
     match key {
+        Key::Named(Named::ArrowUp) if cursor_line => {
+            Some(Command::Act(Action::AddCursorLine { down: false }))
+        }
+        Key::Named(Named::ArrowDown) if cursor_line => {
+            Some(Command::Act(Action::AddCursorLine { down: true }))
+        }
         Key::Named(Named::Enter) => Some(Command::Act(Action::Newline)),
         Key::Named(Named::Tab) => Some(Command::Act(Action::Insert(TAB.to_owned()))),
         Key::Named(Named::Backspace) => deletion(Deletion::WordBackward, Deletion::Backward),
@@ -1148,6 +1174,119 @@ mod tests {
         let mut ui = simulator(view(&editor, &LIGHT, |action| action).autofocus(true));
         interact(&mut ui);
         ui.into_messages().collect()
+    }
+
+    fn actions_on(
+        editor: &Editor,
+        interact: impl FnOnce(&mut Simulator<'_, Action>),
+    ) -> Vec<Action> {
+        load_fonts();
+        let mut ui = simulator(view(editor, &LIGHT, |action| action).autofocus(true));
+        interact(&mut ui);
+        ui.into_messages().collect()
+    }
+
+    fn two_cursors(text: &str, second: usize) -> Editor {
+        let mut editor = Editor::new(text);
+        editor
+            .perform(Action::AddCursor(Position::new(second)), Instant::now())
+            .unwrap();
+        editor
+    }
+
+    fn arrow(key: Named, code: Code, modifiers: Modifiers) -> Event {
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: Key::Named(key),
+            modified_key: Key::Named(key),
+            physical_key: Physical::Code(code),
+            location: Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    #[test]
+    fn control_d_and_control_shift_l_select_more_places() {
+        let actions = actions("cat cat", |ui| {
+            ui.simulate([
+                shortcut("d", Code::KeyD, Modifiers::COMMAND),
+                shortcut("l", Code::KeyL, Modifiers::COMMAND | Modifiers::SHIFT),
+            ]);
+        });
+
+        assert_eq!(actions, [Action::SelectNext, Action::SelectEvery]);
+    }
+
+    #[test]
+    fn control_alt_arrows_add_a_cursor_line() {
+        let both = Modifiers::COMMAND | Modifiers::ALT;
+        let actions = actions("ab\ncd", |ui| {
+            ui.simulate([
+                arrow(Named::ArrowDown, Code::ArrowDown, both),
+                arrow(Named::ArrowUp, Code::ArrowUp, both),
+            ]);
+        });
+
+        assert_eq!(
+            actions,
+            [
+                Action::AddCursorLine { down: true },
+                Action::AddCursorLine { down: false }
+            ]
+        );
+    }
+
+    #[test]
+    fn alt_click_adds_a_cursor() {
+        let actions = actions(ALPHABET, |ui| {
+            ui.simulate([Event::Keyboard(keyboard::Event::ModifiersChanged(
+                Modifiers::ALT,
+            ))]);
+            press(first_line(200.0))(ui);
+        });
+
+        assert!(
+            matches!(actions.as_slice(), [Action::AddCursor(position)] if position.offset() > 0),
+            "{actions:?}"
+        );
+    }
+
+    #[test]
+    fn escape_keeps_only_one_of_many_cursors() {
+        let editor = two_cursors("ab\ncd", 3);
+
+        let actions = actions_on(&editor, |ui| {
+            ui.tap_key(Named::Escape);
+        });
+
+        assert_eq!(actions, [Action::SingleCursor]);
+    }
+
+    #[test]
+    fn escape_with_one_cursor_does_nothing() {
+        let actions = actions("ab", |ui| {
+            ui.tap_key(Named::Escape);
+        });
+
+        assert_eq!(actions, Vec::<Action>::new());
+    }
+
+    #[test]
+    fn arrow_down_moves_each_cursor() {
+        let editor = two_cursors("ab\ncd\nef", 3);
+
+        let actions = actions_on(&editor, |ui| {
+            ui.tap_key(Named::ArrowDown);
+        });
+
+        assert_eq!(
+            actions,
+            [Action::MoveEach {
+                heads: vec![Position::new(3), Position::new(6)],
+                extend: false
+            }]
+        );
     }
 
     fn shortcut(letter: &str, code: Code, modifiers: Modifiers) -> Event {

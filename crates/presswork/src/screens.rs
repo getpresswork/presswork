@@ -269,6 +269,9 @@ fn render_find(app: &mut App) {
     );
     render(app, "find-replace");
     send(app, Message::Find(FindMessage::Close));
+    send(app, Message::Editor(EditorAction::SelectEvery));
+    render(app, "many-cursors");
+    send(app, Message::Editor(EditorAction::SingleCursor));
 }
 
 fn render_library(app: &mut App) {
