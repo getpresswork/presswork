@@ -66,8 +66,11 @@ Until the project model is ready, the Write workspace shows a scratch document. 
 | Ctrl+Z, and Ctrl+Y or Ctrl+Shift+Z | Undo and redo. |
 | Ctrl+Space | Show the completions at the cursor. |
 | F12 | Go to the definition of the item at the cursor. |
+| Ctrl+F | Open the find bar. |
+| Ctrl+H | Open the find bar with the replace row. |
+| F3 and Shift+F3 | Go to the next or the previous result of the find bar. |
 
-On macOS, Cmd replaces Ctrl in shortcuts, and Alt replaces Ctrl for word movement and word deletion. Cmd+Left and Cmd+Right move to the start or the end of the line. Ctrl+Space stays Ctrl+Space, because Cmd+Space opens Spotlight.
+On macOS, Cmd replaces Ctrl in shortcuts, and Alt replaces Ctrl for word movement and word deletion. Cmd+Left and Cmd+Right move to the start or the end of the line. Ctrl+Space stays Ctrl+Space, because Cmd+Space opens Spotlight. Cmd+Option+F opens the replace row, because Cmd+H hides the application.
 
 Click to move the cursor. Double-click to select a word, and triple-click to select a line. Drag to select text. Shift+click extends the selection. Ctrl+click a name to go to its definition. On macOS, use Cmd+click.
 
@@ -95,6 +98,17 @@ Push F12 or Ctrl+click a name to go to the definition of the item (D173).
 - If the definition is in the main file, the editor selects the name in the definition. For a reference, the editor selects the element with the label.
 - If the definition is in another file, a note gives the name of the file, because the editor shows only the main file.
 - If the item is part of the Typst library, for example `text`, a note tells this.
+
+### Find and replace
+
+Push Ctrl+F to find text in the document (D176, D177). The find bar opens above the editor. If you selected text on one line, the bar finds that text.
+
+- Each result has a background color. The bar shows the number of results, for example "2 of 8". While you type, the editor selects the first result after the start of the selection.
+- Enter or F3 goes to the next result. Shift+Enter or Shift+F3 goes to the previous result. After the last result, the search starts again at the top.
+- **Match case** finds only text with the same capital and small letters. **Whole word** finds only full words. **Regular expression** finds a pattern, for example `\d+` for numbers. The signs `^` and `$` match at the start and at the end of each line.
+- To replace text, push Ctrl+H or click the arrow at the left of the bar. **Replace** changes the selected result and selects the next result. **Replace all** changes all results in one step, and one undo restores them. With a regular expression, `$1` in the replacement gives the first group of the result.
+- The results follow all changes of the text, also the changes of other persons.
+- Escape closes the bar and gives the keyboard focus back to the editor.
 
 ### Syntax colors
 

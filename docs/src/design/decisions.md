@@ -1266,3 +1266,23 @@ Do not change what an accepted decision says. You can correct its language. To c
   - With the managed toolchain, the outline shows a note, because it needs the document model.
 - **Reason:** The outline shows the structure of the document as the reader sees it, also when code or other files make the headings. The page numbers help typesetters to find the pages.
 - **Other options:** Only the headings of the table of contents. The headings of the source text of the main file, without page numbers. A panel that is closed by default.
+
+## D176. The regex crate for find and replace
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Project owner.
+- **Decision:** The search of the editor uses the `regex` crate, also for plain text: the search escapes the signs of plain text. The text model (`presswork-text`) contains the search, so that it does not need iced.
+- **Reason:** Typst already uses `regex` with the same features, so the build does not change. One engine gives the same rules for case, words, and lines in all modes.
+- **Other options:** A search of our own for plain text, and `regex` only for patterns. The `fancy-regex` crate, which also has look-around but can be slow.
+
+## D177. Details of find and replace
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - Ctrl+F opens the find bar above the editor, and Ctrl+H opens it with the replace row. On macOS, Cmd+F and Cmd+Option+F, because Cmd+H hides the application. Selected text on one line becomes the query.
+  - The search ignores the case by default. **Whole word** accepts a result only if the characters before and after it are not letters, digits, or underscores. A regular expression matches `^` and `$` at each line. A pattern that matches no characters gives no results.
+  - All results have the find color as background, below the selection. The selected result has the selection color. The bar shows "2 of 8", or "8 results" if the selection is not a result.
+  - While you type the query, the editor selects the first result at or after the start of the selection. Enter and F3 go to the next result, and Shift+Enter and Shift+F3 to the previous result. The search goes around at the end.
+  - **Replace** changes the selected result and selects the next result. If the selection is not a result, it only goes to the next result. **Replace all** is one undo step. In pattern mode, `$1` and `${name}` give the groups.
+  - The search runs again after each change of the text or of the query. Escape closes the bar and focuses the editor.
+- **Reason:** These are the usual keys and functions of code editors and word processors.
+- **Other options:** Find in all files of the project. A search only in the selected text. A list of all results in a panel.
