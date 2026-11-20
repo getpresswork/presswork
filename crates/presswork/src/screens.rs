@@ -246,6 +246,7 @@ fn render_screens() {
 
 const EXPORTS: &str = "[project]\nname = \"Field Notes\"\n\n\
                        [[export]]\nname = \"Print\"\nstandards = [\"a-2b\"]\nimage-ppi = 300\n\
+                       page-size = \"148mm x 210mm\"\ncolors = \"cmyk\"\n\
                        output = \"out/field-notes-print.pdf\"\n\n\
                        [[export]]\nname = \"Screen\"\nstandards = [\"ua-1\"]\n\
                        output = \"out/field-notes.pdf\"\n\n\
@@ -259,6 +260,7 @@ const MAP: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"120\" heigh
 
 fn render_publish(app: &mut App) {
     let text = "#set page(paper: \"a5\")\n#set text(font: \"Libertinus Serif\")\n\
+                #show heading: set text(fill: rgb(\"#8c2f39\"))\n\
                 = Field notes\n\n#image(\"meadow.png\", width: 5cm, alt: \"A meadow at dawn\")\n\n\
                 #image(\"map.svg\", width: 4cm)\n";
     let book = folder(&[
