@@ -54,6 +54,7 @@ pub struct EditorView<'a, Message> {
     tooltip: Option<&'a Tooltip>,
     on_complete: Option<Box<dyn Fn(CompletionEvent) -> Message + 'a>>,
     completions: Option<&'a CompletionList>,
+    on_definition: Option<Box<dyn Fn(Position) -> Message + 'a>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +92,7 @@ pub fn view<'a, Message>(
         tooltip: None,
         on_complete: None,
         completions: None,
+        on_definition: None,
     }
 }
 
@@ -134,6 +136,12 @@ impl<'a, Message> EditorView<'a, Message> {
     #[must_use]
     pub fn completions(mut self, completions: Option<&'a CompletionList>) -> Self {
         self.completions = completions;
+        self
+    }
+
+    #[must_use]
+    pub fn on_definition(mut self, on_definition: impl Fn(Position) -> Message + 'a) -> Self {
+        self.on_definition = Some(Box::new(on_definition));
         self
     }
 
@@ -184,6 +192,35 @@ impl<'a, Message> EditorView<'a, Message> {
         buffer.position(buffer.line_column(position, Unit::Byte), Unit::Byte)
     }
 
+    fn key(
+        &self,
+        state: &mut State,
+        (key, physical_key, modifiers, text): (&Key, Physical, keyboard::Modifiers, Option<&str>),
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let open = self.completions.is_some_and(|list| !list.items.is_empty());
+        if *key == Key::Named(Named::F12)
+            && let Some(on_definition) = &self.on_definition
+        {
+            shell.publish(on_definition(
+                self.editor.document().selection().primary().head,
+            ));
+            shell.capture_event();
+        } else if let Some(event) = complete::completion_key(key, modifiers, open)
+            && let Some(on_complete) = &self.on_complete
+        {
+            shell.publish(on_complete(event));
+            shell.capture_event();
+        } else if let Some(command) = command(key, physical_key, modifiers, text) {
+            self.run(command, state, clipboard, shell);
+            if let Some(focus) = &mut state.focus {
+                focus.since = Instant::now();
+            }
+            shell.capture_event();
+        }
+    }
+
     fn press(
         &self,
         state: &mut State,
@@ -199,6 +236,15 @@ impl<'a, Message> EditorView<'a, Message> {
             }
             return;
         };
+        if state.modifiers.command()
+            && let Some(on_definition) = &self.on_definition
+        {
+            if let Some(position) = self.text_at(state, bounds, point) {
+                shell.publish(on_definition(position));
+            }
+            shell.capture_event();
+            return;
+        }
         let click = mouse::Click::new(point, mouse::Button::Left, state.last_click);
         let position = self.snap(state.layout.hit(state.to_content(bounds, point)));
         let action = match click.kind() {
@@ -993,21 +1039,12 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
                 text,
                 ..
             }) if state.focus.is_some() => {
-                let open = self.completions.is_some_and(|list| !list.items.is_empty());
-                if let Some(event) = complete::completion_key(key, *modifiers, open)
-                    && let Some(on_complete) = &self.on_complete
-                {
-                    shell.publish(on_complete(event));
-                    shell.capture_event();
-                } else if let Some(command) =
-                    command(key, *physical_key, *modifiers, text.as_deref())
-                {
-                    self.run(command, state, clipboard, shell);
-                    if let Some(focus) = &mut state.focus {
-                        focus.since = Instant::now();
-                    }
-                    shell.capture_event();
-                }
+                self.key(
+                    state,
+                    (key, *physical_key, *modifiers, text.as_deref()),
+                    clipboard,
+                    shell,
+                );
             }
             _ => {}
         }
@@ -1213,6 +1250,62 @@ mod tests {
         Act(Action),
         Hover(Option<Position>),
         Complete(CompletionEvent),
+        Definition(Position),
+    }
+
+    fn definition_reports(
+        text: &str,
+        interact: impl FnOnce(&mut Simulator<'_, Report>),
+    ) -> Vec<Report> {
+        load_fonts();
+        let mut editor = Editor::new(text);
+        editor
+            .perform(
+                Action::Move {
+                    motion: Motion::DocumentEnd,
+                    extend: false,
+                },
+                Instant::now(),
+            )
+            .unwrap();
+        let mut ui = simulator(
+            view(&editor, &LIGHT, Report::Act)
+                .autofocus(true)
+                .on_definition(Report::Definition),
+        );
+        interact(&mut ui);
+        ui.into_messages().collect()
+    }
+
+    #[test]
+    fn f12_asks_for_the_definition_at_the_cursor() {
+        let reports = definition_reports("#gap", |ui| {
+            ui.tap_key(Named::F12);
+        });
+
+        assert_eq!(reports, [Report::Definition(Position::new(4))]);
+    }
+
+    #[test]
+    fn a_command_click_asks_for_the_definition_at_the_click() {
+        let reports = definition_reports(ALPHABET, |ui| {
+            ui.simulate([Event::Keyboard(keyboard::Event::ModifiersChanged(
+                Modifiers::COMMAND,
+            ))]);
+            ui.point_at(first_line(200.0));
+            ui.simulate([
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            ]);
+        });
+
+        assert!(
+            matches!(
+                reports.as_slice(),
+                [Report::Definition(position)] if position.offset() > 0 && position.offset() < ALPHABET.len()
+            ),
+            "{reports:?}"
+        );
     }
 
     fn completion_list(from: usize, labels: &[&str]) -> CompletionList {
@@ -1339,7 +1432,7 @@ mod tests {
         ui.into_messages()
             .filter_map(|report| match report {
                 Report::Hover(hover) => Some(hover),
-                Report::Act(_) | Report::Complete(_) => None,
+                Report::Act(_) | Report::Complete(_) | Report::Definition(_) => None,
             })
             .collect()
     }
