@@ -1,12 +1,21 @@
+use std::time::Instant;
+
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::scrollable::{Direction, Scrollbar};
-use iced::widget::{button, column, container, image, responsive, row, scrollable, space, text};
-use iced::{Element, Fill, Size};
-use presswork_typst::Output;
+use iced::widget::scrollable::{AbsoluteOffset, Direction, Scrollbar};
+use iced::widget::{
+    button, column, container, image, operation, responsive, row, scrollable, space, text,
+};
+use iced::{Element, Fill, Point, Size, Task};
+use presswork_typst::{Output, PagePoint};
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::{font, font_size, size, space as gap};
 
+use crate::page::page_area;
+
+const PAGES: &str = "preview-pages";
+const SHOWN_MARGIN: f32 = 1.0 / 6.0;
+const SHOWN_AT: f32 = 1.0 / 3.0;
 const PX_PER_PT: f32 = 96.0 / 72.0;
 const STEPS: [u16; 11] = [25, 50, 67, 75, 90, 100, 125, 150, 200, 300, 400];
 const FULL_SIZE: u16 = 100;
@@ -23,7 +32,7 @@ pub enum Zoom {
     Percent(u16),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Action {
     ZoomIn,
     ZoomOut,
@@ -31,6 +40,26 @@ pub enum Action {
     ShowProblem,
     Detach,
     Attach,
+    Click(PagePoint),
+    Scrolled(Viewport),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Viewport {
+    top: f32,
+    height: f32,
+    width: f32,
+}
+
+impl From<scrollable::Viewport> for Viewport {
+    fn from(viewport: scrollable::Viewport) -> Self {
+        let bounds = viewport.bounds();
+        Self {
+            top: viewport.absolute_offset().y,
+            height: bounds.height,
+            width: bounds.width,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +81,8 @@ pub struct Preview {
     zoom: Zoom,
     problem: Option<String>,
     detached: bool,
+    viewport: Option<Viewport>,
+    mark: Option<(PagePoint, Instant)>,
 }
 
 impl Preview {
@@ -106,8 +137,54 @@ impl Preview {
                     .find(|&step| step < current)
                     .unwrap_or(STEPS[0]),
             ),
-            Action::ShowProblem | Action::Detach | Action::Attach => return,
+            Action::Scrolled(viewport) => {
+                self.viewport = Some(viewport);
+                return;
+            }
+            Action::ShowProblem | Action::Detach | Action::Attach | Action::Click(_) => return,
         };
+    }
+
+    pub fn show_point<T>(&mut self, point: PagePoint, now: Instant) -> Task<T> {
+        self.mark = Some((point, now));
+        match self.scroll_target(point) {
+            Some(top) => operation::scroll_to(
+                PAGES,
+                AbsoluteOffset {
+                    x: None,
+                    y: Some(top),
+                },
+            ),
+            None => Task::none(),
+        }
+    }
+
+    fn scroll_target(&self, point: PagePoint) -> Option<f32> {
+        let viewport = self.viewport?;
+        let above = self.pages.get(..point.page)?;
+        self.pages.get(point.page)?;
+        let Frame { scale, .. } = self.frame(viewport.width);
+        let pages_above: f32 = above
+            .iter()
+            .map(|page| page.height * PX_PER_PT * scale + PAGE_GAP)
+            .sum();
+        let y = PADDING + pages_above + to_f32(point.y) * PX_PER_PT * scale;
+        let margin = viewport.height * SHOWN_MARGIN;
+        if y >= viewport.top + margin && y <= viewport.top + viewport.height - margin {
+            return None;
+        }
+        Some((y - viewport.height * SHOWN_AT).max(0.0))
+    }
+
+    fn mark_on(&self, page: usize, scale: f32) -> Option<(Point, Instant)> {
+        let (point, since) = self.mark?;
+        (point.page == page).then(|| {
+            let ratio = PX_PER_PT * scale;
+            (
+                Point::new(to_f32(point.x) * ratio, to_f32(point.y) * ratio),
+                since,
+            )
+        })
     }
 
     pub fn view<'a, Message: Clone + 'a>(
@@ -193,13 +270,22 @@ impl Preview {
         .spacing(gap::XXS)
         .align_y(Vertical::Center)
         .padding([gap::XS, gap::S]);
-        let pages = column(self.pages.iter().map(|page| {
-            container(
+        let pages = column(self.pages.iter().enumerate().map(|(index, page)| {
+            let content = container(
                 image(page.handle.clone())
                     .width(page.width * PX_PER_PT * scale)
                     .height(page.height * PX_PER_PT * scale),
             )
             .style(style::paper)
+            .id(format!("page-{index}"));
+            page_area(content, move |point| {
+                on_action(Action::Click(PagePoint {
+                    page: index,
+                    x: f64::from(point.x / (PX_PER_PT * scale)),
+                    y: f64::from(point.y / (PX_PER_PT * scale)),
+                }))
+            })
+            .mark(self.mark_on(index, scale))
             .into()
         }))
         .spacing(PAGE_GAP)
@@ -207,10 +293,12 @@ impl Preview {
         .align_x(Horizontal::Center)
         .width(width);
         let pages = scrollable(pages)
+            .id(PAGES)
             .direction(Direction::Both {
                 vertical: Scrollbar::default(),
                 horizontal: Scrollbar::default(),
             })
+            .on_scroll(move |viewport| on_action(Action::Scrolled(viewport.into())))
             .width(Fill)
             .height(Fill);
         column![toolbar, pages].into()
@@ -222,6 +310,14 @@ impl Preview {
     reason = "page images are far smaller than 2^24 pixels"
 )]
 fn pixels(value: u32) -> f32 {
+    value as f32
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "page coordinates are far below the limits of f32"
+)]
+fn to_f32(value: f64) -> f32 {
     value as f32
 }
 
@@ -425,5 +521,98 @@ mod tests {
 
         assert!(ui.find("Line 2: unknown variable").is_ok());
         assert!(ui.find(EMPTY).is_err());
+    }
+
+    fn a5_pages(count: usize) -> Output {
+        Output {
+            pages: Some(
+                (0..count)
+                    .map(|_| PageImage {
+                        width: 840,
+                        height: 1190,
+                        rgba: vec![255; 840 * 1190 * 4],
+                    })
+                    .collect(),
+            ),
+            ..Output::default()
+        }
+    }
+
+    fn point(page: usize, x: f64, y: f64) -> PagePoint {
+        PagePoint { page, x, y }
+    }
+
+    fn scrolled(top: f32, height: f32, width: f32) -> Action {
+        Action::Scrolled(Viewport { top, height, width })
+    }
+
+    #[test]
+    fn a_click_on_a_page_gives_the_point_on_the_page() {
+        let mut preview = Preview::default();
+        preview.show(&a5_page(), 2.0);
+        for _ in 0..20 {
+            preview.perform(Action::ZoomOut);
+        }
+        let mut ui = simulator(preview.view(EMPTY.to_owned(), |action| action));
+
+        ui.click(iced::widget::Id::from("page-0".to_owned()))
+            .unwrap();
+
+        let clicks: Vec<PagePoint> = ui
+            .into_messages()
+            .filter_map(|action| match action {
+                Action::Click(point) => Some(point),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(clicks.len(), 1, "{clicks:?}");
+        assert_eq!(clicks[0].page, 0);
+        assert!((clicks[0].x - 210.0).abs() < 1.0, "{clicks:?}");
+        assert!((clicks[0].y - 297.5).abs() < 1.0, "{clicks:?}");
+    }
+
+    #[test]
+    fn a_point_below_the_view_scrolls_to_a_third_of_the_view() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        preview.perform(scrolled(0.0, 600.0, 640.0));
+        let scale = preview.frame(640.0).scale;
+        let y = PADDING + 595.0 * PX_PER_PT * scale + PAGE_GAP + 100.0 * PX_PER_PT * scale;
+
+        let target = preview.scroll_target(point(1, 50.0, 100.0)).unwrap();
+
+        assert!((target - (y - 200.0)).abs() < 0.5, "{target} {y}");
+    }
+
+    #[test]
+    fn a_point_in_the_view_does_not_scroll() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        preview.perform(scrolled(0.0, 600.0, 640.0));
+
+        assert_eq!(preview.scroll_target(point(0, 50.0, 200.0)), None);
+    }
+
+    #[test]
+    fn without_a_known_view_the_preview_does_not_scroll() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+
+        assert_eq!(preview.scroll_target(point(2, 50.0, 100.0)), None);
+    }
+
+    #[test]
+    fn a_shown_point_is_marked_on_its_page() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(2), 2.0);
+        let now = Instant::now();
+
+        let _ = preview.show_point::<Action>(point(1, 30.0, 60.0), now);
+
+        assert_eq!(preview.mark_on(0, 1.0), None);
+        let (mark, since) = preview.mark_on(1, 1.0).unwrap();
+        assert!((mark.x - 30.0 * PX_PER_PT).abs() < 0.01, "{mark:?}");
+        assert!((mark.y - 60.0 * PX_PER_PT).abs() < 0.01, "{mark:?}");
+        assert_eq!(since, now);
     }
 }

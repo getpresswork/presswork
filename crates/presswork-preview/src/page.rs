@@ -1,0 +1,244 @@
+use std::time::{Duration, Instant};
+
+use iced::advanced::layout::{self, Layout};
+use iced::advanced::renderer::{self, Quad, Renderer as _};
+use iced::advanced::widget::{self, Tree, Widget};
+use iced::advanced::{Clipboard, Shell, mouse, overlay};
+use iced::{
+    Border, Element, Event, Length, Point, Rectangle, Renderer, Size, Theme, Vector, window,
+};
+
+pub(crate) const MARK_TIME: Duration = Duration::from_millis(1500);
+const MARK_RADIUS: f32 = 9.0;
+const MARK_BORDER: f32 = 2.0;
+
+pub(crate) struct PageArea<'a, Message> {
+    content: Element<'a, Message>,
+    on_click: Box<dyn Fn(Point) -> Message + 'a>,
+    mark: Option<(Point, Instant)>,
+}
+
+pub(crate) fn page_area<'a, Message>(
+    content: impl Into<Element<'a, Message>>,
+    on_click: impl Fn(Point) -> Message + 'a,
+) -> PageArea<'a, Message> {
+    PageArea {
+        content: content.into(),
+        on_click: Box::new(on_click),
+        mark: None,
+    }
+}
+
+impl<Message> PageArea<'_, Message> {
+    pub(crate) fn mark(mut self, mark: Option<(Point, Instant)>) -> Self {
+        self.mark = mark;
+        self
+    }
+}
+
+fn shows(since: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(since) < MARK_TIME
+}
+
+impl<Message> Widget<Message, Theme, Renderer> for PageArea<'_, Message> {
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        );
+        if shell.is_event_captured() {
+            return;
+        }
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if let Some(position) = cursor.position_in(layout.bounds()) {
+                    shell.publish((self.on_click)(position));
+                    shell.capture_event();
+                }
+            }
+            Event::Window(window::Event::RedrawRequested(now)) => {
+                if let Some((_, since)) = self.mark
+                    && shows(since, *now)
+                {
+                    shell.request_redraw_at(since + MARK_TIME);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            style,
+            layout,
+            cursor,
+            viewport,
+        );
+        if let Some((point, since)) = self.mark
+            && shows(since, Instant::now())
+        {
+            let colors = presswork_ui::theme::colors(theme);
+            let bounds = layout.bounds();
+            let corner = Point::new(
+                bounds.x + point.x - MARK_RADIUS,
+                bounds.y + point.y - MARK_RADIUS,
+            );
+            renderer.fill_quad(
+                Quad {
+                    bounds: Rectangle::new(corner, Size::new(2.0 * MARK_RADIUS, 2.0 * MARK_RADIUS)),
+                    border: Border {
+                        color: colors.accent,
+                        width: MARK_BORDER,
+                        radius: MARK_RADIUS.into(),
+                    },
+                    ..Quad::default()
+                },
+                colors.accent_soft,
+            );
+        }
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
+    }
+}
+
+impl<'a, Message: 'a> From<PageArea<'a, Message>> for Element<'a, Message> {
+    fn from(area: PageArea<'a, Message>) -> Self {
+        Element::new(area)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::widget::space;
+    use iced_test::simulator;
+
+    use super::*;
+
+    #[test]
+    fn a_click_gives_the_point_in_the_area() {
+        let area = page_area(space().width(200).height(100), |point| point);
+        let mut ui = simulator(area);
+
+        ui.point_at(Point::new(50.0, 20.0));
+        let _ = ui.simulate(simulator::click());
+
+        assert_eq!(
+            ui.into_messages().collect::<Vec<_>>(),
+            [Point::new(50.0, 20.0)]
+        );
+    }
+
+    #[test]
+    fn a_click_outside_the_area_gives_nothing() {
+        let area = page_area(space().width(200).height(100), |point| point);
+        let mut ui = simulator(area);
+
+        ui.point_at(Point::new(300.0, 20.0));
+        let _ = ui.simulate(simulator::click());
+
+        assert_eq!(ui.into_messages().count(), 0);
+    }
+
+    #[test]
+    fn the_mark_shows_for_a_short_time() {
+        let now = Instant::now();
+
+        assert!(shows(now, now + Duration::from_millis(100)));
+        assert!(!shows(now, now + MARK_TIME));
+    }
+}
