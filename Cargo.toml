@@ -83,7 +83,9 @@ typst = "0.15.1"
 typst-assets = { version = "0.15.1", features = ["fonts"] }
 typst-ide = "0.15.1"
 typst-layout = "0.15.1"
+typst-pdf = "0.15.1"
 typst-render = "0.15.1"
+typst-svg = "0.15.1"
 typst-syntax = "0.15.1"
 tracing-subscriber ={ version = "0.3.23", default-features = false, features = ["std", "registry", "env-filter", "tracing-log"] }
 unic-langid = "0.9.6"

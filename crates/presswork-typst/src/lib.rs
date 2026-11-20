@@ -1,5 +1,6 @@
 mod assist;
 mod compile;
+mod export;
 mod fonts;
 mod ide;
 mod job;
@@ -12,6 +13,7 @@ mod world;
 
 pub use assist::{Completion, CompletionKind, Completions, Definition, Tooltip};
 pub use compile::{Compilation, Diagnostic, Severity, compile};
+pub use export::{ExportError, ExportSettings, Format, export};
 pub use fonts::Fonts;
 pub use ide::{Analysis, Jump, PagePoint};
 pub use job::{Output, run};
