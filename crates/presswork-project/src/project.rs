@@ -80,7 +80,7 @@ impl Project {
     }
 }
 
-fn is_inside(path: &Path) -> bool {
+pub(crate) fn is_inside(path: &Path) -> bool {
     path.components()
         .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
 }

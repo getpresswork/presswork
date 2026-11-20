@@ -3,8 +3,10 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::error::ProjectError;
+use crate::project::is_inside;
 
 pub const MANIFEST: &str = "presswork.toml";
+const DEFAULT_PPI: u32 = 144;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Manifest {
@@ -47,6 +49,18 @@ impl ExportProfile {
             ppi: None,
             image_ppi: None,
         }
+    }
+
+    #[must_use]
+    pub fn resolution(&self) -> u32 {
+        self.ppi.unwrap_or(DEFAULT_PPI)
+    }
+
+    #[must_use]
+    pub fn outside(&self, main: &Path) -> Option<PathBuf> {
+        self.files(main, 1)
+            .into_iter()
+            .find(|path| !is_inside(path))
     }
 
     #[must_use]
@@ -142,6 +156,14 @@ pub(crate) fn with_pin(text: &str, pin: &str) -> Result<String, ProjectError> {
 }
 
 impl Manifest {
+    #[must_use]
+    pub fn export_profiles(&self) -> Vec<ExportProfile> {
+        if self.exports.is_empty() {
+            return vec![ExportProfile::named("PDF", ExportFormat::Pdf)];
+        }
+        self.exports.clone()
+    }
+
     pub fn parse(text: &str) -> Result<Self, ProjectError> {
         let file: File = toml::from_str(text)
             .map_err(|error| ProjectError::InvalidManifest(error.message().to_owned()))?;
@@ -274,6 +296,51 @@ mod tests {
                 PathBuf::from("chapters/book-2.png")
             ]
         );
+    }
+
+    #[test]
+    fn a_manifest_without_export_tables_gives_one_pdf_profile() {
+        let manifest = Manifest::parse("[project]\nname = \"Notes\"\n").unwrap();
+
+        assert_eq!(
+            manifest.export_profiles(),
+            [ExportProfile::named("PDF", ExportFormat::Pdf)]
+        );
+    }
+
+    #[test]
+    fn export_tables_replace_the_pdf_profile() {
+        let manifest =
+            Manifest::parse("[project]\nname = \"Notes\"\n\n[[export]]\nname = \"print\"\n")
+                .unwrap();
+
+        assert_eq!(
+            manifest.export_profiles(),
+            [ExportProfile::named("print", ExportFormat::Pdf)]
+        );
+    }
+
+    #[test]
+    fn an_output_outside_the_project_folder_is_found() {
+        let main = Path::new("main.typ");
+        let mut profile = ExportProfile::named("print", ExportFormat::Pdf);
+        assert_eq!(profile.outside(main), None);
+
+        profile.output = Some(PathBuf::from("../book.pdf"));
+        assert_eq!(profile.outside(main), Some(PathBuf::from("../book.pdf")));
+
+        let absolute = std::env::temp_dir().join("book.pdf");
+        profile.output = Some(absolute.clone());
+        assert_eq!(profile.outside(main), Some(absolute));
+    }
+
+    #[test]
+    fn page_images_have_144_ppi_by_default() {
+        let mut profile = ExportProfile::named("pages", ExportFormat::Png);
+        assert_eq!(profile.resolution(), 144);
+
+        profile.ppi = Some(300);
+        assert_eq!(profile.resolution(), 300);
     }
 
     #[test]
