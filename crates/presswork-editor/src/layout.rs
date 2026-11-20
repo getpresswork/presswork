@@ -29,6 +29,7 @@ pub(crate) struct Line {
     pub(crate) len: usize,
     pub(crate) top: f32,
     pub(crate) height: f32,
+    pub(crate) hidden: bool,
     pub(crate) paragraph: Paragraph,
 }
 
@@ -36,6 +37,7 @@ pub(crate) struct Line {
 struct Key {
     editor: u64,
     revision: u64,
+    folds: u64,
     width: u32,
     colors: Colors,
 }
@@ -58,6 +60,7 @@ impl Layout {
         let key = Key {
             editor: editor.id(),
             revision: editor.revision(),
+            folds: editor.fold_revision(),
             width: width.to_bits(),
             colors: *colors,
         };
@@ -90,12 +93,21 @@ impl Layout {
                 .or_else(|| previous.remove(&hash))
                 .unwrap_or_else(|| shape(&text, &pieces, colors, width));
             self.cache.insert(hash, paragraph.clone());
-            let height = paragraph.min_height().max(row_height());
+            let hidden = editor
+                .folds()
+                .iter()
+                .any(|fold| fold.start.offset() <= start && start < fold.end.offset());
+            let height = if hidden {
+                0.0
+            } else {
+                paragraph.min_height().max(row_height())
+            };
             lines.push(Line {
                 start,
                 len: end - start,
                 top,
                 height,
+                hidden,
                 paragraph,
             });
             top += height;
@@ -127,6 +139,7 @@ impl Layout {
             .enumerate()
             .skip(first)
             .take_while(move |(_, line)| line.top < range.end)
+            .filter(|(_, line)| !line.hidden)
     }
 
     pub(crate) fn caret(&self, position: Position) -> Rectangle {
@@ -150,7 +163,7 @@ impl Layout {
     }
 
     pub(crate) fn hit(&self, point: Point) -> Position {
-        let Some(last) = self.lines.last() else {
+        let Some(last) = self.lines.iter().rev().find(|line| !line.hidden) else {
             return Position::default();
         };
         if point.y >= self.height() {
@@ -194,7 +207,7 @@ impl Layout {
         }
         let first = self.line_index(range.start);
         let last = self.line_index(range.end);
-        for line in &self.lines[first..=last] {
+        for line in self.lines[first..=last].iter().filter(|line| !line.hidden) {
             let start = range
                 .start
                 .offset()
@@ -480,6 +493,60 @@ pub(crate) mod tests {
 
         assert!(rows.len() > 2);
         assert!(rows.windows(2).all(|pair| pair[0].y < pair[1].y));
+    }
+
+    fn folded_layout(text: &str, hidden: Range<usize>) -> Layout {
+        load_fonts();
+        let mut editor = Editor::new(text);
+        editor
+            .perform(
+                crate::Action::Fold(Position::new(hidden.start)..Position::new(hidden.end)),
+                std::time::Instant::now(),
+            )
+            .unwrap();
+        let mut layout = Layout::default();
+        layout.update(&editor, &mut Highlighter::default(), &LIGHT, 400.0);
+        layout
+    }
+
+    #[test]
+    fn folded_lines_have_no_height_and_do_not_show() {
+        let layout = folded_layout("head\nbody\ntail", 5..10);
+
+        let tops: Vec<f32> = layout.lines().iter().map(|line| line.top).collect();
+        assert_eq!(tops, [0.0, row_height(), row_height()]);
+        let shown: Vec<usize> = layout
+            .visible(0.0..1000.0)
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(shown, [0, 2]);
+        assert_eq!(
+            layout.hit(Point::new(1.0, row_height() * 1.5)),
+            Position::new(10)
+        );
+    }
+
+    #[test]
+    fn a_selection_over_a_fold_has_no_hidden_rows() {
+        let layout = folded_layout("head\nbody\ntail", 5..10);
+
+        let rows = layout.selection(Position::new(0)..Position::new(14));
+
+        assert!(
+            rows.iter()
+                .all(|row| row.y < 0.5 || (row.y - row_height()).abs() < 0.5),
+            "{rows:?}"
+        );
+    }
+
+    #[test]
+    fn a_click_below_a_fold_at_the_end_goes_to_the_last_shown_line() {
+        let layout = folded_layout("head\nbody", 5..9);
+
+        assert_eq!(
+            layout.hit(Point::new(1.0, 10.0 * row_height())),
+            Position::new(4)
+        );
     }
 
     #[test]

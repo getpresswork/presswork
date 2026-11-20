@@ -22,6 +22,8 @@ pub enum Action {
         extend: bool,
     },
     Paste(String),
+    Fold(Range<Position>),
+    Unfold(Range<Position>),
     Move {
         motion: Motion,
         extend: bool,

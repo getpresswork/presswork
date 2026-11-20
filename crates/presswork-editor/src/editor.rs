@@ -20,6 +20,8 @@ pub struct Editor {
     revision: u64,
     goal: Option<f32>,
     word_search: bool,
+    folds: Vec<Range<Position>>,
+    fold_revision: u64,
 }
 
 impl Editor {
@@ -31,6 +33,8 @@ impl Editor {
             revision: 0,
             goal: None,
             word_search: false,
+            folds: Vec::new(),
+            fold_revision: 0,
         }
     }
 
@@ -55,6 +59,16 @@ impl Editor {
     }
 
     #[must_use]
+    pub fn folds(&self) -> &[Range<Position>] {
+        &self.folds
+    }
+
+    #[must_use]
+    pub fn fold_revision(&self) -> u64 {
+        self.fold_revision
+    }
+
+    #[must_use]
     pub fn selected_text(&self) -> String {
         let buffer = self.document.buffer();
         let parts: Vec<_> = self
@@ -74,6 +88,8 @@ impl Editor {
         }
         self.document.apply_remote(changes)?;
         self.revision += 1;
+        self.map_folds(changes);
+        self.reveal();
         Ok(())
     }
 
@@ -91,7 +107,7 @@ impl Editor {
                 let ranges = selection
                     .ranges()
                     .iter()
-                    .map(|range| moved(buffer, *range, motion, extend))
+                    .map(|range| self.over_folds(range.head, moved(buffer, *range, motion, extend)))
                     .collect();
                 self.select(Selection::new(ranges, selection.primary_index()), now)
             }
@@ -141,6 +157,11 @@ impl Editor {
             }
             Action::MoveEach { heads, extend } => self.move_each(&heads, extend, now),
             Action::Paste(text) => self.paste(&text, now),
+            Action::Fold(hidden) => self.fold(hidden, now),
+            Action::Unfold(hidden) => {
+                self.unfold(&hidden);
+                Ok(None)
+            }
             Action::Newline => self.replace_each(
                 |_, buffer, range| {
                     format!(
@@ -166,8 +187,10 @@ impl Editor {
     }
 
     fn count(&mut self, changes: Option<&ChangeSet>) {
-        if changes.is_some() {
+        if let Some(changes) = changes {
             self.revision += 1;
+            self.map_folds(changes);
+            self.reveal();
         }
     }
 
@@ -179,7 +202,102 @@ impl Editor {
         let len = self.document.buffer().len();
         let transaction = Transaction::new(ChangeSet::empty(len)).with_selection(selection);
         self.document.apply(transaction, now)?;
+        self.reveal();
         Ok(None)
+    }
+
+    fn fold(
+        &mut self,
+        hidden: Range<Position>,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
+        if hidden.start >= hidden.end || self.folds.contains(&hidden) {
+            return Ok(None);
+        }
+        let header_end = self.header_end(&hidden);
+        let selection = self.document.selection();
+        let ranges = selection
+            .ranges()
+            .iter()
+            .map(|range| {
+                if hidden.contains(&range.head) {
+                    SelectionRange::cursor(header_end)
+                } else {
+                    *range
+                }
+            })
+            .collect();
+        let primary = selection.primary_index();
+        self.folds.push(hidden);
+        self.folds.sort_by_key(|fold| fold.start);
+        self.fold_revision += 1;
+        self.select(Selection::new(ranges, primary), now)
+    }
+
+    fn unfold(&mut self, hidden: &Range<Position>) {
+        let before = self.folds.len();
+        self.folds.retain(|fold| fold != hidden);
+        if self.folds.len() != before {
+            self.fold_revision += 1;
+        }
+    }
+
+    fn header_end(&self, hidden: &Range<Position>) -> Position {
+        let buffer = self.document.buffer();
+        buffer.line_end(buffer.line_of(hidden.start).saturating_sub(1))
+    }
+
+    fn over_folds(&self, from: Position, range: SelectionRange) -> SelectionRange {
+        let Some(fold) = self.folds.iter().find(|fold| fold.contains(&range.head)) else {
+            return range;
+        };
+        let head = if range.head > from {
+            fold.end
+        } else {
+            self.header_end(fold)
+        };
+        let anchor = if range.is_empty() { head } else { range.anchor };
+        SelectionRange::new(anchor, head)
+    }
+
+    fn reveal(&mut self) {
+        if self.folds.is_empty() {
+            return;
+        }
+        let heads: Vec<Position> = self
+            .document
+            .selection()
+            .ranges()
+            .iter()
+            .map(|range| range.head)
+            .collect();
+        let before = self.folds.len();
+        self.folds
+            .retain(|fold| !heads.iter().any(|head| fold.contains(head)));
+        if self.folds.len() != before {
+            self.fold_revision += 1;
+        }
+    }
+
+    fn map_folds(&mut self, changes: &ChangeSet) {
+        if self.folds.is_empty() {
+            return;
+        }
+        let buffer = self.document.buffer();
+        let mapped: Vec<Range<Position>> = self
+            .folds
+            .iter()
+            .filter_map(|fold| {
+                let start =
+                    line_start_from(buffer, changes.map_position(fold.start, Assoc::Before));
+                let end = line_start_from(buffer, changes.map_position(fold.end, Assoc::Before));
+                (start.offset() > 0 && start < end).then_some(start..end)
+            })
+            .collect();
+        if mapped != self.folds {
+            self.folds = mapped;
+            self.fold_revision += 1;
+        }
     }
 
     fn select_range(
@@ -475,7 +593,19 @@ impl Editor {
         let changes = transaction.changes.clone();
         self.document.apply(transaction, now)?;
         self.revision += 1;
+        self.map_folds(&changes);
+        self.reveal();
         Ok(Some(changes))
+    }
+}
+
+fn line_start_from(buffer: &Buffer, position: Position) -> Position {
+    let line = buffer.line_of(position);
+    let start = buffer.line_start(line);
+    if start == position {
+        start
+    } else {
+        buffer.line_start(line + 1)
     }
 }
 
@@ -1050,6 +1180,102 @@ mod tests {
             after_all("a|\nb|", &[Action::Paste("x".to_owned())]),
             "ax|\nbx|"
         );
+    }
+
+    fn folded(marked_text: &str, hidden: std::ops::Range<usize>) -> Editor {
+        let mut editor = editor(marked_text);
+        perform(
+            &mut editor,
+            Action::Fold(Position::new(hidden.start)..Position::new(hidden.end)),
+        );
+        editor
+    }
+
+    fn fold_spans(editor: &Editor) -> Vec<(usize, usize)> {
+        editor
+            .folds()
+            .iter()
+            .map(|fold| (fold.start.offset(), fold.end.offset()))
+            .collect()
+    }
+
+    #[test]
+    fn a_fold_moves_a_hidden_cursor_to_the_end_of_its_header() {
+        let editor = folded("head\nbo|dy\ntail", 5..10);
+
+        assert_eq!(marked(&editor), "head|\nbody\ntail");
+        assert_eq!(fold_spans(&editor), [(5, 10)]);
+    }
+
+    #[test]
+    fn moving_right_from_the_header_goes_over_the_fold() {
+        let mut editor = folded("head|\nbody\ntail", 5..10);
+
+        perform(&mut editor, step(Motion::Right));
+
+        assert_eq!(marked(&editor), "head\nbody\n|tail");
+        assert_eq!(fold_spans(&editor), [(5, 10)]);
+    }
+
+    #[test]
+    fn moving_left_after_the_fold_goes_back_to_the_header() {
+        let mut editor = folded("head\nbody\n|tail", 5..10);
+
+        perform(&mut editor, step(Motion::Left));
+
+        assert_eq!(marked(&editor), "head|\nbody\ntail");
+    }
+
+    #[test]
+    fn a_jump_into_a_fold_opens_it() {
+        let mut editor = folded("head|\nbody\ntail", 5..10);
+
+        perform(&mut editor, move_to(Position::new(7), false));
+
+        assert_eq!(fold_spans(&editor), Vec::<(usize, usize)>::new());
+    }
+
+    #[test]
+    fn typing_before_a_fold_moves_it() {
+        let mut editor = folded("head|\nbody\ntail", 5..10);
+
+        perform(&mut editor, insert("!"));
+
+        assert_eq!(fold_spans(&editor), [(6, 11)]);
+    }
+
+    #[test]
+    fn a_remote_change_moves_a_fold() {
+        let mut editor = folded("head|\nbody\ntail", 5..10);
+        let changes = ChangeSet::new(14, [Edit::insert(Position::new(0), "ab")]).unwrap();
+
+        editor.apply_remote(&changes).unwrap();
+
+        assert_eq!(fold_spans(&editor), [(7, 12)]);
+    }
+
+    #[test]
+    fn replacing_the_folded_text_removes_the_fold() {
+        let mut editor = folded("head|\nbody\ntail", 5..10);
+
+        perform(&mut editor, Action::SelectAll);
+        perform(&mut editor, insert("x"));
+
+        assert_eq!(fold_spans(&editor), Vec::<(usize, usize)>::new());
+    }
+
+    #[test]
+    fn unfold_shows_the_text_again() {
+        let mut editor = folded("head|\nbody\ntail", 5..10);
+        let revision = editor.fold_revision();
+
+        perform(
+            &mut editor,
+            Action::Unfold(Position::new(5)..Position::new(10)),
+        );
+
+        assert_eq!(fold_spans(&editor), Vec::<(usize, usize)>::new());
+        assert!(editor.fold_revision() > revision);
     }
 
     fn replace_all(ranges: &[(usize, usize, &str)]) -> Action {
