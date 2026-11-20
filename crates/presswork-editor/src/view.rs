@@ -42,6 +42,7 @@ pub struct EditorView<'a, Message> {
     on_action: Box<dyn Fn(Action) -> Message + 'a>,
     autofocus: bool,
     marks: Vec<Mark>,
+    id: Option<widget::Id>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +68,7 @@ pub fn view<'a, Message>(
         on_action: Box::new(on_action),
         autofocus: false,
         marks: Vec::new(),
+        id: None,
     }
 }
 
@@ -80,6 +82,12 @@ impl<Message> EditorView<'_, Message> {
     #[must_use]
     pub fn marks(mut self, marks: Vec<Mark>) -> Self {
         self.marks = marks;
+        self
+    }
+
+    #[must_use]
+    pub fn id(mut self, id: impl Into<widget::Id>) -> Self {
+        self.id = Some(id.into());
         self
     }
 
@@ -648,7 +656,7 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
         operation: &mut dyn widget::Operation,
     ) {
         let state = tree.state.downcast_mut::<State>();
-        operation.focusable(None, layout.bounds(), state);
+        operation.focusable(self.id.as_ref(), layout.bounds(), state);
     }
 }
 
@@ -809,6 +817,15 @@ mod tests {
         let mut ui = simulator(view(&editor, &LIGHT, |action| action).marks(marks));
 
         assert!(ui.snapshot(&presswork_ui::theme::light()).is_ok());
+    }
+
+    #[test]
+    fn the_view_gives_its_id_to_the_focus_operations() {
+        load_fonts();
+        let editor = Editor::new("ab");
+        let mut ui = simulator(view(&editor, &LIGHT, |action| action).id("editor"));
+
+        assert!(ui.find(widget::Id::from("editor")).is_ok());
     }
 
     #[test]
