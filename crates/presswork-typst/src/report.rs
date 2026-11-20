@@ -159,9 +159,11 @@ pub(crate) fn report_path(profile: &ExportProfile, main: &Path) -> PathBuf {
             }
         })
         .collect();
-    profile
-        .template(main)
-        .with_file_name(format!("{name}.report.json"))
+    let template = profile.template(main).to_string_lossy().into_owned();
+    let folder = template
+        .rfind(['/', '\\'])
+        .map_or(0, |separator| separator + 1);
+    PathBuf::from(format!("{}{name}.report.json", &template[..folder]))
 }
 
 fn fonts(document: &PagedDocument) -> Vec<Font> {
@@ -214,8 +216,8 @@ mod tests {
             ..ExportProfile::named("Print run/2", ExportFormat::Png)
         };
         assert_eq!(
-            report_path(&profile, Path::new("main.typ")),
-            Path::new("out/pages/Print-run-2.report.json")
+            report_path(&profile, Path::new("main.typ")).to_string_lossy(),
+            "out/pages/Print-run-2.report.json"
         );
 
         profile.output = None;
