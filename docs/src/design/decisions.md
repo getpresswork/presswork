@@ -1440,7 +1440,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D190. Add a word to the word list
 
-- **Status:** Accepted, 2026-11-21. **Origin:** Default.
+- **Status:** Accepted, 2026-11-21. D197 adds the personal dictionary after this item. **Origin:** Default.
 - **Decision:**
   - For a misspelled word in a project, the corrections list (D189) has one more item at the end: "Add “word” to the word list". The suggestions of the dictionary stay first, thus Enter still selects the first suggestion. For a word without suggestions, the list has only this item.
   - The item adds the word as it is in the text to `presswork-words.txt` (D188). A word with a capital letter, for example at the start of a sentence, then permits only the same letters. To permit all forms, change the word in the file to small letters.
@@ -1518,3 +1518,15 @@ Do not change what an accepted decision says. You can correct its language. To c
   - `presswork-cli check` and the Typeset workspace use the same limits.
 - **Reason:** Each house and each book has its own rules for breaks. The limits belong to the project, as the baseline grid does (D194).
 - **Other options:** A separate `[qa]` table. Limits for each language. Limits in the settings of the user. Percent values as text, for example `"150%"`.
+
+## D197. The personal dictionary
+
+- **Status:** Accepted, 2026-11-21. **Origin:** Default.
+- **Decision:**
+  - Each user has one personal dictionary: the file `personal-words.txt` in the data folder of Presswork. On Windows, this is `%APPDATA%\getpresswork\Presswork\data`. On macOS, it is `~/Library/Application Support/io.github.getpresswork.Presswork`. On Linux, it is `~/.local/share/presswork`. The folder is the roaming data folder, not the local data folder of the toolchains, because the words belong to the person and not to the computer.
+  - The file has the format of the word list of a project (D188). A word in the personal dictionary or in the word list of the project is correct.
+  - The corrections of a misspelled word end with "Add “word” to the personal dictionary", after the item of the project word list (D190). The item is also there without a project, for example in a document from the server. Presswork makes the folder and the file if necessary.
+  - The editor reads the file again before each check, thus a change in a text editor applies at the next check.
+  - `presswork-cli check` does not use the personal dictionary, thus CI and all computers of the team give the same result.
+- **Reason:** A writer often uses names and terms that are correct for that person but that the team does not want in the project. One file in the user folder is simple to keep, to copy, and to edit.
+- **Other options:** A personal dictionary for each language. Personal words on the server for each account. A command to open the file. The personal dictionary also in `presswork-cli check`, with an option to switch it off.
