@@ -5382,6 +5382,7 @@ dependencies = [
  "presswork-api",
  "presswork-client",
  "presswork-editor",
+ "presswork-language",
  "presswork-library",
  "presswork-log",
  "presswork-preview",

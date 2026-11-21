@@ -18,6 +18,7 @@ mod publish_view;
 #[cfg(test)]
 mod screens;
 mod server_dialog;
+mod spelling;
 mod task_list;
 #[cfg(test)]
 mod testing;
@@ -43,8 +44,12 @@ pub fn run() -> iced::Result {
         let mut app = App::new(store.clone());
         let window = app.open_main_window();
         let compile = app.request_compile();
+        let dictionaries = App::load_dictionaries();
         let theme = iced::system::theme().map(app::Message::SystemTheme);
-        (app, iced::Task::batch([window, theme, compile]))
+        (
+            app,
+            iced::Task::batch([window, theme, compile, dictionaries]),
+        )
     };
     iced::daemon(boot, App::update, App::view_window)
         .settings(settings())

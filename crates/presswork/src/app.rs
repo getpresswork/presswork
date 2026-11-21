@@ -17,6 +17,7 @@ use presswork_api::{Document, SearchHit};
 use presswork_editor::{
     CompletionEvent, CompletionItem, CompletionList, Editor, Mark, MarkKind, Motion,
 };
+use presswork_language::WordList;
 use presswork_log::{Level, LogStore};
 use presswork_preview::Preview;
 use presswork_project::{ExportProfile, Project};
@@ -45,8 +46,11 @@ use crate::menu;
 use crate::outline_panel::{self, OutlinePanel};
 use crate::publish_view::{self, PublishView};
 use crate::server_dialog::{self, ServerDialog};
+use crate::spelling::{self, SpellChecker};
 use crate::task_list::{self, TaskList};
-use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
+use crate::toolchain_panel::{
+    self, Choice, ToolchainPanel, dictionary_directory, sentence, toolchain_directory,
+};
 use crate::typeset_view;
 use crate::unsaved;
 use crate::workspace::Workspace;
@@ -78,6 +82,7 @@ pub(crate) struct App {
     find: FindBar,
     publish: PublishView,
     quality: Vec<Problem>,
+    spelling: SpellChecker,
     modifiers: keyboard::Modifiers,
     hovered: Option<Position>,
     tooltip: Option<presswork_editor::Tooltip>,
@@ -138,6 +143,7 @@ pub(crate) enum Message {
     Find(find_bar::Message),
     Publish(publish_view::Message),
     Typeset(typeset_view::Message),
+    Spelling(spelling::Message),
     OpenFolder,
     FolderPicked(Option<PathBuf>),
     Save,
@@ -184,6 +190,7 @@ impl App {
             find: FindBar::default(),
             publish: PublishView::default(),
             quality: Vec::new(),
+            spelling: SpellChecker::default(),
             modifiers: keyboard::Modifiers::default(),
             hovered: None,
             tooltip: None,
@@ -284,6 +291,7 @@ impl App {
 
     pub(crate) fn marks(&self) -> Vec<Mark> {
         let mut marks = self.diagnostic_marks();
+        marks.extend(self.spelling.marks(self.editor.revision()));
         if self.find.is_open() {
             marks.extend(self.find.matches().iter().map(|found| Mark {
                 range: Position::new(found.start)..Position::new(found.end),
@@ -352,6 +360,8 @@ impl App {
                 self.saved = self.editor.revision();
                 let root = opened.project.root().to_path_buf();
                 let main = opened.project.manifest().main.clone();
+                let words = fs::read_to_string(root.join(spelling::WORD_LIST)).unwrap_or_default();
+                self.spelling.set_words(WordList::parse(&words));
                 self.project = Some(opened.project);
                 let backend = self.backend();
                 self.compiler.open(&root, &main, backend);
@@ -1315,11 +1325,49 @@ impl App {
                 .as_ref()
                 .map_or_else(Vec::new, Analysis::quality);
         }
+        let spell = if output.pages.is_some() {
+            self.check_spelling()
+        } else {
+            Task::none()
+        };
         self.compiled = Some(output);
         if self.compiler.finish() {
-            return self.start_compile();
+            return Task::batch([spell, self.start_compile()]);
         }
-        Task::none()
+        spell
+    }
+
+    fn check_spelling(&mut self) -> Task<Message> {
+        let (Some(analysis), Some(revision)) =
+            (self.pages_analysis.clone(), self.compiled_revision)
+        else {
+            return Task::none();
+        };
+        self.spelling
+            .check(analysis, revision)
+            .map(Message::Spelling)
+    }
+
+    fn spelling_message(&mut self, message: spelling::Message) -> Task<Message> {
+        let loaded = matches!(message, spelling::Message::Loaded(_));
+        let task = self.spelling.update(message).map(Message::Spelling);
+        if loaded {
+            return Task::batch([task, self.check_spelling()]);
+        }
+        task
+    }
+
+    pub(crate) fn load_dictionaries() -> Task<Message> {
+        spelling::load_task(dictionary_directory()).map(Message::Spelling)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn spell_now(&mut self) {
+        if let (Some(analysis), Some(revision)) =
+            (self.pages_analysis.clone(), self.compiled_revision)
+        {
+            self.spelling.check_now(&analysis, revision);
+        }
     }
 
     fn failed_output(&self, error: &str) -> Output {
@@ -1431,6 +1479,7 @@ impl App {
             Message::Typeset(typeset_view::Message::Show(index)) => {
                 return self.show_layout_problem(index);
             }
+            Message::Spelling(message) => return self.spelling_message(message),
             Message::ToggleMenu => self.menu_open = !self.menu_open,
             Message::CloseMenu => self.menu_open = false,
             Message::MenuItem(item) => {
@@ -2756,6 +2805,52 @@ mod tests {
     }
 
     const EXPORTED: &str = "Presswork wrote main.pdf and the build report PDF.report.json.";
+
+    fn english_dictionary() -> Message {
+        let mut dictionaries = presswork_language::Dictionaries::default();
+        dictionaries.insert(
+            "en-US",
+            presswork_language::Dictionary::new(b"SET UTF-8\n", b"4\nthe\ncat\nsat\non\n").unwrap(),
+        );
+        Message::Spelling(spelling::Message::Loaded(Arc::new(dictionaries)))
+    }
+
+    fn spelling_marks(app: &App) -> Vec<std::ops::Range<Position>> {
+        app.marks()
+            .into_iter()
+            .filter(|mark| mark.kind == MarkKind::Spelling)
+            .map(|mark| mark.range)
+            .collect()
+    }
+
+    #[test]
+    fn misspelled_words_of_the_editor_text_have_marks() {
+        let mut app = compiled_app("The cat sat on the mta.");
+        send(&mut app, english_dictionary());
+
+        app.spell_now();
+
+        assert_eq!(spelling_marks(&app), [Position::new(19)..Position::new(22)]);
+        send(&mut app, insert("x"));
+        assert_eq!(spelling_marks(&app), []);
+    }
+
+    #[test]
+    fn the_word_list_of_the_project_permits_its_words() {
+        let folder = project_folder(&[
+            ("presswork.toml", "[project]\nname = \"The Book\"\n"),
+            ("main.typ", "The cat sat on the mta."),
+            ("presswork-words.txt", "mta\n"),
+        ]);
+        let mut app = app();
+        open(&mut app, &folder);
+        app.compile_now();
+        send(&mut app, english_dictionary());
+
+        app.spell_now();
+
+        assert_eq!(spelling_marks(&app), []);
+    }
 
     const SHORT_END: &str = "A line of text \\ it.";
     const SHORT_END_PROBLEM: &str = "Page 1: The last line of a paragraph has only 3 characters.";

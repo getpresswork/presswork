@@ -623,6 +623,11 @@ pub(crate) fn toolchain_directory() -> Option<PathBuf> {
         .map(|directories| directories.data_local_dir().join("toolchains"))
 }
 
+pub(crate) fn dictionary_directory() -> Option<PathBuf> {
+    ProjectDirs::from("io.github", "getpresswork", "Presswork")
+        .map(|directories| directories.data_local_dir().join("dictionaries"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;

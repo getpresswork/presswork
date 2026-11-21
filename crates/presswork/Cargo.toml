@@ -16,6 +16,7 @@ workspace = true
 presswork-api.workspace = true
 presswork-client.workspace = true
 presswork-editor.workspace = true
+presswork-language.workspace = true
 presswork-library.workspace = true
 presswork-log.workspace = true
 presswork-preview.workspace = true
