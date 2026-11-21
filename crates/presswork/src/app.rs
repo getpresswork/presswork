@@ -85,6 +85,7 @@ pub(crate) struct App {
     tooltip: Option<presswork_editor::Tooltip>,
     completions: Option<presswork_editor::CompletionList>,
     explicit_completion: bool,
+    word_to_add: Option<String>,
     project: Option<Project>,
     saved: u64,
     notice: Option<String>,
@@ -128,6 +129,7 @@ pub(crate) enum Message {
     CorrectionsFound {
         revision: u64,
         range: std::ops::Range<usize>,
+        word: String,
         suggestions: Vec<String>,
     },
     Compiled {
@@ -198,6 +200,7 @@ impl App {
             tooltip: None,
             completions: None,
             explicit_completion: false,
+            word_to_add: None,
             project: None,
             notice: None,
             main_window: window::Id::unique(),
@@ -830,8 +833,9 @@ impl App {
             Message::CorrectionsFound {
                 revision,
                 range,
+                word,
                 suggestions,
-            } => self.corrections_found(revision, range, suggestions),
+            } => self.corrections_found(revision, range, suggestions, Some(word)),
             Message::Definition(position) => return self.find_definition(position),
             Message::DefinitionFound {
                 revision,
@@ -924,7 +928,7 @@ impl App {
             .correction_at(revision, self.cursor().offset())
         {
             Some(Correction::Replacement { range, text }) => {
-                self.corrections_found(revision, range, vec![text]);
+                self.corrections_found(revision, range, vec![text], None);
                 Task::none()
             }
             Some(Correction::Spelling {
@@ -932,10 +936,11 @@ impl App {
                 word,
                 language,
             }) => Task::perform(
-                proofreading::suggestions(self.proofreader.dictionaries(), word, language),
+                proofreading::suggestions(self.proofreader.dictionaries(), word.clone(), language),
                 move |suggestions| Message::CorrectionsFound {
                     revision,
                     range,
+                    word,
                     suggestions,
                 },
             ),
@@ -951,15 +956,13 @@ impl App {
         revision: u64,
         range: std::ops::Range<usize>,
         suggestions: Vec<String>,
+        word: Option<String>,
     ) {
         if revision != self.editor.revision() {
             return;
         }
-        if suggestions.is_empty() {
-            self.show_no_corrections();
-            return;
-        }
-        let items = suggestions
+        let word = word.filter(|_| self.project.is_some());
+        let mut items: Vec<CompletionItem> = suggestions
             .into_iter()
             .map(|text| CompletionItem {
                 label: text.clone(),
@@ -968,6 +971,21 @@ impl App {
                 text,
             })
             .collect();
+        if let Some(word) = &word {
+            let mut args = FluentArgs::new();
+            args.set("word", word.clone());
+            items.push(CompletionItem {
+                label: self.localizer.format("proofreading-add-word", &args),
+                detail: Some(self.localizer.text("proofreading-add-word-detail")),
+                text: String::new(),
+                select: 0..0,
+            });
+        }
+        if items.is_empty() {
+            self.show_no_corrections();
+            return;
+        }
+        self.word_to_add = word;
         self.completions = Some(CompletionList {
             from: Position::new(range.start),
             to: Some(Position::new(range.end)),
@@ -975,6 +993,18 @@ impl App {
             selected: 0,
         });
         self.explicit_completion = false;
+    }
+
+    fn add_to_word_list(&mut self, word: &str) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        if let Err(error) = self.proofreader.add_word(project.root(), word) {
+            tracing::warn!(%error, "The word list was not written");
+            let mut args = FluentArgs::new();
+            args.set("error", error.to_string());
+            self.notice = Some(self.localizer.format("proofreading-add-word-error", &args));
+        }
     }
 
     fn show_no_corrections(&mut self) {
@@ -989,6 +1019,13 @@ impl App {
         let Some(list) = self.completions.take() else {
             return Task::none();
         };
+        if let Some(word) = self.word_to_add.take()
+            && list.to.is_some()
+            && index + 1 == list.items.len()
+        {
+            self.add_to_word_list(&word);
+            return Task::none();
+        }
         match list.apply(index, self.cursor()) {
             Some(action) => self.edit(action),
             None => Task::none(),
@@ -1508,10 +1545,10 @@ impl App {
         {
             let suggestions = futures::executor::block_on(proofreading::suggestions(
                 self.proofreader.dictionaries(),
-                word,
+                word.clone(),
                 language,
             ));
-            self.corrections_found(revision, range, suggestions);
+            self.corrections_found(revision, range, suggestions, Some(word));
         } else {
             let _ = self.request_corrections();
         }
@@ -3072,15 +3109,8 @@ mod tests {
 
         let task = app.update(Message::Complete(CompletionEvent::Correct));
         assert!(task.units() > 0);
-        let revision = app.editor.revision();
-        send(
-            &mut app,
-            Message::CorrectionsFound {
-                revision,
-                range: 19..22,
-                suggestions: vec!["mat".to_owned(), "met".to_owned()],
-            },
-        );
+        let found = misspelling_found(&app, &["mat", "met"]);
+        send(&mut app, found);
         assert_eq!(labels(&app), ["mat", "met"]);
         send(&mut app, Message::Complete(CompletionEvent::Accept));
 
@@ -3088,6 +3118,61 @@ mod tests {
             app.editor.document().buffer().to_string(),
             "The cat sat on the mat."
         );
+    }
+
+    fn misspelling_found(app: &App, suggestions: &[&str]) -> Message {
+        Message::CorrectionsFound {
+            revision: app.editor.revision(),
+            range: 19..22,
+            word: "mta".to_owned(),
+            suggestions: suggestions
+                .iter()
+                .map(|suggestion| (*suggestion).to_owned())
+                .collect(),
+        }
+    }
+
+    fn proofread_spelling_book() -> (App, tempfile::TempDir) {
+        let folder = project_folder(&[
+            ("presswork.toml", "[project]\nname = \"The Book\"\n"),
+            ("main.typ", STYLE_BOOK),
+        ]);
+        let mut app = app();
+        open(&mut app, &folder);
+        app.compile_now();
+        send(&mut app, english_dictionary());
+        app.proofread_now();
+        send(&mut app, move_to(20));
+        (app, folder)
+    }
+
+    #[test]
+    fn the_corrections_of_a_misspelled_word_end_with_adding_it_to_the_word_list() {
+        let (mut app, folder) = proofread_spelling_book();
+        let found = misspelling_found(&app, &["mat"]);
+        send(&mut app, found);
+        assert_eq!(labels(&app), ["mat", "Add “mta” to the word list"]);
+
+        send(&mut app, Message::Complete(CompletionEvent::Choose(1)));
+
+        assert_eq!(
+            fs::read_to_string(folder.path().join("presswork-words.txt")).unwrap(),
+            "mta\n"
+        );
+        assert_eq!(app.editor.document().buffer().to_string(), STYLE_BOOK);
+        assert_eq!(spelling_marks(&app), []);
+        assert_eq!(app.completions, None);
+    }
+
+    #[test]
+    fn a_misspelled_word_without_suggestions_can_still_go_into_the_word_list() {
+        let (mut app, _folder) = proofread_spelling_book();
+        let found = misspelling_found(&app, &[]);
+
+        send(&mut app, found);
+
+        assert_eq!(labels(&app), ["Add “mta” to the word list"]);
+        assert_eq!(app.tooltip, None);
     }
 
     #[test]

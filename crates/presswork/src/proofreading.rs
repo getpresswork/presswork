@@ -87,6 +87,25 @@ impl Proofreader {
         }
     }
 
+    pub(crate) fn add_word(&mut self, root: &Path, word: &str) -> std::io::Result<()> {
+        let path = root.join(WORD_LIST);
+        let mut text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(error) => return Err(error),
+        };
+        let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push_str(newline);
+        }
+        text.push_str(word);
+        text.push_str(newline);
+        fs::write(&path, &text)?;
+        self.words = WordList::parse(&text);
+        self.words_text = text;
+        Ok(())
+    }
+
     pub(crate) fn close_project(&mut self) {
         self.words = WordList::default();
         self.words_text.clear();
@@ -463,6 +482,35 @@ mod tests {
         assert!(found("en").contains(&"mat".to_owned()), "{:?}", found("en"));
         assert!(found("en-US").contains(&"mat".to_owned()));
         assert_eq!(found("de"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn an_added_word_goes_into_the_list_file_and_loses_its_mark() {
+        let folder = project(&[]);
+        let mut proofreader = proofreader(&folder, english());
+        proofreader.check_now(&analysis(TEXT), 7);
+
+        proofreader.add_word(folder.path(), "mta").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(folder.path().join(WORD_LIST)).unwrap(),
+            "mta\n"
+        );
+        assert_eq!(proofreader.marks(7), []);
+        assert_eq!(proofreader.read_project(folder.path()), None);
+    }
+
+    #[test]
+    fn an_added_word_keeps_the_lines_of_the_list_file() {
+        let folder = project(&[(WORD_LIST, "# Names\r\nTypst")]);
+        let mut proofreader = proofreader(&folder, english());
+
+        proofreader.add_word(folder.path(), "mta").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(folder.path().join(WORD_LIST)).unwrap(),
+            "# Names\r\nTypst\r\nmta\r\n"
+        );
     }
 
     #[test]
