@@ -64,7 +64,7 @@ In milestone 2, the report finds the first five problems (D185):
 - A last line is short when it has fewer than five characters, without spaces. Paragraphs with one line do not count.
 - The limits are fixed now. Text outside of the margins needs the margins, and Typst does not give them (D181).
 
-The Typeset workspace shows the report of the last compilation. A click on a problem opens the Write workspace and selects the source of the line. The preview then marks the place. The preview also puts a box in the warning color around each problem on its page, and the tooltip of the box tells the problem (D191). The report needs the built-in Typst engine. `presswork-cli check` also lists these problems, but they do not change its exit code.
+The Typeset workspace shows the report of the last compilation in a panel at the left, and the preview at the right (D192). Each problem gives its page. A click on a problem scrolls the preview to the problem and marks its place. The pen button at the right of a problem opens the Write workspace and selects the source of the line. The preview puts a box in the warning color around each problem on its page, and the tooltip of the box tells the problem (D191). The report needs the built-in Typst engine. `presswork-cli check` also lists these problems, but they do not change its exit code.
 
 ## Baseline grid check
 

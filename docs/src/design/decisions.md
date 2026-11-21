@@ -1382,7 +1382,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D185. Details of the typesetting QA report
 
-- **Status:** Accepted, 2026-11-20. D191 adds marks on the pages of the preview. **Origin:** Default.
+- **Status:** Accepted, 2026-11-20. D191 adds marks on the pages of the preview. D192 changes the click on a problem. **Origin:** Default.
 - **Decision:**
   - The report finds paragraphs from the paragraph tags of the Typst output, and lines from the vertical position of the text. A change of more than half the text size starts a new line.
   - A widow is the last line of a paragraph on a new page or at the top of a new column. An orphan is the first line of a paragraph before such a break.
@@ -1462,3 +1462,16 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The **Problems** button (a warning triangle) in the toolbar of the preview shows or hides the boxes. The boxes are on by default. The thumbnails show no boxes.
 - **Reason:** Typesetters examine the pages, thus a problem must show where it is. The same preflight as in the command-line tool gives the same problems in both. Preflight problems make `check` fail and layout problems do not, thus the error color and the warning color agree with the command-line tool.
 - **Other options:** Boxes only for layout problems. Preflight only with the rules of the first profile. Boxes that are off by default. A list of the preflight problems in the Typeset workspace. Boxes in the thumbnails. Preflight on a separate thread.
+
+## D192. The preview in the Typeset workspace
+
+- **Status:** Accepted, 2026-11-21. **Origin:** Default.
+- **Decision:**
+  - The Typeset workspace shows the QA report in a panel of 340 pixels at the left and the preview at the right. The preview is the same as in the Write workspace, with the same pages, zoom, buttons, and marks.
+  - Each problem in the panel shows its sentence and the number of its page.
+  - A click on a problem scrolls the preview to the problem and marks the middle of its area for 1.5 seconds, as in D171. The workspace does not change. Until the next compilation with pages, the panel shows the problem in the accent color.
+  - The pen button at the right of a problem opens the Write workspace and selects the source of the line, as a click on a problem did before (D185). A problem without a source has no pen button.
+  - When the preview is in its own window, the panel uses the full width of the workspace.
+  - A click on a page in the Typeset workspace moves the cursor of the editor, as in the Write workspace, and the workspace does not change.
+- **Reason:** Typesetters examine the problems and the pages together. A click that keeps the workspace lets them examine the problems one after the other. The pen button keeps the way to the source.
+- **Other options:** A click that opens the Write workspace, as before. A double-click for the source. An editor in the Typeset workspace. The preflight problems in the panel. A preview that keeps its position when the workspace changes.
