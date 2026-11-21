@@ -79,6 +79,19 @@ pub enum ProblemKind {
     },
 }
 
+impl ProblemKind {
+    #[must_use]
+    pub fn depends_on_profile(&self) -> bool {
+        matches!(
+            self,
+            Self::LowResolution { .. }
+                | Self::PageSize { .. }
+                | Self::Color { .. }
+                | Self::GradientSpace { .. }
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Problem {
     pub page: Option<usize>,
@@ -88,6 +101,24 @@ pub struct Problem {
 }
 
 impl Output {
+    #[must_use]
+    pub fn preflight_profiles<'a>(
+        &self,
+        profiles: &'a [ExportProfile],
+    ) -> Vec<(&'a ExportProfile, Problem)> {
+        let mut found: Vec<(&ExportProfile, Problem)> = Vec::new();
+        for profile in profiles {
+            for problem in self.preflight(&Rules::of(profile)) {
+                if problem.kind.depends_on_profile()
+                    || !found.iter().any(|(_, known)| *known == problem)
+                {
+                    found.push((profile, problem));
+                }
+            }
+        }
+        found
+    }
+
     #[must_use]
     pub fn preflight(&self, rules: &Rules) -> Vec<Problem> {
         let mut families = HashSet::new();
@@ -369,7 +400,7 @@ mod tests {
     use std::path::Path;
     use std::sync::{Arc, Mutex};
 
-    use presswork_project::LengthUnit;
+    use presswork_project::{ExportFormat, LengthUnit};
     use typst::foundations::Datetime;
 
     use super::*;
@@ -389,7 +420,7 @@ mod tests {
         bytes
     }
 
-    fn problems(text: &str, rules: Rules) -> Vec<Problem> {
+    fn output(text: &str) -> (Output, tempfile::TempDir) {
         let folder = tempfile::tempdir().unwrap();
         fs::write(folder.path().join("main.typ"), text).unwrap();
         fs::write(folder.path().join("dot.png"), png(100, 100)).unwrap();
@@ -399,7 +430,69 @@ mod tests {
             folder.path().to_path_buf(),
             Path::new("main.typ"),
         ));
-        run(&world, text, 1.0, false).preflight(&rules)
+        (run(&world, text, 1.0, false), folder)
+    }
+
+    fn problems(text: &str, rules: Rules) -> Vec<Problem> {
+        output(text).0.preflight(&rules)
+    }
+
+    #[test]
+    fn each_profile_gives_its_problems_and_the_document_problems_show_once() {
+        let print = ExportProfile {
+            image_ppi: Some(300),
+            colors: Some(Colors::Cmyk),
+            ..ExportProfile::named("Print", ExportFormat::Pdf)
+        };
+        let proof = ExportProfile {
+            image_ppi: Some(150),
+            ..ExportProfile::named("Proof", ExportFormat::Pdf)
+        };
+        let profiles = [print, proof];
+        let (output, _folder) =
+            output("#image(\"dot.png\", width: 1in)\n#text(fill: rgb(\"#ff0000\"))[Red]");
+
+        let found = output.preflight_profiles(&profiles);
+
+        let names: Vec<(&str, ProblemKind)> = found
+            .iter()
+            .map(|(profile, problem)| (profile.name.as_str(), problem.kind.clone()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("Print", ProblemKind::MissingAltText),
+                (
+                    "Print",
+                    ProblemKind::LowResolution {
+                        ppi: 100,
+                        minimum: 300
+                    }
+                ),
+                (
+                    "Print",
+                    ProblemKind::Color {
+                        color: "rgb(\"#ff0000\")".to_owned(),
+                        permitted: Colors::Cmyk
+                    }
+                ),
+                (
+                    "Proof",
+                    ProblemKind::LowResolution {
+                        ppi: 100,
+                        minimum: 150
+                    }
+                ),
+            ]
+        );
+        assert!(!ProblemKind::MissingAltText.depends_on_profile());
+        assert!(
+            ProblemKind::LowResolution {
+                ppi: 100,
+                minimum: 150
+            }
+            .depends_on_profile()
+        );
     }
 
     fn kinds(problems: &[Problem]) -> Vec<(Option<usize>, ProblemKind)> {

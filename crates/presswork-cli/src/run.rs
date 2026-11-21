@@ -9,8 +9,8 @@ use presswork_project::{
 };
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
-    Analysis, Diagnostic, Fonts, Misspelling, Output, Problem, ProblemKind, ProfileError, Rules,
-    Severity, SourceRange, StyleProblem, World, analyze, today,
+    Analysis, Diagnostic, Fonts, Misspelling, Problem, ProblemKind, ProfileError, Severity,
+    SourceRange, StyleProblem, World, analyze, today,
 };
 
 use crate::cli::{Cli, Command, Target};
@@ -75,7 +75,7 @@ fn work(target: &Target, build: bool, console: &mut Console<'_>) -> Result<(), F
     {
         return Err(Failed);
     }
-    let problems = preflight(&output, &profiles);
+    let problems = output.preflight_profiles(&profiles);
     for (profile, problem) in &problems {
         console.problem(&places, problem, &profile.name);
     }
@@ -220,31 +220,6 @@ fn select(profiles: Vec<ExportProfile>, names: &[String]) -> Result<Vec<ExportPr
         .into_iter()
         .filter(|profile| names.is_empty() || names.contains(&profile.name))
         .collect())
-}
-
-fn preflight<'a>(
-    output: &Output,
-    profiles: &'a [ExportProfile],
-) -> Vec<(&'a ExportProfile, Problem)> {
-    let mut found: Vec<(&ExportProfile, Problem)> = Vec::new();
-    for profile in profiles {
-        for problem in output.preflight(&Rules::of(profile)) {
-            if of_the_profile(&problem.kind) || !found.iter().any(|(_, known)| *known == problem) {
-                found.push((profile, problem));
-            }
-        }
-    }
-    found
-}
-
-fn of_the_profile(kind: &ProblemKind) -> bool {
-    matches!(
-        kind,
-        ProblemKind::LowResolution { .. }
-            | ProblemKind::PageSize { .. }
-            | ProblemKind::Color { .. }
-            | ProblemKind::GradientSpace { .. }
-    )
 }
 
 fn colors_id(colors: Colors) -> &'static str {
