@@ -30,9 +30,10 @@ In milestone 2, the spell checker does these things (D186, D187, D188):
 - It does not check words with digits, words in capital letters only, code, math, raw text, and text that the document does not show.
 - A word with an apostrophe, for example "can't", is one word.
 - The editor shows each misspelled word in the main file with a dotted line in the error color. The check runs on a separate thread after each compilation.
-- The file `presswork-words.txt` in the project folder is the word list of the team. It has one word on each line. Lines that start with `#` are comments. A word in small letters also permits the same word with capitals, for example `typst` permits "Typst".
+- A tooltip on a misspelled word tells the problem. Ctrl+. on the word shows the suggestions of the dictionary (D189).
+- The file `presswork-words.txt` in the project folder is the word list of the team. It has one word on each line. Lines that start with `#` are comments. A word in small letters also permits the same word with capitals, for example `typst` permits "Typst". The editor reads the list again before each check.
 - `presswork-cli check` lists the misspelled words, and they make the check fail. If the document has text in a language without a dictionary, the command names the language one time. Without any dictionary, the command does not check the spelling.
-- Personal dictionaries, suggestions in the editor, and the command to add a word to the list come later.
+- Personal dictionaries and the command to add a word to the list come later.
 
 ## House style
 
@@ -44,6 +45,34 @@ A house style is a set of rules. Examples:
 - Terms: the preferred terms from the termbase.
 
 Each rule has a pattern, a message, and an optional correction. Presswork shows each problem in the editor. A person can apply the correction or keep the text.
+
+In milestone 2, the house style does these things (D189):
+
+- The file `presswork-style.toml` in the project folder has the rules. Each `[[rule]]` table is one rule:
+
+  ```toml
+  [[rule]]
+  text = "organise"
+  replacement = "organize"
+
+  [[rule]]
+  text = "in order to"
+  replacement = "to"
+  message = "Use the short form."
+
+  [[rule]]
+  pattern = '(\d+)-(\d+)'
+  replacement = '$1–$2'
+  message = "Use an en dash between two numbers."
+  ```
+
+- A rule has `text` or `pattern`. `text` finds whole words. A text in small letters also finds the words with capitals, and the replacement keeps the capital of the first letter. `pattern` is a regular expression in the syntax of the Rust `regex` crate. In the replacement, `$1` gives the first group of the pattern.
+- `replacement` and `message` are optional. Without a message, the tooltip tells that the house style does not permit the text.
+- The rules examine the same text parts as the spell checker. They do not examine code, math, raw text, or text that the document does not show.
+- The editor shows each problem with a dotted line in the warning color. The tooltip gives the message. Ctrl+. shows the replacement, and Enter puts it into the text.
+- The editor reads the file again before each check. If the file is not valid, the notice bar tells the problem. Until the file is correct, the editor uses no rules.
+- `presswork-cli check` lists the problems, and they make the check fail. A file that is not valid is an error.
+- Rules from the termbase, rules for each language, and corrections in suggestion mode come later.
 
 ## Termbase
 

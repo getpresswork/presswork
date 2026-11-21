@@ -1411,7 +1411,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D188. Details of the spell checker
 
-- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Status:** Accepted, 2026-11-20. D189 adds the suggestions in the editor. **Origin:** Default.
 - **Decision:**
   - The list has 14 dictionaries from commit `c0865a85` (2026-11-06): en-US, en-GB, de-DE, de-AT, de-CH, fr-FR, es-ES, it-IT, nl-NL, pt-BR, pt-PT, pl-PL, ru-RU, and da-DK. Swedish is not in the list, because its folder has no spelling files.
   - The order of the list selects the dictionary for a language without a region: `en` uses en-US, `de` uses de-DE, and `pt` uses pt-BR.
@@ -1423,3 +1423,17 @@ Do not change what an accepted decision says. You can correct its language. To c
   - In `presswork-cli check`, misspelled words make the check fail. `--dictionaries` gives a different folder.
 - **Reason:** The layout gives the language exactly as Typst uses it. Skipped lines keep a dictionary usable when a few lines have errors. A word list in the project folder goes into the version control of the team.
 - **Other options:** Suggestions and a command to add a word in the editor now. A personal dictionary now. A `download` command in `presswork-cli`. A language from the source text in place of the layout.
+
+## D189. Details of the house style
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - The house style of a project is the file `presswork-style.toml` in the project folder. Each `[[rule]]` table is one rule with `text` or `pattern`, and with an optional `replacement` and `message`. A rule without `text` and `pattern`, with both, or with an empty value is an error. Other keys are permitted for later versions, as in `presswork.toml`.
+  - `text` finds whole words. A space in the text also finds a line break. If the text has only small letters, the rule also finds the words with capitals, and the replacement gets the capital of the first letter: "Organise" becomes "Organize". A text with a capital finds only the same letters.
+  - `pattern` is a regular expression of the `regex` crate, which was already in the dependency tree. `$1` in the replacement gives the first group. `(?i)` in the pattern ignores the difference between capital and small letters.
+  - The rules examine the same text parts as the spell checker. A text part includes its spaces, thus a rule can find more than one word.
+  - The editor shows each problem in the main file with a dotted line in the warning color. A tooltip on a marked word gives the message of the rule or of the spell checker. Ctrl+. (Cmd+. on macOS) shows the replacement of the rule or the suggestions of the dictionary in the completion list. The selected item replaces all of the marked text. Typing closes the list.
+  - Before each check, the editor reads `presswork-style.toml` and `presswork-words.txt` again if their text changed. An error in the house style file shows in the notice bar one time. Until the file is correct, the editor uses no rules.
+  - In `presswork-cli check`, house style problems make the check fail. A house style file that is not valid is an error.
+- **Reason:** A TOML file in the project folder goes into the version control of the team, as the manifest and the word list do. Whole words, and small letters for both cases, give the expected result for most rules without regular expressions. A check after each compilation shows a changed rule without a new start of the project.
+- **Other options:** Rules in `presswork.toml`. The Vale rule format. Regular expressions with look-ahead through `fancy-regex`. Problems as warnings that do not make `check` fail. Rules for each language. Rules from the termbase. A command that applies all replacements. Corrections as suggestions in suggestion mode.

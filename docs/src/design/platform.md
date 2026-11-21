@@ -23,9 +23,10 @@ In milestone 2, the program has the `build` and `check` commands (D183):
 - Each command runs preflight for each selected profile. A problem of the document shows one time. A problem of a profile shows with the name of the profile (D184).
 - `check` also lists the problems of the typesetting QA report, for example widows and loose lines. These problems do not change the exit code (D185).
 - `check` also checks the spelling with the downloaded dictionaries. Misspelled words make the check fail. `--dictionaries FOLDER` gives a different folder with dictionaries, for example a cache in a CI system. The default is the folder of the desktop application (D188).
-- `check` compiles the project and runs preflight. It writes no files. The quote checker and the house style rules come later.
+- `check` also checks the house style rules in `presswork-style.toml`. House style problems make the check fail. A house style file that is not valid is an error (D189).
+- `check` compiles the project and runs preflight. It writes no files. The quote checker comes later.
 - Errors, warnings, and preflight problems go to the standard error stream, one on each line, for example `chapters/one.typ:12:5: error: unknown variable: x`. Lines and columns start at 1. Preflight problems are warnings.
-- The exit code is 0 for success and 1 for a failure. `check` fails if the document has errors or preflight problems. `build` fails if the document has errors or if a profile cannot write its files. Preflight problems do not stop `build`.
+- The exit code is 0 for success and 1 for a failure. `check` fails if the document has errors, preflight problems, misspelled words, or house style problems. `build` fails if the document has errors or if a profile cannot write its files. Preflight problems do not stop `build`.
 - If the Typst pin of the project does not accept the built-in Typst version, the command stops.
 - `presswork-cli --help` shows all options.
 

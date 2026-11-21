@@ -65,6 +65,7 @@ Until the project model is ready, the Write workspace shows a scratch document. 
 | Ctrl+A, Ctrl+C, Ctrl+X, and Ctrl+V | Select all, copy, cut, and paste. |
 | Ctrl+Z, and Ctrl+Y or Ctrl+Shift+Z | Undo and redo. |
 | Ctrl+Space | Show the completions at the cursor. |
+| Ctrl+. | Show the corrections for the spelling or house style problem at the cursor. |
 | F12 | Go to the definition of the item at the cursor. |
 | Ctrl+F | Open the find bar. |
 | Ctrl+H | Open the find bar with the replace row. |
@@ -83,6 +84,8 @@ Click to move the cursor. Double-click to select a word, and triple-click to sel
 
 If the mouse pointer stays on the text for half a second, the editor shows a tooltip for the item below the pointer. The tooltip comes from the embedded engine (D169). For example, it gives a short description of a function, or a length in other units. Code in a tooltip has the monospace font. The tooltip goes above the line, or below the line if there is no space above. If you move the pointer, push a key, or click, the tooltip closes.
 
+On a word with a dotted line, the tooltip tells the spelling or house style problem and the shortcut for the corrections (D189).
+
 ### Completion
 
 While you type Typst code, the editor shows completions, for example after `#`. To see the completions at the cursor, also in text, push Ctrl+Space.
@@ -95,6 +98,15 @@ While you type Typst code, the editor shows completions, for example after `#`. 
 - If you move the cursor, the list closes.
 
 Tooltips and completions use the text in the editor, also if it changed after the last compilation (D172).
+
+### Corrections
+
+Push Ctrl+. on a word with a dotted line to show the corrections in the completion list (D189):
+
+- For a misspelled word, the list shows the suggestions of the dictionary.
+- For a house style problem, the list shows the replacement of the rule.
+- Enter or Tab replaces all of the marked text with the selected item. If you type or move the cursor, the list closes.
+- If there are no corrections, a tooltip tells you.
 
 ### Go to definition
 
