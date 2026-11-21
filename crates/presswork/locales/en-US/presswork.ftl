@@ -231,6 +231,15 @@ problem-loose-line = The word spaces in this line are { $spacing }% of their nor
 colors-cmyk = CMYK, gray, and spot colors
 colors-gray = gray colors
 
+proofreading-spelling = The word “{ $word }” is not in the dictionary for { $language }.
+proofreading-style = The house style does not permit “{ $text }”.
+proofreading-replacement = Use “{ $replacement }”.
+style-error-file = The house style file { $file } is not valid. { $problem }
+style-error-missing = Rule { $rule } in { $file } has no text and no pattern.
+style-error-both = Rule { $rule } in { $file } has a text and a pattern. Use only one of them.
+style-error-empty = Rule { $rule } in { $file } has an empty text or pattern.
+style-error-pattern = The pattern of rule { $rule } in { $file } is not valid: { $problem }.
+
 logs-toggle = Logs
 logs-title = Logs
 logs-level-error = Error

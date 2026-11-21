@@ -17,10 +17,9 @@ use presswork_api::{Document, SearchHit};
 use presswork_editor::{
     CompletionEvent, CompletionItem, CompletionList, Editor, Mark, MarkKind, Motion,
 };
-use presswork_language::WordList;
 use presswork_log::{Level, LogStore};
 use presswork_preview::Preview;
-use presswork_project::{ExportProfile, Project, WORD_LIST};
+use presswork_project::{ExportProfile, Project};
 use presswork_text::{ChangeSet, Position, Unit};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
@@ -44,9 +43,9 @@ use crate::live_session::{self, LiveSession};
 use crate::log_panel::{self, LogPanel};
 use crate::menu;
 use crate::outline_panel::{self, OutlinePanel};
+use crate::proofreading::{self, Proofreader};
 use crate::publish_view::{self, PublishView};
 use crate::server_dialog::{self, ServerDialog};
-use crate::spelling::{self, SpellChecker};
 use crate::task_list::{self, TaskList};
 use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
 use crate::typeset_view;
@@ -80,7 +79,7 @@ pub(crate) struct App {
     find: FindBar,
     publish: PublishView,
     quality: Vec<Problem>,
-    spelling: SpellChecker,
+    proofreader: Proofreader,
     modifiers: keyboard::Modifiers,
     hovered: Option<Position>,
     tooltip: Option<presswork_editor::Tooltip>,
@@ -141,7 +140,7 @@ pub(crate) enum Message {
     Find(find_bar::Message),
     Publish(publish_view::Message),
     Typeset(typeset_view::Message),
-    Spelling(spelling::Message),
+    Proofreading(proofreading::Message),
     OpenFolder,
     FolderPicked(Option<PathBuf>),
     Save,
@@ -188,7 +187,7 @@ impl App {
             find: FindBar::default(),
             publish: PublishView::default(),
             quality: Vec::new(),
-            spelling: SpellChecker::default(),
+            proofreader: Proofreader::default(),
             modifiers: keyboard::Modifiers::default(),
             hovered: None,
             tooltip: None,
@@ -289,7 +288,7 @@ impl App {
 
     pub(crate) fn marks(&self) -> Vec<Mark> {
         let mut marks = self.diagnostic_marks();
-        marks.extend(self.spelling.marks(self.editor.revision()));
+        marks.extend(self.proofreader.marks(self.editor.revision()));
         if self.find.is_open() {
             marks.extend(self.find.matches().iter().map(|found| Mark {
                 range: Position::new(found.start)..Position::new(found.end),
@@ -358,14 +357,15 @@ impl App {
                 self.saved = self.editor.revision();
                 let root = opened.project.root().to_path_buf();
                 let main = opened.project.manifest().main.clone();
-                let words = fs::read_to_string(root.join(WORD_LIST)).unwrap_or_default();
-                self.spelling.set_words(WordList::parse(&words));
+                self.proofreader.close_project();
+                let style_error = self.proofreader.read_project(&root);
                 self.project = Some(opened.project);
                 let backend = self.backend();
                 self.compiler.open(&root, &main, backend);
                 self.clear_pages();
                 self.publish.clear();
-                self.notice = None;
+                self.notice = style_error
+                    .map(|error| proofreading::style_error_text(&self.localizer, &error));
                 self.workspace = Workspace::Write;
                 self.request_compile()
             }
@@ -396,6 +396,7 @@ impl App {
         self.editor = Editor::new("");
         self.saved = self.editor.revision();
         self.project = None;
+        self.proofreader.close_project();
         self.compiler.scratch();
         self.clear_pages();
         self.notice = None;
@@ -973,7 +974,21 @@ impl App {
     fn hover(&mut self, position: Option<Position>) -> Task<Message> {
         self.hovered = position;
         self.tooltip = None;
-        let (Some(position), Some(analysis)) = (position, self.assist_analysis()) else {
+        let Some(position) = position else {
+            return Task::none();
+        };
+        if let Some(text) =
+            self.proofreader
+                .tooltip(&self.localizer, self.editor.revision(), position.offset())
+        {
+            self.tooltip = Some(presswork_editor::Tooltip {
+                position,
+                text,
+                code: false,
+            });
+            return Task::none();
+        }
+        let Some(analysis) = self.assist_analysis() else {
             return Task::none();
         };
         let text = self.editor.document().buffer().to_string();
@@ -1323,16 +1338,16 @@ impl App {
                 .as_ref()
                 .map_or_else(Vec::new, Analysis::quality);
         }
-        let spell = if output.pages.is_some() {
-            self.check_spelling()
+        let proofread = if output.pages.is_some() {
+            self.proofread()
         } else {
             Task::none()
         };
         self.compiled = Some(output);
         if self.compiler.finish() {
-            return Task::batch([spell, self.start_compile()]);
+            return Task::batch([proofread, self.start_compile()]);
         }
-        spell
+        proofread
     }
 
     fn toolchain_message(&mut self, message: toolchain_panel::Message) -> Task<Message> {
@@ -1359,36 +1374,47 @@ impl App {
         Task::batch([task.map(Message::Toolchains), sync, reload])
     }
 
-    fn check_spelling(&mut self) -> Task<Message> {
+    fn read_project_files(&mut self) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        if let Some(error) = self.proofreader.read_project(project.root()) {
+            self.notice = Some(proofreading::style_error_text(&self.localizer, &error));
+        }
+    }
+
+    fn proofread(&mut self) -> Task<Message> {
+        self.read_project_files();
         let (Some(analysis), Some(revision)) =
             (self.pages_analysis.clone(), self.compiled_revision)
         else {
             return Task::none();
         };
-        self.spelling
+        self.proofreader
             .check(analysis, revision)
-            .map(Message::Spelling)
+            .map(Message::Proofreading)
     }
 
-    fn spelling_message(&mut self, message: spelling::Message) -> Task<Message> {
-        let loaded = matches!(message, spelling::Message::Loaded(_));
-        let task = self.spelling.update(message).map(Message::Spelling);
+    fn proofreading_message(&mut self, message: proofreading::Message) -> Task<Message> {
+        let loaded = matches!(message, proofreading::Message::Loaded(_));
+        let task = self.proofreader.update(message).map(Message::Proofreading);
         if loaded {
-            return Task::batch([task, self.check_spelling()]);
+            return Task::batch([task, self.proofread()]);
         }
         task
     }
 
     pub(crate) fn load_dictionaries(&self) -> Task<Message> {
-        spelling::load_task(self.toolchains.dictionary_root()).map(Message::Spelling)
+        proofreading::load_task(self.toolchains.dictionary_root()).map(Message::Proofreading)
     }
 
     #[cfg(test)]
-    pub(crate) fn spell_now(&mut self) {
+    pub(crate) fn proofread_now(&mut self) {
+        self.read_project_files();
         if let (Some(analysis), Some(revision)) =
             (self.pages_analysis.clone(), self.compiled_revision)
         {
-            self.spelling.check_now(&analysis, revision);
+            self.proofreader.check_now(&analysis, revision);
         }
     }
 
@@ -1488,7 +1514,7 @@ impl App {
             Message::Typeset(typeset_view::Message::Show(index)) => {
                 return self.show_layout_problem(index);
             }
-            Message::Spelling(message) => return self.spelling_message(message),
+            Message::Proofreading(message) => return self.proofreading_message(message),
             Message::ToggleMenu => self.menu_open = !self.menu_open,
             Message::CloseMenu => self.menu_open = false,
             Message::MenuItem(item) => {
@@ -2821,15 +2847,19 @@ mod tests {
             "en-US",
             presswork_language::Dictionary::new(b"SET UTF-8\n", b"4\nthe\ncat\nsat\non\n").unwrap(),
         );
-        Message::Spelling(spelling::Message::Loaded(Arc::new(dictionaries)))
+        Message::Proofreading(proofreading::Message::Loaded(Arc::new(dictionaries)))
+    }
+
+    fn marks_of(app: &App, kind: MarkKind) -> Vec<std::ops::Range<Position>> {
+        app.marks()
+            .into_iter()
+            .filter(|mark| mark.kind == kind)
+            .map(|mark| mark.range)
+            .collect()
     }
 
     fn spelling_marks(app: &App) -> Vec<std::ops::Range<Position>> {
-        app.marks()
-            .into_iter()
-            .filter(|mark| mark.kind == MarkKind::Spelling)
-            .map(|mark| mark.range)
-            .collect()
+        marks_of(app, MarkKind::Spelling)
     }
 
     #[test]
@@ -2837,11 +2867,68 @@ mod tests {
         let mut app = compiled_app("The cat sat on the mta.");
         send(&mut app, english_dictionary());
 
-        app.spell_now();
+        app.proofread_now();
 
         assert_eq!(spelling_marks(&app), [Position::new(19)..Position::new(22)]);
         send(&mut app, insert("x"));
         assert_eq!(spelling_marks(&app), []);
+    }
+
+    #[test]
+    fn resting_on_a_misspelled_word_shows_its_problem_at_once() {
+        let mut app = compiled_app("The cat sat on the mta.");
+        send(&mut app, english_dictionary());
+        app.proofread_now();
+
+        let task = app.update(hover_at(20));
+
+        assert_eq!(task.units(), 0);
+        assert_eq!(
+            app.tooltip,
+            Some(presswork_editor::Tooltip {
+                position: Position::new(20),
+                text: "The word “mta” is not in the dictionary for en.".to_owned(),
+                code: false,
+            })
+        );
+    }
+
+    const STYLE_BOOK: &str = "The cat sat on the mta.";
+
+    fn styled_book(style: &str) -> tempfile::TempDir {
+        project_folder(&[
+            ("presswork.toml", "[project]\nname = \"The Book\"\n"),
+            ("main.typ", STYLE_BOOK),
+            ("presswork-style.toml", style),
+        ])
+    }
+
+    #[test]
+    fn house_style_problems_of_the_project_have_marks() {
+        let folder = styled_book("[[rule]]\ntext = \"mta\"\nreplacement = \"mat\"\n");
+        let mut app = app();
+        open(&mut app, &folder);
+        app.compile_now();
+
+        app.proofread_now();
+
+        assert_eq!(
+            marks_of(&app, MarkKind::Style),
+            [Position::new(19)..Position::new(22)]
+        );
+    }
+
+    #[test]
+    fn a_house_style_file_that_is_not_valid_shows_a_notice() {
+        let folder = styled_book("[[rule]]\nmessage = \"No text.\"\n");
+        let mut app = app();
+
+        open(&mut app, &folder);
+
+        assert_eq!(
+            app.notice.as_deref(),
+            Some("Rule 1 in presswork-style.toml has no text and no pattern.")
+        );
     }
 
     #[test]
@@ -2856,7 +2943,7 @@ mod tests {
         app.compile_now();
         send(&mut app, english_dictionary());
 
-        app.spell_now();
+        app.proofread_now();
 
         assert_eq!(spelling_marks(&app), []);
     }

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use iced::{Settings, keyboard, window};
@@ -15,6 +16,7 @@ use presswork_api::{
 };
 use presswork_client::Api;
 use presswork_editor::{Action as EditorAction, Motion};
+use presswork_language::{Dictionaries, Dictionary};
 use presswork_preview::Action as PreviewAction;
 use presswork_sync::TextDocument;
 use presswork_text::{ChangeSet, Edit, Position};
@@ -26,6 +28,7 @@ use crate::chat_panel::Message as ChatPanelMessage;
 use crate::find_bar::Message as FindMessage;
 use crate::library_view::{Message as LibraryMessage, PickedFile, Target};
 use crate::live_session::Event as LiveEvent;
+use crate::proofreading::Message as ProofreadingMessage;
 use crate::publish_view::Message as PublishMessage;
 use crate::server_dialog::{Connection, Message as ServerMessage, Shelf};
 use crate::task_list::Message as TaskListMessage;
@@ -243,6 +246,47 @@ fn render_screens() {
     render_spreads(&mut app);
     render_publish(&mut app);
     render_typeset(&mut app);
+    render_house_style(&mut app);
+}
+
+const STYLED_NOTES: &str = "#set text(font: \"Libertinus Serif\")\n= Field notes\n\n\
+                            We organise the notes in order to find them on pages 12-19.\n\
+                            The papr is cut by hand.\n";
+
+const HOUSE_STYLE: &str = "[[rule]]\ntext = \"organise\"\nreplacement = \"organize\"\n\n\
+                           [[rule]]\ntext = \"in order to\"\nreplacement = \"to\"\n\
+                           message = \"Use the short form.\"\n\n\
+                           [[rule]]\npattern = '(\\d+)-(\\d+)'\nreplacement = '$1–$2'\n\
+                           message = \"Use an en dash between two numbers.\"\n";
+
+fn render_house_style(app: &mut App) {
+    let words = "field notes we organise the in order to find them on pages is cut by hand";
+    let dic = format!(
+        "{}\n{}\n",
+        words.split(' ').count(),
+        words.replace(' ', "\n")
+    );
+    let mut dictionaries = Dictionaries::default();
+    dictionaries.insert(
+        "en-US",
+        Dictionary::new(b"SET UTF-8\n", dic.as_bytes()).unwrap(),
+    );
+    let book = folder(&[
+        ("presswork.toml", "[project]\nname = \"Field Notes\"\n"),
+        ("main.typ", STYLED_NOTES),
+        ("presswork-style.toml", HOUSE_STYLE),
+    ]);
+    send(app, Message::SelectWorkspace(Workspace::Write));
+    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    send(
+        app,
+        Message::Proofreading(ProofreadingMessage::Loaded(Arc::new(dictionaries))),
+    );
+    app.compile_now();
+    app.proofread_now();
+    let range = STYLED_NOTES.find("12-19").unwrap() + 1;
+    send(app, Message::Hover(Some(Position::new(range))));
+    render(app, "house-style");
 }
 
 fn render_typeset(app: &mut App) {

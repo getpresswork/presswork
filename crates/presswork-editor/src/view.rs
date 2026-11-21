@@ -78,6 +78,7 @@ pub enum MarkKind {
     Warning,
     Match,
     Spelling,
+    Style,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,7 +211,7 @@ impl<'a, Message> EditorView<'a, Message> {
         for mark in self.shown_marks(state, visible) {
             let color = match mark.kind {
                 MarkKind::Error | MarkKind::Spelling => self.colors.editor.error,
-                MarkKind::Warning => self.colors.warning,
+                MarkKind::Warning | MarkKind::Style => self.colors.warning,
                 MarkKind::Match => continue,
             };
             let rows = if mark.range.start < mark.range.end {
@@ -227,7 +228,7 @@ impl<'a, Message> EditorView<'a, Message> {
                     continue;
                 }
                 let y = origin.y + row.y + row.height - MARK_OFFSET;
-                let (dash, step) = if mark.kind == MarkKind::Spelling {
+                let (dash, step) = if matches!(mark.kind, MarkKind::Spelling | MarkKind::Style) {
                     (DOT, DOT * 2.0)
                 } else {
                     (row.width, row.width.max(1.0))
@@ -1781,26 +1782,34 @@ mod tests {
         assert!((3..30).contains(&added), "{added} rows");
     }
 
+    fn marked_pixels(kind: MarkKind, color: iced::Color) -> usize {
+        let editor = Editor::new("        \nmore text");
+        let marks = vec![Mark {
+            range: Position::new(9)..Position::new(18),
+            kind,
+        }];
+        pixels_with_color(view(&editor, &LIGHT, |action| action).marks(marks), color)
+    }
+
     #[test]
     fn a_spelling_mark_is_a_dotted_line_in_the_error_color() {
         load_fonts();
-        let editor = Editor::new("        \nmore text");
-        let mark = |kind| {
-            vec![Mark {
-                range: Position::new(9)..Position::new(18),
-                kind,
-            }]
-        };
         let error = LIGHT.editor.error;
 
-        let solid = pixels_with_color(
-            view(&editor, &LIGHT, |action| action).marks(mark(MarkKind::Error)),
-            error,
-        );
-        let dotted = pixels_with_color(
-            view(&editor, &LIGHT, |action| action).marks(mark(MarkKind::Spelling)),
-            error,
-        );
+        let solid = marked_pixels(MarkKind::Error, error);
+        let dotted = marked_pixels(MarkKind::Spelling, error);
+
+        assert!(dotted > 0, "{dotted}");
+        assert!(dotted * 3 < solid * 2, "{dotted} of {solid}");
+    }
+
+    #[test]
+    fn a_style_mark_is_a_dotted_line_in_the_warning_color() {
+        load_fonts();
+        let warning = LIGHT.warning;
+
+        let solid = marked_pixels(MarkKind::Warning, warning);
+        let dotted = marked_pixels(MarkKind::Style, warning);
 
         assert!(dotted > 0, "{dotted}");
         assert!(dotted * 3 < solid * 2, "{dotted} of {solid}");

@@ -15,11 +15,11 @@ mod logging;
 mod menu;
 mod outline_panel;
 mod problems;
+mod proofreading;
 mod publish_view;
 #[cfg(test)]
 mod screens;
 mod server_dialog;
-mod spelling;
 mod task_list;
 #[cfg(test)]
 mod testing;
