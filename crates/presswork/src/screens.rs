@@ -242,6 +242,24 @@ fn render_screens() {
     render_library(&mut app);
     render_spreads(&mut app);
     render_publish(&mut app);
+    render_typeset(&mut app);
+}
+
+fn render_typeset(app: &mut App) {
+    let text = "#set page(width: 105mm, height: 74mm, margin: 8mm)\n\
+                #set text(font: \"Libertinus Serif\", size: 10pt, costs: (widow: 0%, orphan: 0%))\n\
+                #set par(justify: true)\n\
+                #lorem(70)\n\n\
+                A typesetter considers incomprehensibilities thoroughly. The last line of this \
+                paragraph is short \\ it.\n";
+    let book = folder(&[
+        ("presswork.toml", "[project]\nname = \"Field Notes\"\n"),
+        ("main.typ", text),
+    ]);
+    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    app.compile_now();
+    send(app, Message::SelectWorkspace(Workspace::Typeset));
+    render(app, "typeset-qa");
 }
 
 const EXPORTS: &str = "[project]\nname = \"Field Notes\"\n\n\
