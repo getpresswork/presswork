@@ -20,11 +20,30 @@ pub struct Manifest {
     pub typeset: TypesetSettings,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
 pub struct TypesetSettings {
     pub baseline_grid: Option<Length>,
     pub baseline_start: Option<Length>,
+    pub widows: bool,
+    pub orphans: bool,
+    pub stacked_hyphens: u32,
+    pub short_last_line: u32,
+    pub loose_spacing: u32,
+}
+
+impl Default for TypesetSettings {
+    fn default() -> Self {
+        Self {
+            baseline_grid: None,
+            baseline_start: None,
+            widows: true,
+            orphans: true,
+            stacked_hyphens: 3,
+            short_last_line: 5,
+            loose_spacing: 150,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
@@ -200,6 +219,11 @@ impl Manifest {
                 "the baseline-grid in [typeset] must be larger than 0".to_owned(),
             ));
         }
+        if file.typeset.loose_spacing < 100 {
+            return Err(ProjectError::InvalidManifest(
+                "the loose-spacing in [typeset] must be 100 or more".to_owned(),
+            ));
+        }
         Ok(Self {
             name: file.project.name,
             main: file.project.main,
@@ -246,7 +270,66 @@ mod tests {
             TypesetSettings {
                 baseline_grid: Some(Length::parse("13pt").unwrap()),
                 baseline_start: Some(Length::parse("30mm").unwrap()),
+                ..TypesetSettings::default()
             }
+        );
+    }
+
+    #[test]
+    fn the_typeset_table_gives_the_limits_of_the_qa_report() {
+        let manifest = Manifest::parse(
+            "[project]\nname = \"Book\"\n\n[typeset]\nwidows = false\norphans = false\n\
+             stacked-hyphens = 2\nshort-last-line = 8\nloose-spacing = 180\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.typeset,
+            TypesetSettings {
+                widows: false,
+                orphans: false,
+                stacked_hyphens: 2,
+                short_last_line: 8,
+                loose_spacing: 180,
+                ..TypesetSettings::default()
+            }
+        );
+    }
+
+    #[test]
+    fn the_limits_of_the_qa_report_have_defaults() {
+        let settings =
+            Manifest::parse("[project]\nname = \"Book\"\n\n[typeset]\nbaseline-grid = \"12pt\"\n")
+                .unwrap()
+                .typeset;
+
+        assert!(settings.widows && settings.orphans);
+        assert_eq!(
+            (
+                settings.stacked_hyphens,
+                settings.short_last_line,
+                settings.loose_spacing
+            ),
+            (3, 5, 150)
+        );
+        assert_eq!(
+            TypesetSettings::default(),
+            TypesetSettings {
+                baseline_grid: None,
+                ..settings
+            }
+        );
+    }
+
+    #[test]
+    fn a_loose_spacing_below_one_hundred_percent_is_not_valid() {
+        let error =
+            Manifest::parse("[project]\nname = \"Book\"\n\n[typeset]\nloose-spacing = 90\n")
+                .unwrap_err();
+
+        assert!(
+            matches!(&error, ProjectError::InvalidManifest(message) if message.contains("loose-spacing")),
+            "{error:?}"
         );
     }
 

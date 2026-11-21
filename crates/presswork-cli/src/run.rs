@@ -905,6 +905,21 @@ mod tests {
     }
 
     #[test]
+    fn a_check_uses_the_limits_of_the_qa_report_from_the_project() {
+        let folder = project(&[
+            (
+                "presswork.toml",
+                "[project]\nname = \"Notes\"\n\n[typeset]\nshort-last-line = 3\n",
+            ),
+            ("main.typ", "A line of text \\ it."),
+        ]);
+
+        let ran = presswork(&["check", &argument(&folder)]);
+
+        assert_eq!((ran.code, ran.err), (SUCCESS, String::new()));
+    }
+
+    #[test]
     fn a_check_lists_body_lines_off_the_baseline_grid_of_the_project() {
         let folder = project(&[
             (

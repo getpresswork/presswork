@@ -12,9 +12,6 @@ use crate::preflight::{Problem, ProblemKind};
 
 const NEW_LINE: f64 = 0.5;
 const HYPHENS: [char; 3] = ['\u{ad}', '-', '\u{2010}'];
-const HYPHEN_RUN: usize = 3;
-const SHORT_LINE: usize = 5;
-const LOOSE_SPACING: u32 = 150;
 const GRID_TOLERANCE: f64 = 0.1;
 const TIE: f64 = 1e-6;
 const SIZE_TOLERANCE: f64 = 0.05;
@@ -71,7 +68,7 @@ impl Analysis {
         let paragraphs = paragraphs(document);
         let mut found = Vec::new();
         for lines in &paragraphs {
-            check(lines, &mut found);
+            check(lines, settings, &mut found);
         }
         if let (Some(step), Some(grid)) = (settings.baseline_grid, grid(&paragraphs, settings)) {
             check_grid(&paragraphs, grid, step.unit, &mut found);
@@ -89,7 +86,9 @@ impl Analysis {
     }
 }
 
-fn check(lines: &[Line], found: &mut Vec<Finding>) {
+fn check(lines: &[Line], settings: &TypesetSettings, found: &mut Vec<Finding>) {
+    let hyphen_limit = usize::try_from(settings.stacked_hyphens).unwrap_or(usize::MAX);
+    let short_limit = usize::try_from(settings.short_last_line).unwrap_or(usize::MAX);
     let mut add = |line: &Line, kind, area| {
         found.push(Finding {
             page: line.page,
@@ -98,7 +97,8 @@ fn check(lines: &[Line], found: &mut Vec<Finding>) {
             area,
         });
     };
-    if let [first, second, ..] = lines
+    if settings.orphans
+        && let [first, second, ..] = lines
         && moved(first, second)
     {
         add(first, ProblemKind::Orphan, first.area);
@@ -111,7 +111,7 @@ fn check(lines: &[Line], found: &mut Vec<Finding>) {
             continue;
         }
         if let Some((start, count)) = run.take()
-            && count > HYPHEN_RUN
+            && count > hyphen_limit
         {
             add(
                 &lines[start],
@@ -124,7 +124,7 @@ fn check(lines: &[Line], found: &mut Vec<Finding>) {
         return;
     };
     for line in before {
-        if line.spacing > LOOSE_SPACING {
+        if line.spacing > settings.loose_spacing {
             add(
                 line,
                 ProblemKind::LooseLine {
@@ -137,7 +137,7 @@ fn check(lines: &[Line], found: &mut Vec<Finding>) {
     let Some(previous) = before.last() else {
         return;
     };
-    if moved(previous, last) {
+    if settings.widows && moved(previous, last) {
         add(last, ProblemKind::Widow, last.area);
     }
     let characters = last
@@ -145,7 +145,7 @@ fn check(lines: &[Line], found: &mut Vec<Finding>) {
         .chars()
         .filter(|character| !character.is_whitespace())
         .count();
-    if characters < SHORT_LINE {
+    if characters < short_limit {
         add(last, ProblemKind::ShortLastLine { characters }, last.area);
     }
 }
@@ -367,12 +367,70 @@ mod tests {
     }
 
     fn kinds(lines: &[Line]) -> Vec<(usize, ProblemKind)> {
+        kinds_with(lines, &TypesetSettings::default())
+    }
+
+    fn kinds_with(lines: &[Line], settings: &TypesetSettings) -> Vec<(usize, ProblemKind)> {
         let mut found = Vec::new();
-        check(lines, &mut found);
+        check(lines, settings, &mut found);
         found
             .into_iter()
             .map(|finding| (finding.page, finding.kind))
             .collect()
+    }
+
+    #[test]
+    fn the_limits_of_the_report_come_from_the_settings() {
+        let short = [
+            line(0, 20.0, "A paragraph that ends with"),
+            line(0, 34.0, "it."),
+        ];
+        let mut wide = line(0, 20.0, "Wide spaces in this line");
+        wide.spacing = 186;
+        let loose = [wide, line(0, 34.0, "and the end of the paragraph.")];
+        let hyphenated = |y| line(0, y, "hyphen\u{ad}");
+        let hyphens = [
+            line(0, 10.0, "Start"),
+            hyphenated(24.0),
+            hyphenated(38.0),
+            hyphenated(52.0),
+            line(0, 66.0, "and the end of the paragraph."),
+        ];
+        let settings = TypesetSettings {
+            short_last_line: 3,
+            loose_spacing: 200,
+            stacked_hyphens: 2,
+            ..TypesetSettings::default()
+        };
+
+        assert_eq!(kinds_with(&short, &settings), []);
+        assert_eq!(kinds_with(&loose, &settings), []);
+        assert_eq!(
+            kinds_with(&hyphens, &settings),
+            [(0, ProblemKind::StackedHyphens { lines: 3 })]
+        );
+    }
+
+    #[test]
+    fn widows_and_orphans_can_be_switched_off() {
+        let orphan = [
+            line(0, 500.0, "The first"),
+            line(1, 20.0, "and the rest"),
+            line(1, 34.0, "of it."),
+        ];
+        let widow = [
+            line(0, 480.0, "The first line"),
+            line(0, 494.0, "and a second line"),
+            line(1, 20.0, "and the end."),
+        ];
+        let off = TypesetSettings {
+            widows: false,
+            orphans: false,
+            ..TypesetSettings::default()
+        };
+
+        assert_eq!(kinds_with(&orphan, &off), []);
+        assert_eq!(kinds_with(&widow, &off), []);
     }
 
     const NARROW: &str =
@@ -480,6 +538,7 @@ mod tests {
         TypesetSettings {
             baseline_grid: Some(Length::parse("12pt").unwrap()),
             baseline_start: start.map(|start| Length::parse(start).unwrap()),
+            ..TypesetSettings::default()
         }
     }
 
@@ -590,7 +649,7 @@ mod tests {
         ];
         let mut found = Vec::new();
 
-        check(&lines, &mut found);
+        check(&lines, &TypesetSettings::default(), &mut found);
 
         assert_eq!(found.len(), 1);
         assert_eq!(
