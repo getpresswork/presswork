@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use presswork_project::{Colors, ExportProfile, PageSize};
+use presswork_project::{Colors, ExportProfile, LengthUnit, PageSize};
 use serde::Serialize;
 use typst::foundations::Repr as _;
 use typst::layout::{Abs, Frame, FrameItem, Point, Rect, Size, Transform};
@@ -76,6 +76,11 @@ pub enum ProblemKind {
     },
     LooseLine {
         spacing: u32,
+    },
+    OffGrid {
+        #[serde(rename = "offset-um")]
+        offset: i32,
+        unit: LengthUnit,
     },
 }
 

@@ -1,3 +1,4 @@
+use presswork_project::{LengthUnit, TypesetSettings};
 use typst::introspection::Tag;
 use typst::layout::{Frame, FrameItem, Point, Transform};
 use typst::model::ParElem;
@@ -14,6 +15,10 @@ const HYPHENS: [char; 3] = ['\u{ad}', '-', '\u{2010}'];
 const HYPHEN_RUN: usize = 3;
 const SHORT_LINE: usize = 5;
 const LOOSE_SPACING: u32 = 150;
+const GRID_TOLERANCE: f64 = 0.1;
+const TIE: f64 = 1e-6;
+const SIZE_TOLERANCE: f64 = 0.05;
+const MICROMETERS_PER_POINT: f64 = 25_400.0 / 72.0;
 
 #[derive(Debug, Clone, PartialEq)]
 struct Line {
@@ -33,15 +38,43 @@ struct Finding {
     area: Area,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Grid {
+    pub start: f64,
+    pub step: f64,
+}
+
+impl Grid {
+    #[must_use]
+    pub fn offset(&self, y: f64) -> f64 {
+        let steps = ((y - self.start) / self.step - 0.5).ceil();
+        let offset = y - (self.start + steps * self.step);
+        if (offset + self.step / 2.0).abs() < TIE {
+            offset + self.step
+        } else {
+            offset
+        }
+    }
+}
+
 impl Analysis {
     #[must_use]
-    pub fn quality(&self) -> Vec<Problem> {
+    pub fn baseline_grid(&self, settings: &TypesetSettings) -> Option<Grid> {
+        grid(&paragraphs(self.document()?), settings)
+    }
+
+    #[must_use]
+    pub fn quality(&self, settings: &TypesetSettings) -> Vec<Problem> {
         let Some(document) = self.document() else {
             return Vec::new();
         };
+        let paragraphs = paragraphs(document);
         let mut found = Vec::new();
-        for lines in paragraphs(document) {
-            check(&lines, &mut found);
+        for lines in &paragraphs {
+            check(lines, &mut found);
+        }
+        if let (Some(step), Some(grid)) = (settings.baseline_grid, grid(&paragraphs, settings)) {
+            check_grid(&paragraphs, grid, step.unit, &mut found);
         }
         found.sort_by_key(|finding| finding.page);
         found
@@ -115,6 +148,70 @@ fn check(lines: &[Line], found: &mut Vec<Finding>) {
     if characters < SHORT_LINE {
         add(last, ProblemKind::ShortLastLine { characters }, last.area);
     }
+}
+
+fn body_size(paragraphs: &[Vec<Line>]) -> Option<f64> {
+    let mut sizes: Vec<(f64, usize)> = Vec::new();
+    for line in paragraphs.iter().flatten() {
+        match sizes
+            .iter_mut()
+            .find(|(size, _)| (size - line.size).abs() < SIZE_TOLERANCE)
+        {
+            Some((_, count)) => *count += 1,
+            None => sizes.push((line.size, 1)),
+        }
+    }
+    sizes
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(size, _)| size)
+}
+
+fn body_lines(paragraphs: &[Vec<Line>]) -> impl Iterator<Item = &Line> {
+    let size = body_size(paragraphs);
+    paragraphs
+        .iter()
+        .flatten()
+        .filter(move |line| size.is_some_and(|size| (line.size - size).abs() < SIZE_TOLERANCE))
+}
+
+fn grid(paragraphs: &[Vec<Line>], settings: &TypesetSettings) -> Option<Grid> {
+    let step = settings.baseline_grid?.points();
+    let start = match settings.baseline_start {
+        Some(start) => start.points(),
+        None => {
+            body_lines(paragraphs)
+                .map(|line| (line.page, line.y))
+                .min_by(|first, second| first.0.cmp(&second.0).then(first.1.total_cmp(&second.1)))?
+                .1
+        }
+    };
+    Some(Grid { start, step })
+}
+
+fn check_grid(paragraphs: &[Vec<Line>], grid: Grid, unit: LengthUnit, found: &mut Vec<Finding>) {
+    for line in body_lines(paragraphs) {
+        let offset = grid.offset(line.y);
+        if offset.abs() > GRID_TOLERANCE {
+            found.push(Finding {
+                page: line.page,
+                kind: ProblemKind::OffGrid {
+                    offset: micrometers(offset),
+                    unit,
+                },
+                span: line.span,
+                area: line.area,
+            });
+        }
+    }
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "an offset is less than one grid step"
+)]
+fn micrometers(points: f64) -> i32 {
+    (points * MICROMETERS_PER_POINT).round() as i32
 }
 
 fn run_area(lines: &[Line]) -> Area {
@@ -235,6 +332,7 @@ fn percent(ratio: f64) -> u32 {
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use presswork_project::{Length, LengthUnit};
     use typst::foundations::Datetime;
 
     use super::*;
@@ -346,7 +444,7 @@ mod tests {
         ));
         let analysis = analyze(&world, "A line of text \\ it.").analysis.unwrap();
 
-        let problems = analysis.quality();
+        let problems = analysis.quality(&TypesetSettings::default());
 
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert_eq!(problems[0].page, Some(0));
@@ -360,6 +458,106 @@ mod tests {
         ));
     }
 
+    const GRID: &str = "#set page(width: 200pt, height: auto, margin: 10pt)\n\
+                        #set text(size: 10pt, top-edge: 10pt, bottom-edge: 0pt)\n\
+                        #set par(leading: 2pt, spacing: 2pt)\n";
+
+    fn grid_problems(text: &str, settings: &TypesetSettings) -> Vec<Problem> {
+        let world = Mutex::new(World::new(
+            Arc::new(Fonts::embedded()),
+            Datetime::from_ymd(2026, 11, 21),
+        ));
+        analyze(&world, text)
+            .analysis
+            .unwrap()
+            .quality(settings)
+            .into_iter()
+            .filter(|problem| matches!(problem.kind, ProblemKind::OffGrid { .. }))
+            .collect()
+    }
+
+    fn twelve_points(start: Option<&str>) -> TypesetSettings {
+        TypesetSettings {
+            baseline_grid: Some(Length::parse("12pt").unwrap()),
+            baseline_start: start.map(|start| Length::parse(start).unwrap()),
+        }
+    }
+
+    #[test]
+    fn body_lines_on_the_baseline_grid_have_no_problem() {
+        let text = format!(
+            "{GRID}The first paragraph has enough words to fill two lines here.\n\nThe second one."
+        );
+
+        assert_eq!(grid_problems(&text, &twelve_points(Some("20pt"))), []);
+        assert_eq!(grid_problems(&text, &TypesetSettings::default()), []);
+    }
+
+    #[test]
+    fn a_body_line_off_the_baseline_grid_is_a_problem() {
+        let text = format!("{GRID}The first one.\n\nThe second one.\n\n#v(5pt)\nThe third one.");
+
+        let found = grid_problems(&text, &twelve_points(Some("20pt")));
+
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            matches!(found[0].kind, ProblemKind::OffGrid { offset, unit: LengthUnit::Pt } if offset != 0),
+            "{found:?}"
+        );
+        assert!(found[0].area.is_some_and(|area| area.y > 40.0), "{found:?}");
+    }
+
+    #[test]
+    fn without_a_start_the_first_body_line_sets_the_baseline_grid() {
+        let text = format!("{GRID}#v(3pt)\nThe first one.\n\nThe second one.\n\nThe third one.");
+
+        assert_eq!(grid_problems(&text, &twelve_points(None)), []);
+        assert_eq!(grid_problems(&text, &twelve_points(Some("20pt"))).len(), 3);
+    }
+
+    #[test]
+    fn lines_in_a_different_size_do_not_count_for_the_baseline_grid() {
+        let text = format!(
+            "{GRID}The first one.\n\nThe second one.\n\nThe third one.\n\n\
+             #v(3pt)\n#text(size: 8pt)[A small note.]"
+        );
+
+        assert_eq!(grid_problems(&text, &twelve_points(Some("20pt"))), []);
+    }
+
+    #[test]
+    fn a_running_head_does_not_set_the_baseline_grid() {
+        let text = format!(
+            "{GRID}#set page(height: 200pt, margin: (top: 40pt, rest: 10pt), header: [Running head])\n\
+             The first one.\n\nThe second one."
+        );
+
+        assert_eq!(grid_problems(&text, &twelve_points(None)), []);
+    }
+
+    #[test]
+    fn the_offset_goes_to_the_nearest_grid_line() {
+        let grid = Grid {
+            start: 10.0,
+            step: 12.0,
+        };
+
+        assert!(grid.offset(22.0).abs() < 1e-9);
+        assert!((grid.offset(27.0) - 5.0).abs() < 1e-9);
+        assert!((grid.offset(33.0) + 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_line_in_the_middle_between_two_grid_lines_is_below_the_upper_one() {
+        let grid = Grid {
+            start: 10.0,
+            step: 12.0,
+        };
+
+        assert!((grid.offset(28.0) - 6.0).abs() < 1e-9);
+        assert!((grid.offset(4.0) - 6.0).abs() < 1e-9);
+    }
+
     #[test]
     fn each_problem_has_the_area_of_its_line() {
         let world = Mutex::new(World::new(
@@ -370,7 +568,7 @@ mod tests {
             .analysis
             .unwrap();
 
-        let problems = analysis.quality();
+        let problems = analysis.quality(&TypesetSettings::default());
 
         let area = problems[0].area.unwrap();
         assert!((area.x - 10.0).abs() < 0.5, "{area:?}");

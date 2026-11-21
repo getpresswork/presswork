@@ -67,6 +67,12 @@ pub(crate) fn problem_sentence(problem: &Problem, localizer: &Localizer) -> Stri
             args.set("spacing", *spacing);
             "problem-loose-line"
         }
+        ProblemKind::OffGrid { offset, unit } => {
+            args.set("offset", unit.format(offset.unsigned_abs()));
+            args.set("unit", unit.name());
+            args.set("direction", if *offset < 0 { "above" } else { "below" });
+            "problem-grid"
+        }
     };
     localizer.format(id, &args)
 }
@@ -80,7 +86,7 @@ fn colors_id(colors: Colors) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use presswork_project::PageSize;
+    use presswork_project::{LengthUnit, PageSize};
 
     use super::*;
 
@@ -172,6 +178,26 @@ mod tests {
         assert_eq!(
             problem(Some(0), ProblemKind::LooseLine { spacing: 186 }),
             "Page 1: The word spaces in this line are 186% of their normal width."
+        );
+        assert_eq!(
+            problem(
+                Some(0),
+                ProblemKind::OffGrid {
+                    offset: 1_764,
+                    unit: LengthUnit::Pt
+                }
+            ),
+            "Page 1: The baseline of this line is 5 pt below the baseline grid."
+        );
+        assert_eq!(
+            problem(
+                Some(0),
+                ProblemKind::OffGrid {
+                    offset: -353,
+                    unit: LengthUnit::Pt
+                }
+            ),
+            "Page 1: The baseline of this line is 1 pt above the baseline grid."
         );
     }
 }

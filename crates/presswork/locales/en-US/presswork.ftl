@@ -230,6 +230,10 @@ problem-short-line = The last line of a paragraph has only { $characters ->
    *[other] { $characters } characters
 }.
 problem-loose-line = The word spaces in this line are { $spacing }% of their normal width.
+problem-grid = The baseline of this line is { $offset } { $unit } { $direction ->
+    [above] above
+   *[below] below
+} the baseline grid.
 colors-cmyk = CMYK, gray, and spot colors
 colors-gray = gray colors
 

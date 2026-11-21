@@ -83,7 +83,7 @@ fn work(target: &Target, build: bool, console: &mut Console<'_>) -> Result<(), F
         let layout = output
             .analysis
             .as_ref()
-            .map_or_else(Vec::new, Analysis::quality);
+            .map_or_else(Vec::new, |analysis| analysis.quality(&manifest.typeset));
         for problem in &layout {
             console.problem(&places, problem, "");
         }
@@ -352,6 +352,12 @@ impl Console<'_> {
             ProblemKind::LooseLine { spacing } => {
                 args.set("spacing", *spacing);
                 "problem-loose-line"
+            }
+            ProblemKind::OffGrid { offset, unit } => {
+                args.set("offset", unit.format(offset.unsigned_abs()));
+                args.set("unit", unit.name());
+                args.set("direction", if *offset < 0 { "above" } else { "below" });
+                "problem-grid"
             }
         };
         let mut message = self.localizer.format(id, &args);
@@ -895,6 +901,34 @@ mod tests {
                     place(&folder, "main.typ")
                 )
             )
+        );
+    }
+
+    #[test]
+    fn a_check_lists_body_lines_off_the_baseline_grid_of_the_project() {
+        let folder = project(&[
+            (
+                "presswork.toml",
+                "[project]\nname = \"Notes\"\n\n[typeset]\nbaseline-grid = \"12pt\"\nbaseline-start = \"20pt\"\n",
+            ),
+            (
+                "main.typ",
+                "#set page(width: 200pt, height: auto, margin: 10pt)\n\
+                 #set text(size: 10pt, top-edge: 10pt, bottom-edge: 0pt)\n\
+                 #set par(leading: 2pt, spacing: 2pt)\n\
+                 The first one.\n\nThe second one.\n\n#v(6pt)\nThe third one.",
+            ),
+        ]);
+
+        let ran = presswork(&["check", &argument(&folder)]);
+
+        assert_eq!(ran.code, SUCCESS);
+        assert!(
+            ran.err.contains(
+                "warning: Page 1: The baseline of this line is 6 pt below the baseline grid."
+            ),
+            "{}",
+            ran.err
         );
     }
 

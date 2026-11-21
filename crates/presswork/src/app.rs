@@ -19,7 +19,7 @@ use presswork_editor::{
 };
 use presswork_log::{Level, LogStore};
 use presswork_preview::{Preview, ProblemMark};
-use presswork_project::{ExportFormat, ExportProfile, Project};
+use presswork_project::{ExportFormat, ExportProfile, Project, TypesetSettings};
 use presswork_text::{ChangeSet, Position, Unit};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
@@ -1487,10 +1487,11 @@ impl App {
                     .as_ref()
                     .map_or_else(Vec::new, Analysis::outline),
             );
+            let settings = self.typeset_settings();
             self.quality = self
                 .pages_analysis
                 .as_ref()
-                .map_or_else(Vec::new, Analysis::quality);
+                .map_or_else(Vec::new, |analysis| analysis.quality(&settings));
             self.shown_problem = None;
             let marks = self.problem_marks(&output);
             self.preview.set_problem_marks(marks);
@@ -1505,6 +1506,12 @@ impl App {
             return Task::batch([proofread, self.start_compile()]);
         }
         proofread
+    }
+
+    fn typeset_settings(&self) -> TypesetSettings {
+        self.project
+            .as_ref()
+            .map_or_default(|project| project.manifest().typeset)
     }
 
     fn problem_marks(&self, output: &Output) -> Vec<ProblemMark> {
@@ -3395,6 +3402,35 @@ mod tests {
         app.compile_now();
 
         assert_eq!(app.shown_problem, None);
+    }
+
+    fn grid_problems(app: &App) -> usize {
+        app.quality
+            .iter()
+            .filter(|problem| matches!(problem.kind, presswork_typst::ProblemKind::OffGrid { .. }))
+            .count()
+    }
+
+    #[test]
+    fn the_baseline_grid_of_the_project_finds_body_lines_off_the_grid() {
+        let text = "#set page(width: 200pt, height: auto, margin: 10pt)\n\
+                    #set text(size: 10pt, top-edge: 10pt, bottom-edge: 0pt)\n\
+                    #set par(leading: 2pt, spacing: 2pt)\n\
+                    The first one.\n\nThe second one.\n\n#v(6pt)\nThe third one.";
+        let grid = "[project]\nname = \"The Book\"\n\n[typeset]\nbaseline-grid = \"12pt\"\n";
+        let mut app = app();
+        let with_grid = project_folder(&[("presswork.toml", grid), ("main.typ", text)]);
+        open(&mut app, &with_grid);
+        app.compile_now();
+        assert_eq!(grid_problems(&app), 1);
+
+        let without = project_folder(&[
+            ("presswork.toml", "[project]\nname = \"The Book\"\n"),
+            ("main.typ", text),
+        ]);
+        open(&mut app, &without);
+        app.compile_now();
+        assert_eq!(grid_problems(&app), 0);
     }
 
     fn problem_marks(app: &App) -> Vec<(usize, &str, Severity)> {

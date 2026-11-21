@@ -32,6 +32,7 @@ pub use outline::{Heading, LabelKind, LabelTarget, SourceRange};
 pub use preflight::{Problem, ProblemKind, Rules};
 pub use profile::{Export, ProfileError};
 pub use program::{Program, ProgramError, Stop};
+pub use quality::Grid;
 pub use render::{Insets, PageImage, render_page};
 pub use scheduler::Scheduler;
 pub use spelling::{Misspelling, Spelling};
