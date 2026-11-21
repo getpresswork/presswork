@@ -7,7 +7,7 @@ use iced::widget::{
     stack, text, tooltip,
 };
 use iced::{Border, Color, Element, Fill, Point, Rectangle, Size, Task};
-use presswork_typst::{Insets, Output, PagePoint};
+use presswork_typst::{Insets, Output, PagePoint, Severity};
 use presswork_ui::color::LIGHT;
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
@@ -34,12 +34,6 @@ const PROBLEM_RADIUS: f32 = 2.0;
 const PROBLEM_FILL_ALPHA: f32 = 0.12;
 const TIP_WIDTH: f32 = 320.0;
 const TIP_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Severity {
-    Warning,
-    Error,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProblemMark {
