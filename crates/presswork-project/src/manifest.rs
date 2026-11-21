@@ -194,7 +194,7 @@ impl Manifest {
         if file
             .typeset
             .baseline_grid
-            .is_some_and(|grid| grid.micrometers == 0)
+            .is_some_and(|grid| grid.thousandths == 0)
         {
             return Err(ProjectError::InvalidManifest(
                 "the baseline-grid in [typeset] must be larger than 0".to_owned(),

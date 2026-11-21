@@ -49,13 +49,21 @@ impl LengthUnit {
 }
 
 const LONGEST: f64 = 10_000_000.0;
+const THOUSANDTHS: f64 = 1_000.0;
 
-fn length(text: &str) -> Option<(u32, LengthUnit)> {
+fn amount(text: &str) -> Option<(f64, LengthUnit)> {
     let text = text.trim();
     let (number, unit) =
         text.split_at(text.find(|character: char| character.is_ascii_alphabetic())?);
-    let unit = LengthUnit::parse(unit.trim())?;
-    let micrometers = (number.trim().parse::<f64>().ok()? * unit.micrometers()).round();
+    Some((
+        number.trim().parse::<f64>().ok()?,
+        LengthUnit::parse(unit.trim())?,
+    ))
+}
+
+fn length(text: &str) -> Option<(u32, LengthUnit)> {
+    let (number, unit) = amount(text)?;
+    let micrometers = (number * unit.micrometers()).round();
     (0.0..=LONGEST)
         .contains(&micrometers)
         .then(|| (whole(micrometers), unit))
@@ -73,21 +81,28 @@ fn whole(value: f64) -> u32 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct Length {
-    pub micrometers: u32,
+    pub thousandths: u32,
     pub unit: LengthUnit,
 }
 
 impl Length {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let (micrometers, unit) = length(text).ok_or_else(|| {
-            format!("the length \"{text}\" is not valid, for example use \"13pt\"")
-        })?;
-        Ok(Self { micrometers, unit })
+        let invalid = || format!("the length \"{text}\" is not valid, for example use \"13pt\"");
+        let (number, unit) = amount(text).ok_or_else(invalid)?;
+        let thousandths = (number * THOUSANDTHS).round();
+        if !(0.0..=LONGEST).contains(&thousandths) {
+            return Err(invalid());
+        }
+        Ok(Self {
+            thousandths: whole(thousandths),
+            unit,
+        })
     }
 
     #[must_use]
     pub fn points(self) -> f64 {
-        f64::from(self.micrometers) / LengthUnit::Pt.micrometers()
+        f64::from(self.thousandths) / THOUSANDTHS * self.unit.micrometers()
+            / LengthUnit::Pt.micrometers()
     }
 }
 
@@ -107,10 +122,11 @@ impl From<Length> for String {
 
 impl fmt::Display for Length {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let number = format!("{:.3}", f64::from(self.thousandths) / THOUSANDTHS);
         write!(
             formatter,
             "{}{}",
-            self.unit.format(self.micrometers),
+            number.trim_end_matches('0').trim_end_matches('.'),
             self.unit.name()
         )
     }
@@ -219,21 +235,21 @@ mod tests {
         assert_eq!(
             Length::parse("13pt"),
             Ok(Length {
-                micrometers: 4_586,
+                thousandths: 13_000,
                 unit: LengthUnit::Pt
             })
         );
         assert_eq!(
             Length::parse("4.5 mm"),
             Ok(Length {
-                micrometers: 4_500,
+                thousandths: 4_500,
                 unit: LengthUnit::Mm
             })
         );
         assert_eq!(
             Length::parse("0pt"),
             Ok(Length {
-                micrometers: 0,
+                thousandths: 0,
                 unit: LengthUnit::Pt
             })
         );
@@ -247,7 +263,16 @@ mod tests {
         let inch = Length::parse("1in").unwrap();
 
         assert!((inch.points() - 72.0).abs() < 1e-9);
+        assert!((Length::parse("25.4mm").unwrap().points() - 72.0).abs() < 1e-9);
         assert_eq!(Length::parse("13pt").unwrap().to_string(), "13pt");
+        assert_eq!(Length::parse("10.5 pt").unwrap().to_string(), "10.5pt");
+    }
+
+    #[test]
+    fn a_length_in_points_keeps_its_exact_value() {
+        let step = Length::parse("12pt").unwrap().points();
+
+        assert!((step * 3.5 - 42.0).abs() < 1e-12, "{step}");
     }
 
     #[test]
