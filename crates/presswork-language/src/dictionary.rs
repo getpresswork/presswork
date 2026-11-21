@@ -6,7 +6,18 @@ pub enum LanguageError {
     Parse(String),
 }
 
+use spellbook::ParseDictionaryErrorSource;
+
 const MICROSOFT: &str = "microsoft-";
+const MOST_SKIPPED_LINES: usize = 50;
+
+fn without_line(text: &str, number: usize) -> String {
+    text.split_inclusive('\n')
+        .enumerate()
+        .filter(|(index, _)| index + 1 != number)
+        .map(|(_, line)| line)
+        .collect()
+}
 
 pub struct Dictionary {
     inner: spellbook::Dictionary,
@@ -16,10 +27,24 @@ impl Dictionary {
     pub fn new(aff: &[u8], dic: &[u8]) -> Result<Self, LanguageError> {
         let encoding = encoding(aff)?;
         let (aff, _, _) = encoding.decode(aff);
-        let (dic, _, _) = encoding.decode(dic);
-        let inner = spellbook::Dictionary::new(&aff, &dic)
-            .map_err(|error| LanguageError::Parse(error.to_string()))?;
-        Ok(Self { inner })
+        let mut dic = encoding.decode(dic).0.into_owned();
+        let mut skipped = 0;
+        loop {
+            match spellbook::Dictionary::new(&aff, &dic) {
+                Ok(inner) => return Ok(Self { inner }),
+                Err(error)
+                    if skipped < MOST_SKIPPED_LINES
+                        && error.source == ParseDictionaryErrorSource::Dic =>
+                {
+                    let Some(line) = error.line_number else {
+                        return Err(LanguageError::Parse(error.to_string()));
+                    };
+                    dic = without_line(&dic, line);
+                    skipped += 1;
+                }
+                Err(error) => return Err(LanguageError::Parse(error.to_string())),
+            }
+        }
     }
 
     #[must_use]
@@ -131,6 +156,39 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "set PRESSWORK_TEST_DICTIONARIES to a folder with installed dictionaries"]
+    fn the_libreoffice_dictionaries_know_common_words() {
+        let Some(folder) = std::env::var_os("PRESSWORK_TEST_DICTIONARIES") else {
+            return;
+        };
+        let folder = std::path::PathBuf::from(folder);
+        for (tag, words) in [
+            ("en-US", ["house", "colors"]),
+            ("en-GB", ["house", "colours"]),
+            ("de-DE", ["Straße", "Häuser"]),
+            ("de-AT", ["Jänner", "Häuser"]),
+            ("de-CH", ["Strasse", "Häuser"]),
+            ("fr-FR", ["maison", "être"]),
+            ("es-ES", ["niño", "casa"]),
+            ("it-IT", ["città", "casa"]),
+            ("nl-NL", ["huis", "fiets"]),
+            ("pt-BR", ["ação", "casa"]),
+            ("pt-PT", ["ação", "casa"]),
+            ("pl-PL", ["dziękuję", "źdźbło"]),
+            ("ru-RU", ["дом", "спасибо"]),
+            ("da-DK", ["hus", "tak"]),
+        ] {
+            let read = |name: &str| std::fs::read(folder.join(tag).join(name)).unwrap();
+            let dictionary = Dictionary::new(&read("dictionary.aff"), &read("dictionary.dic"))
+                .unwrap_or_else(|error| panic!("{tag}: {error}"));
+            for word in words {
+                assert!(dictionary.check(word), "{tag}: {word}");
+            }
+            assert!(!dictionary.check("qxwzvtk"), "{tag}");
+        }
+    }
+
+    #[test]
     fn a_dictionary_suggests_words() {
         assert!(english().suggest("caat").contains(&"cat".to_owned()));
     }
@@ -144,6 +202,15 @@ mod tests {
         let dictionary = Dictionary::new(b"SET ISO8859-1\r\n", &dic).unwrap();
 
         assert!(dictionary.check("Straße"));
+    }
+
+    #[test]
+    fn a_word_line_that_does_not_parse_is_skipped_as_in_hunspell() {
+        let dictionary =
+            Dictionary::new(b"SET UTF-8\nFLAG num\n", b"3\nhouse\n\"A/S\"\ncat\n").unwrap();
+
+        assert!(dictionary.check("house"));
+        assert!(dictionary.check("cat"));
     }
 
     #[test]
