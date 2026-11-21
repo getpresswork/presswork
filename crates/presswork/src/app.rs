@@ -18,8 +18,8 @@ use presswork_editor::{
     CompletionEvent, CompletionItem, CompletionList, Editor, Mark, MarkKind, Motion,
 };
 use presswork_log::{Level, LogStore};
-use presswork_preview::Preview;
-use presswork_project::{ExportProfile, Project};
+use presswork_preview::{Preview, ProblemMark};
+use presswork_project::{ExportFormat, ExportProfile, Project};
 use presswork_text::{ChangeSet, Position, Unit};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
@@ -43,6 +43,7 @@ use crate::live_session::{self, LiveSession};
 use crate::log_panel::{self, LogPanel};
 use crate::menu;
 use crate::outline_panel::{self, OutlinePanel};
+use crate::problems::problem_sentence;
 use crate::proofreading::{self, Correction, Proofreader};
 use crate::publish_view::{self, PublishView};
 use crate::server_dialog::{self, ServerDialog};
@@ -1461,6 +1462,8 @@ impl App {
                 .pages_analysis
                 .as_ref()
                 .map_or_else(Vec::new, Analysis::quality);
+            let marks = self.problem_marks(&output);
+            self.preview.set_problem_marks(marks);
         }
         let proofread = if output.pages.is_some() {
             self.proofread()
@@ -1472,6 +1475,35 @@ impl App {
             return Task::batch([proofread, self.start_compile()]);
         }
         proofread
+    }
+
+    fn problem_marks(&self, output: &Output) -> Vec<ProblemMark> {
+        let profiles = self.project.as_ref().map_or_else(
+            || vec![ExportProfile::named("PDF", ExportFormat::Pdf)],
+            |project| export_profiles(project).0,
+        );
+        let layout = self.quality.iter().filter_map(|problem| {
+            problem_mark(
+                problem,
+                problem_sentence(problem, &self.localizer),
+                Severity::Warning,
+            )
+        });
+        let preflight =
+            output
+                .preflight_profiles(&profiles)
+                .into_iter()
+                .filter_map(|(profile, problem)| {
+                    let mut text = problem_sentence(&problem, &self.localizer);
+                    if problem.kind.depends_on_profile() {
+                        let mut args = FluentArgs::new();
+                        args.set("profile", profile.name.clone());
+                        args.set("problem", text);
+                        text = self.localizer.format("problem-in-profile", &args);
+                    }
+                    problem_mark(&problem, text, Severity::Error)
+                });
+        layout.chain(preflight).collect()
     }
 
     fn toolchain_message(&mut self, message: toolchain_panel::Message) -> Task<Message> {
@@ -2259,6 +2291,15 @@ fn export_profiles(project: &Project) -> (Vec<ExportProfile>, bool) {
 #[cfg(test)]
 pub(crate) fn send(app: &mut App, message: Message) {
     let _ = app.update(message);
+}
+
+fn problem_mark(problem: &Problem, text: String, severity: Severity) -> Option<ProblemMark> {
+    Some(ProblemMark {
+        page: problem.page?,
+        area: problem.area?,
+        text,
+        severity,
+    })
 }
 
 fn notice_bar(notice: &str) -> Element<'_, Message> {
@@ -3243,6 +3284,56 @@ mod tests {
         assert_eq!(app.workspace, Workspace::Write);
         let start = SHORT_END.find("it.").unwrap();
         assert_eq!(app.selection_bounds(), (start, start + 3));
+    }
+
+    fn problem_marks(app: &App) -> Vec<(usize, &str, Severity)> {
+        app.preview
+            .problem_marks()
+            .iter()
+            .map(|mark| (mark.page, mark.text.as_str(), mark.severity))
+            .collect()
+    }
+
+    #[test]
+    fn layout_problems_have_marks_on_the_preview_pages() {
+        let app = compiled_app(SHORT_END);
+
+        assert_eq!(
+            problem_marks(&app),
+            [(
+                0,
+                "The last line of a paragraph has only 3 characters.",
+                Severity::Warning
+            )]
+        );
+    }
+
+    #[test]
+    fn preflight_problems_of_the_export_profiles_have_marks_on_the_preview_pages() {
+        let folder = project_folder(&[
+            (
+                "presswork.toml",
+                "[project]\nname = \"The Book\"\n\n[[export]]\nname = \"Print\"\ncolors = \"cmyk\"\n",
+            ),
+            ("main.typ", "#text(fill: rgb(\"#ff0000\"))[Red] 日"),
+        ]);
+        let mut app = app();
+        open(&mut app, &folder);
+
+        app.compile_now();
+
+        assert_eq!(
+            problem_marks(&app),
+            [
+                (
+                    0,
+                    "Export profile “Print”: The document uses the color rgb(\"#ff0000\"). \
+                     The profile permits only CMYK, gray, and spot colors.",
+                    Severity::Error
+                ),
+                (0, "No font has these characters: 日", Severity::Error),
+            ]
+        );
     }
 
     const CATS: &str = "a cat and a cat";

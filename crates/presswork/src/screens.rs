@@ -41,6 +41,7 @@ const HEIGHT: f32 = 800.0;
 const PREVIEW: (f32, f32) = (720.0, 900.0);
 const NARROW: (f32, f32) = (760.0, 560.0);
 const IMAGE_UPLOAD: Duration = Duration::from_millis(300);
+const TOOLTIP_WAIT: Duration = Duration::from_millis(600);
 
 fn directory() -> PathBuf {
     std::env::var_os("PRESSWORK_SCREENS").map_or_else(
@@ -64,6 +65,16 @@ fn render(app: &mut App, name: &str) {
 }
 
 fn render_window(app: &mut App, name: &str, window: Option<window::Id>, size: (f32, f32)) {
+    render_scene(app, name, window, size, None);
+}
+
+fn render_scene(
+    app: &mut App,
+    name: &str,
+    window: Option<window::Id>,
+    size: (f32, f32),
+    hover: Option<&str>,
+) {
     let directory = directory();
     std::fs::create_dir_all(&directory).unwrap();
     for (label, mode) in [("light", Mode::Light), ("dark", Mode::Dark)] {
@@ -77,6 +88,9 @@ fn render_window(app: &mut App, name: &str, window: Option<window::Id>, size: (f
         }
         let view = window.map_or_else(|| app.view(), |id| app.view_window(id));
         let mut ui = Simulator::with_size(settings(), size, view);
+        if let Some(target) = hover {
+            rest_on(&mut ui, target);
+        }
         let _ = ui.snapshot(&theme).unwrap();
         std::thread::sleep(IMAGE_UPLOAD);
         ui.snapshot(&theme)
@@ -84,6 +98,19 @@ fn render_window(app: &mut App, name: &str, window: Option<window::Id>, size: (f
             .matches_image(directory.join(stem))
             .unwrap();
     }
+}
+
+fn rest_on(ui: &mut Simulator<'_, Message>, target: &str) {
+    let center = ui
+        .find(iced::widget::Id::from(target.to_owned()))
+        .unwrap()
+        .bounds()
+        .center();
+    let moved = iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: center });
+    ui.point_at(center);
+    let _ = ui.simulate([moved.clone()]);
+    std::thread::sleep(TOOLTIP_WAIT);
+    let _ = ui.simulate([moved]);
 }
 
 fn sample_store() -> LogStore {
@@ -246,6 +273,7 @@ fn render_screens() {
     render_spreads(&mut app);
     render_publish(&mut app);
     render_typeset(&mut app);
+    render_problem_marks(&mut app);
     render_house_style(&mut app);
 }
 
@@ -302,21 +330,45 @@ fn render_house_style(app: &mut App) {
     render(app, "corrections");
 }
 
+const TYPESET: &str = "#set page(width: 105mm, height: 74mm, margin: 8mm)\n\
+                       #set text(font: \"Libertinus Serif\", size: 10pt, costs: (widow: 0%, orphan: 0%))\n\
+                       #set par(justify: true)\n\
+                       #lorem(70)\n\n\
+                       A typesetter considers incomprehensibilities thoroughly. The last line of this \
+                       paragraph is short \\ it.\n";
+
 fn render_typeset(app: &mut App) {
-    let text = "#set page(width: 105mm, height: 74mm, margin: 8mm)\n\
-                #set text(font: \"Libertinus Serif\", size: 10pt, costs: (widow: 0%, orphan: 0%))\n\
-                #set par(justify: true)\n\
-                #lorem(70)\n\n\
-                A typesetter considers incomprehensibilities thoroughly. The last line of this \
-                paragraph is short \\ it.\n";
     let book = folder(&[
         ("presswork.toml", "[project]\nname = \"Field Notes\"\n"),
-        ("main.typ", text),
+        ("main.typ", TYPESET),
     ]);
     send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
     app.compile_now();
     send(app, Message::SelectWorkspace(Workspace::Typeset));
     render(app, "typeset-qa");
+}
+
+fn render_problem_marks(app: &mut App) {
+    let text = format!(
+        "{TYPESET}#pagebreak()\n#text(fill: rgb(\"#d6249f\"))[A note in the color of the brand.]\n"
+    );
+    let book = folder(&[
+        (
+            "presswork.toml",
+            "[project]\nname = \"Field Notes\"\n\n[[export]]\nname = \"Print\"\ncolors = \"cmyk\"\n",
+        ),
+        ("main.typ", &text),
+    ]);
+    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    app.compile_now();
+    send(app, Message::SelectWorkspace(Workspace::Write));
+    render_scene(
+        app,
+        "problem-marks",
+        None,
+        (WIDTH, HEIGHT),
+        Some("problem-1-0"),
+    );
 }
 
 const EXPORTS: &str = "[project]\nname = \"Field Notes\"\n\n\

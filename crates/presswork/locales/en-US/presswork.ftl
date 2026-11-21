@@ -213,6 +213,7 @@ typeset-count = { $count ->
 }
 
 problem-on-page = Page { $page }: { $problem }
+problem-in-profile = Export profile “{ $profile }”: { $problem }
 problem-resolution = The image has { $ppi } ppi. The profile needs { $minimum } ppi.
 problem-alt = The image has no alternative text.
 problem-font = The font family { $family } is not available. Typst uses a different font.

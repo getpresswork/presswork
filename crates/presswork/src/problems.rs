@@ -4,6 +4,17 @@ use presswork_typst::{Problem, ProblemKind};
 use crate::i18n::{FluentArgs, Localizer};
 
 pub(crate) fn problem_text(problem: &Problem, localizer: &Localizer) -> String {
+    let text = problem_sentence(problem, localizer);
+    let Some(page) = problem.page else {
+        return text;
+    };
+    let mut args = FluentArgs::new();
+    args.set("page", page + 1);
+    args.set("problem", text);
+    localizer.format("problem-on-page", &args)
+}
+
+pub(crate) fn problem_sentence(problem: &Problem, localizer: &Localizer) -> String {
     let mut args = FluentArgs::new();
     let id = match &problem.kind {
         ProblemKind::LowResolution { ppi, minimum } => {
@@ -57,14 +68,7 @@ pub(crate) fn problem_text(problem: &Problem, localizer: &Localizer) -> String {
             "problem-loose-line"
         }
     };
-    let text = localizer.format(id, &args);
-    let Some(page) = problem.page else {
-        return text;
-    };
-    let mut args = FluentArgs::new();
-    args.set("page", page + 1);
-    args.set("problem", text);
-    localizer.format("problem-on-page", &args)
+    localizer.format(id, &args)
 }
 
 fn colors_id(colors: Colors) -> &'static str {
