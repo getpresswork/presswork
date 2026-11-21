@@ -101,8 +101,8 @@ impl Length {
 
     #[must_use]
     pub fn points(self) -> f64 {
-        f64::from(self.thousandths) / THOUSANDTHS * self.unit.micrometers()
-            / LengthUnit::Pt.micrometers()
+        f64::from(self.thousandths) / THOUSANDTHS
+            * (self.unit.micrometers() / LengthUnit::Pt.micrometers())
     }
 }
 
@@ -271,8 +271,10 @@ mod tests {
     #[test]
     fn a_length_in_points_keeps_its_exact_value() {
         let step = Length::parse("12pt").unwrap().points();
+        let start = Length::parse("30pt").unwrap().points();
 
         assert!((step * 3.5 - 42.0).abs() < 1e-12, "{step}");
+        assert_eq!(start.to_bits(), 30.0_f64.to_bits(), "{start}");
     }
 
     #[test]
