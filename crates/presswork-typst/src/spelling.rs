@@ -1,21 +1,7 @@
-use std::collections::HashMap;
-use std::ops::Range;
-
 use presswork_language::{Dictionaries, words};
-use typst::World as _;
-use typst::layout::{Frame, FrameItem};
-use typst::syntax::{FileId, LinkedNode, Source, Span, SyntaxKind};
-use typst_layout::PagedDocument;
 
-use crate::ide::{Analysis, project_path};
+use crate::ide::Analysis;
 use crate::outline::SourceRange;
-
-type Language = (String, Option<String>);
-
-struct Run {
-    range: Range<usize>,
-    spans: Vec<Span>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Misspelling {
@@ -33,42 +19,23 @@ pub struct Spelling {
 impl Analysis {
     #[must_use]
     pub fn spelling(&self, dictionaries: &Dictionaries) -> Spelling {
-        let Some(document) = self.document() else {
-            return Spelling::default();
-        };
-        let languages = languages(document);
-        let main = self.world().main();
-        let mut files: Vec<FileId> = languages.keys().filter_map(|span| span.id()).collect();
-        files.sort_by_key(|id| (*id != main, project_path(*id)));
-        files.dedup();
         let mut spelling = Spelling::default();
-        for id in files {
-            let Ok(source) = self.world().source(id) else {
-                continue;
-            };
-            for run in runs(&source) {
-                let Some((language, region)) =
-                    run.spans.iter().find_map(|span| languages.get(span))
+        for prose in self.prose() {
+            for run in &prose.runs {
+                let tag = run.language.tag();
+                let Some(dictionary) =
+                    dictionaries.find(&run.language.language, run.language.region.as_deref())
                 else {
-                    continue;
-                };
-                let tag = region
-                    .as_ref()
-                    .map_or_else(|| language.clone(), |region| format!("{language}-{region}"));
-                let Some(dictionary) = dictionaries.find(language, region.as_deref()) else {
                     if !spelling.missing.contains(&tag) {
                         spelling.missing.push(tag);
                     }
                     continue;
                 };
-                let text = &source.text()[run.range.clone()];
-                for (offset, word) in words(text) {
+                for (offset, word) in words(prose.text(run)) {
                     if dictionary.check(word) {
                         continue;
                     }
-                    let start = run.range.start + offset;
-                    let range = start..start + word.len();
-                    let Some(source) = place(id, main, range) else {
+                    let Some(source) = prose.place(run, offset..offset + word.len()) else {
                         continue;
                     };
                     spelling.misspellings.push(Misspelling {
@@ -81,81 +48,6 @@ impl Analysis {
         }
         spelling
     }
-}
-
-fn place(id: FileId, main: FileId, range: Range<usize>) -> Option<SourceRange> {
-    if id == main {
-        return Some(SourceRange::Main(range));
-    }
-    Some(SourceRange::File(project_path(id)?, range))
-}
-
-fn languages(document: &PagedDocument) -> HashMap<Span, Language> {
-    let mut languages = HashMap::new();
-    for page in document.pages() {
-        collect_languages(&page.frame, &mut languages);
-    }
-    languages
-}
-
-fn collect_languages(frame: &Frame, languages: &mut HashMap<Span, Language>) {
-    for (_, item) in frame.items() {
-        match item {
-            FrameItem::Group(group) => collect_languages(&group.frame, languages),
-            FrameItem::Text(text) => {
-                for glyph in &text.glyphs {
-                    languages.entry(glyph.span.0).or_insert_with(|| {
-                        (
-                            text.lang.as_str().to_owned(),
-                            text.region.map(|region| region.as_str().to_owned()),
-                        )
-                    });
-                }
-            }
-            FrameItem::Shape(..)
-            | FrameItem::Image(..)
-            | FrameItem::Link(..)
-            | FrameItem::Tag(_) => {}
-        }
-    }
-}
-
-fn runs(source: &Source) -> Vec<Run> {
-    let mut runs = Vec::new();
-    collect_runs(&LinkedNode::new(source.root()), &mut runs);
-    runs
-}
-
-fn collect_runs(node: &LinkedNode<'_>, runs: &mut Vec<Run>) {
-    if matches!(node.kind(), SyntaxKind::Raw | SyntaxKind::Equation) {
-        return;
-    }
-    let markup = node.kind() == SyntaxKind::Markup;
-    let mut current: Option<Run> = None;
-    for child in node.children() {
-        let prose = markup && matches!(child.kind(), SyntaxKind::Text | SyntaxKind::SmartQuote);
-        if !prose {
-            runs.extend(current.take());
-            collect_runs(&child, runs);
-            continue;
-        }
-        let range = child.range();
-        let span = (child.kind() == SyntaxKind::Text).then(|| child.span());
-        match &mut current {
-            Some(run) if run.range.end == range.start => {
-                run.range.end = range.end;
-                run.spans.extend(span);
-            }
-            _ => {
-                runs.extend(current.take());
-                current = Some(Run {
-                    range,
-                    spans: span.into_iter().collect(),
-                });
-            }
-        }
-    }
-    runs.extend(current);
 }
 
 #[cfg(test)]
