@@ -201,6 +201,7 @@ In milestone 2, the preview also does these things (D180):
 - The **Guides** button (a frame) shows the bleed around each page and a line at the trim box, where the printer cuts the page (D181). Thus you see the content that goes into the bleed. When you switch the guides on or off, the engine compiles the document again. If the document has no bleed, the guides show nothing. The guides need the built-in Typst engine. The preview does not show the text area yet.
 - The **Problems** button (a warning triangle) shows or hides the problem marks (D191). After each compilation with pages, the preview puts a box around each problem of the typesetting QA report in the warning color, and around each preflight problem in the error color. If the mouse pointer stays on a box for half a second, a tooltip tells the problem. The marks are on by default. They need the built-in Typst engine.
 - The Typeset workspace also shows the preview, at the right of the QA report (D192). It has the same pages, zoom, and buttons as in the Write workspace.
+- The preview keeps its place on the pages when its size, the zoom, or the spreads change, when the workspace changes, and when the preview moves into its own window or back (D193).
 
 ## Source and pages
 

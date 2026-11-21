@@ -1465,7 +1465,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D192. The preview in the Typeset workspace
 
-- **Status:** Accepted, 2026-11-21. **Origin:** Default.
+- **Status:** Accepted, 2026-11-21. D193 keeps the place of the preview when the workspace changes. **Origin:** Default.
 - **Decision:**
   - The Typeset workspace shows the QA report in a panel of 340 pixels at the left and the preview at the right. The preview is the same as in the Write workspace, with the same pages, zoom, buttons, and marks.
   - Each problem in the panel shows its sentence and the number of its page.
@@ -1475,3 +1475,15 @@ Do not change what an accepted decision says. You can correct its language. To c
   - A click on a page in the Typeset workspace moves the cursor of the editor, as in the Write workspace, and the workspace does not change.
 - **Reason:** Typesetters examine the problems and the pages together. A click that keeps the workspace lets them examine the problems one after the other. The pen button keeps the way to the source.
 - **Other options:** A click that opens the Write workspace, as before. A double-click for the source. An editor in the Typeset workspace. The preflight problems in the panel. A preview that keeps its position when the workspace changes.
+
+## D193. The preview keeps its place
+
+- **Status:** Accepted, 2026-11-21. **Origin:** Default.
+- **Decision:**
+  - After each scroll event, the preview records its place: the page at the top of the view, and the part of that page above the top edge. The place does not use pixels, because the scale changes with the width of the view and with the zoom.
+  - When the size of the view changes, for example when the window, the outline, or the notice bar changes, the preview scrolls back to the same place.
+  - After a change of the zoom, of the spreads, or of the workspace, and after the preview moves into its own window or back, the next scroll event of the view moves the view back to the same place. This event must come in 0.5 seconds. If it comes later, the preview does not move.
+  - A scroll to a point, for example to a problem or to a heading, gives the new place.
+  - At the top of the document, the preview stays at the top.
+- **Reason:** The scroll area of iced starts again at the top when its part of the layout changes, and the same position in pixels shows a different place at a different scale. A place on a page gives the same view in all layouts.
+- **Other options:** The same position in pixels. The page in the middle of the view. One preview in the same part of the layout for all workspaces.
