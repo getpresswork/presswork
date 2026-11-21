@@ -116,6 +116,12 @@ impl Dictionaries {
     }
 
     #[must_use]
+    pub fn read(&self, tag: &str) -> Option<(Vec<u8>, Vec<u8>)> {
+        let (aff, dic) = self.files(tag)?;
+        Some((fs::read(aff).ok()?, fs::read(dic).ok()?))
+    }
+
+    #[must_use]
     pub fn files(&self, tag: &str) -> Option<(PathBuf, PathBuf)> {
         let folder = self.folder(tag)?;
         let (aff, dic) = (folder.join(AFF), folder.join(DIC));
@@ -283,9 +289,9 @@ mod tests {
         run(dictionaries.install(&client(), &source(), |step| steps.push(step))).unwrap();
 
         assert_eq!(dictionaries.installed(), ["xx-XX"]);
-        let (aff, dic) = dictionaries.files("xx-XX").unwrap();
-        assert_eq!(fs::read(aff).unwrap(), FILES[0].1);
-        assert_eq!(fs::read(dic).unwrap(), FILES[1].1);
+        let (aff, dic) = dictionaries.read("xx-XX").unwrap();
+        assert_eq!(aff, FILES[0].1);
+        assert_eq!(dic, FILES[1].1);
         assert!(root.path().join("xx-XX").join("license.txt").is_file());
         let total = source().aff.size + source().dic.size + source().notice.size;
         assert_eq!(steps.last().map(|step| step.received), Some(total));

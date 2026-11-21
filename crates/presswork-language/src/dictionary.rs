@@ -19,6 +19,7 @@ fn without_line(text: &str, number: usize) -> String {
         .collect()
 }
 
+#[derive(Debug)]
 pub struct Dictionary {
     inner: spellbook::Dictionary,
 }
@@ -85,7 +86,7 @@ fn encoding(aff: &[u8]) -> Result<&'static encoding_rs::Encoding, LanguageError>
         .ok_or(LanguageError::Encoding(label))
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Dictionaries {
     entries: Vec<(String, Dictionary)>,
 }
