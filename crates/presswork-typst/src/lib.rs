@@ -13,6 +13,7 @@ mod quality;
 mod render;
 mod report;
 mod scheduler;
+mod spelling;
 mod version;
 mod world;
 
@@ -29,6 +30,7 @@ pub use profile::{Export, ProfileError};
 pub use program::{Program, ProgramError, Stop};
 pub use render::{Insets, PageImage, render_page};
 pub use scheduler::Scheduler;
+pub use spelling::{Misspelling, Spelling};
 pub use typst::foundations::Datetime;
 pub use typst_layout::PagedDocument;
 pub use version::version;

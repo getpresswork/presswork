@@ -16,6 +16,7 @@ workspace = true
 comemo.workspace = true
 jiff.workspace = true
 png.workspace = true
+presswork-language.workspace = true
 presswork-project.workspace = true
 semver.workspace = true
 serde.workspace = true

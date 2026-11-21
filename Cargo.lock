@@ -5628,6 +5628,7 @@ dependencies = [
  "comemo",
  "jiff",
  "png",
+ "presswork-language",
  "presswork-project",
  "semver",
  "serde",
