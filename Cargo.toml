@@ -16,6 +16,7 @@ presswork-api = { path = "crates/presswork-api" }
 presswork-client = { path = "crates/presswork-client" }
 presswork-domain = { path = "crates/presswork-domain" }
 presswork-editor = { path = "crates/presswork-editor" }
+presswork-language = { path = "crates/presswork-language" }
 presswork-library = { path = "crates/presswork-library" }
 presswork-log = { path = "crates/presswork-log" }
 presswork-ocr = { path = "crates/presswork-ocr", default-features = false }
@@ -33,6 +34,7 @@ axum = "0.8.9"
 clap = { version = "4.6.7", features = ["derive"] }
 comemo = "0.5.1"
 directories = "6.0.0"
+encoding_rs = "0.8.44"
 fluent-bundle = "0.16.0"
 futures = "0.3.34"
 getrandom = "0.4.3"
@@ -67,6 +69,7 @@ serde_bytes = "0.11.19"
 serde_json = "1.0.154"
 sha2 = "0.10.9"
 skrifa = "0.44.0"
+spellbook = "0.4.2"
 sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-ring-native-roots", "migrate", "macros", "uuid"] }
 tantivy = { version = "0.27.0", default-features = false, features = ["mmap", "lz4-compression"] }
 tar = { version = "0.4.46", default-features = false }
