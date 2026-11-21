@@ -13,12 +13,14 @@ const MARK_RADIUS: f32 = 9.0;
 const MARK_BORDER: f32 = 2.0;
 const MARK_FILL_ALPHA: f32 = 0.2;
 const TRIM_WIDTH: f32 = 1.0;
+const GRID_ALPHA: f32 = 0.45;
 
 pub(crate) struct PageArea<'a, Message> {
     content: Element<'a, Message>,
     on_click: Box<dyn Fn(Point) -> Message + 'a>,
     mark: Option<(Point, Instant)>,
     trim: Option<Rectangle>,
+    grid: Vec<Rectangle>,
 }
 
 pub(crate) fn page_area<'a, Message>(
@@ -30,6 +32,7 @@ pub(crate) fn page_area<'a, Message>(
         on_click: Box::new(on_click),
         mark: None,
         trim: None,
+        grid: Vec::new(),
     }
 }
 
@@ -41,6 +44,11 @@ impl<Message> PageArea<'_, Message> {
 
     pub(crate) fn trim(mut self, trim: Option<Rectangle>) -> Self {
         self.trim = trim;
+        self
+    }
+
+    pub(crate) fn grid(mut self, grid: Vec<Rectangle>) -> Self {
+        self.grid = grid;
         self
     }
 }
@@ -165,7 +173,7 @@ impl<Message> Widget<Message, Theme, Renderer> for PageArea<'_, Message> {
         );
         let bounds = layout.bounds();
         let mark = self.mark.filter(|(_, since)| shows(*since, Instant::now()));
-        if mark.is_none() && self.trim.is_none() {
+        if mark.is_none() && self.trim.is_none() && self.grid.is_empty() {
             return;
         }
         let Some(clip) = bounds.intersection(viewport) else {
@@ -173,6 +181,18 @@ impl<Message> Widget<Message, Theme, Renderer> for PageArea<'_, Message> {
         };
         let colors = presswork_ui::theme::colors(theme);
         renderer.with_layer(clip, |renderer| {
+            for line in &self.grid {
+                renderer.fill_quad(
+                    Quad {
+                        bounds: *line + Vector::new(bounds.x, bounds.y),
+                        ..Quad::default()
+                    },
+                    Color {
+                        a: GRID_ALPHA,
+                        ..colors.guide
+                    },
+                );
+            }
             if let Some(trim) = self.trim {
                 renderer.fill_quad(
                     Quad {
@@ -348,6 +368,31 @@ mod tests {
             "{:?}",
             [red, green, blue]
         );
+    }
+
+    #[test]
+    fn a_grid_line_shows_over_the_page_image() {
+        let page = iced::widget::image(iced::widget::image::Handle::from_rgba(
+            40,
+            40,
+            vec![255; 40 * 40 * 4],
+        ))
+        .width(40)
+        .height(40);
+        let line = Rectangle::new(Point::new(0.0, 20.0), Size::new(40.0, 1.0));
+        let area = page_area(page, |point| point).grid(vec![line]);
+        let mut ui = simulator(area);
+        let folder = tempfile::tempdir().unwrap();
+        let theme = presswork_ui::theme::light();
+        let _ = ui.snapshot(&theme).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        ui.snapshot(&theme)
+            .unwrap()
+            .matches_image(folder.path().join("grid"))
+            .unwrap();
+
+        assert_ne!(pixel(folder.path(), 40, 40), [255, 255, 255, 255]);
+        assert_eq!(pixel(folder.path(), 40, 20), [255, 255, 255, 255]);
     }
 
     #[test]

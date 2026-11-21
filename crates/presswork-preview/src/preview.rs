@@ -7,7 +7,7 @@ use iced::widget::{
     stack, text, tooltip,
 };
 use iced::{Border, Color, Element, Fill, Point, Rectangle, Size, Task};
-use presswork_typst::{Insets, Output, PagePoint, Severity};
+use presswork_typst::{Grid, Insets, Output, PagePoint, Severity};
 use presswork_ui::color::LIGHT;
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
@@ -35,6 +35,8 @@ const PROBLEM_FILL_ALPHA: f32 = 0.12;
 const TIP_WIDTH: f32 = 320.0;
 const TIP_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 const KEEP_TIME: std::time::Duration = std::time::Duration::from_millis(500);
+const GRID_LINE: f32 = 1.0;
+const GRID_SPACING: f32 = 2.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProblemMark {
@@ -142,9 +144,48 @@ pub struct Preview {
     problem_marks_visibility: Visibility,
     anchor: Option<Anchor>,
     keep_until: Option<Instant>,
+    baseline_grid: Option<Grid>,
 }
 
 impl Preview {
+    pub fn set_baseline_grid(&mut self, grid: Option<Grid>) {
+        self.baseline_grid = grid;
+    }
+
+    #[must_use]
+    pub fn baseline_grid(&self) -> Option<Grid> {
+        self.baseline_grid
+    }
+
+    fn grid_on(&self, page: usize, scale: f32) -> Vec<Rectangle> {
+        let (Some(grid), Some(shown)) = (
+            self.baseline_grid.filter(|_| self.guides),
+            self.pages.get(page),
+        ) else {
+            return Vec::new();
+        };
+        let ratio = PX_PER_PT * scale;
+        let step = to_f32(grid.step);
+        if step * ratio < GRID_SPACING {
+            return Vec::new();
+        }
+        let bleed = shown.bleed;
+        let height = shown.height - bleed.top - bleed.bottom;
+        let width = (shown.width - bleed.left - bleed.right) * ratio;
+        let mut lines = Vec::new();
+        let mut y = to_f32(grid.start);
+        while y <= height {
+            if y >= 0.0 {
+                lines.push(Rectangle::new(
+                    Point::new(bleed.left * ratio, (y + bleed.top) * ratio),
+                    Size::new(width, GRID_LINE),
+                ));
+            }
+            y += step;
+        }
+        lines
+    }
+
     pub fn keep_position(&mut self, now: Instant) {
         self.keep_until = Some(now + KEEP_TIME);
     }
@@ -709,6 +750,7 @@ impl Preview {
         })
         .mark(self.mark_on(index, scale))
         .trim(self.trim_on(index, scale))
+        .grid(self.grid_on(index, scale))
         .into()
     }
 }
@@ -1418,6 +1460,43 @@ mod tests {
     )]
     fn physical(logical: f32) -> usize {
         (logical * 2.0) as usize
+    }
+
+    const TWELVE_POINTS: Grid = Grid {
+        start: 20.0,
+        step: 12.0,
+    };
+
+    #[test]
+    fn the_guides_show_the_lines_of_the_baseline_grid() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages_with_bleed(1), 2.0);
+        preview.set_baseline_grid(Some(TWELVE_POINTS));
+        preview.perform(Action::Guides);
+
+        let lines = preview.grid_on(0, 1.0);
+
+        assert_eq!(lines.len(), 47);
+        let first = lines[0];
+        assert!((first.x - 10.0 * PX_PER_PT).abs() < 0.01, "{first:?}");
+        assert!((first.y - 30.0 * PX_PER_PT).abs() < 0.01, "{first:?}");
+        assert!((first.width - 400.0 * PX_PER_PT).abs() < 0.01, "{first:?}");
+        assert!(
+            (lines[1].y - first.y - 12.0 * PX_PER_PT).abs() < 0.01,
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn there_are_no_grid_lines_without_guides_or_without_a_grid() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages_with_bleed(1), 2.0);
+        preview.set_baseline_grid(Some(TWELVE_POINTS));
+        assert_eq!(preview.grid_on(0, 1.0), []);
+
+        preview.perform(Action::Guides);
+        preview.set_baseline_grid(None);
+        assert_eq!(preview.grid_on(0, 1.0), []);
     }
 
     fn view_at(top: f32, height: f32, width: f32) -> Viewport {
