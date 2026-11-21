@@ -5,6 +5,7 @@ mod editor;
 mod fold;
 mod highlight;
 mod layout;
+mod suggest;
 mod view;
 
 pub use action::{Action, Deletion, Motion};

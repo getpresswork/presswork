@@ -9,7 +9,7 @@ use presswork_text::{
 };
 
 use crate::action::{Action, Deletion, Motion};
-use crate::boundary;
+use crate::{boundary, suggest};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -22,6 +22,7 @@ pub struct Editor {
     word_search: bool,
     folds: Vec<Range<Position>>,
     fold_revision: u64,
+    suggesting: Option<String>,
 }
 
 impl Editor {
@@ -35,7 +36,17 @@ impl Editor {
             word_search: false,
             folds: Vec::new(),
             fold_revision: 0,
+            suggesting: None,
         }
+    }
+
+    pub fn set_suggesting(&mut self, author: Option<String>) {
+        self.suggesting = author;
+    }
+
+    #[must_use]
+    pub fn suggesting(&self) -> Option<&str> {
+        self.suggesting.as_deref()
     }
 
     #[must_use]
@@ -590,6 +601,23 @@ impl Editor {
         transaction: Transaction,
         now: Instant,
     ) -> Result<Option<ChangeSet>, TextError> {
+        let transaction = match &self.suggesting {
+            Some(author) => {
+                let edits: Vec<Edit> = transaction.changes.edits().collect();
+                let suggested = suggest::suggest(
+                    self.document.buffer(),
+                    self.document.suggestions(),
+                    self.document.selection(),
+                    &edits,
+                    author,
+                    unix_time(),
+                )?;
+                Transaction::new(suggested.changes)
+                    .with_selection(suggested.selection)
+                    .with_suggestions(suggested.suggestions)
+            }
+            None => transaction,
+        };
         let changes = transaction.changes.clone();
         self.document.apply(transaction, now)?;
         self.revision += 1;
@@ -597,6 +625,14 @@ impl Editor {
         self.reveal();
         Ok(Some(changes))
     }
+}
+
+fn unix_time() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
+        })
 }
 
 fn line_start_from(buffer: &Buffer, position: Position) -> Position {
@@ -650,7 +686,7 @@ fn moved(buffer: &Buffer, range: SelectionRange, motion: Motion, extend: bool) -
 
 #[cfg(test)]
 mod tests {
-    use presswork_text::Position;
+    use presswork_text::{Position, SuggestionKind};
 
     use super::*;
     use crate::action::{Deletion, Motion};
@@ -760,6 +796,122 @@ mod tests {
     #[test]
     fn typing_inserts_at_the_cursor() {
         assert_eq!(after("ab|cd", &[insert("X")]), "abX|cd");
+    }
+
+    fn suggesting(marked_text: &str) -> Editor {
+        let mut editor = editor(marked_text);
+        editor.set_suggesting(Some("Ann".to_owned()));
+        editor
+    }
+
+    fn suggested(editor: &Editor) -> Vec<(SuggestionKind, Range<usize>, &str)> {
+        editor
+            .document()
+            .suggestions()
+            .iter()
+            .map(|suggestion| {
+                (
+                    suggestion.kind,
+                    suggestion.range.start.offset()..suggestion.range.end.offset(),
+                    suggestion.author.as_str(),
+                )
+            })
+            .collect()
+    }
+
+    fn backspace() -> Action {
+        Action::Delete(Deletion::Backward)
+    }
+
+    #[test]
+    fn typing_in_suggestion_mode_makes_one_insertion() {
+        let mut editor = suggesting("The cat|.");
+
+        perform(&mut editor, insert("s"));
+        perform(&mut editor, insert("!"));
+
+        assert_eq!(marked(&editor), "The cats!|.");
+        assert_eq!(
+            suggested(&editor),
+            [(SuggestionKind::Insertion, 7..9, "Ann")]
+        );
+    }
+
+    #[test]
+    fn backspace_in_suggestion_mode_marks_the_text_as_deleted() {
+        let mut editor = suggesting("The cat|.");
+
+        perform(&mut editor, backspace());
+        perform(&mut editor, backspace());
+
+        assert_eq!(marked(&editor), "The c|at.");
+        assert_eq!(
+            suggested(&editor),
+            [(SuggestionKind::Deletion, 5..7, "Ann")]
+        );
+    }
+
+    #[test]
+    fn forward_delete_in_suggestion_mode_moves_over_the_deleted_text() {
+        let mut editor = suggesting("The |cat.");
+
+        perform(&mut editor, Action::Delete(Deletion::Forward));
+        perform(&mut editor, Action::Delete(Deletion::Forward));
+
+        assert_eq!(marked(&editor), "The ca|t.");
+        assert_eq!(
+            suggested(&editor),
+            [(SuggestionKind::Deletion, 4..6, "Ann")]
+        );
+    }
+
+    #[test]
+    fn deleting_suggested_text_removes_it() {
+        let mut editor = suggesting("The cat|.");
+        perform(&mut editor, insert("s"));
+
+        perform(&mut editor, backspace());
+
+        assert_eq!(marked(&editor), "The cat|.");
+        assert_eq!(suggested(&editor), []);
+    }
+
+    #[test]
+    fn typing_over_a_selection_suggests_a_deletion_and_an_insertion() {
+        let mut editor = suggesting("The [cat|.");
+
+        perform(&mut editor, insert("dog"));
+
+        assert_eq!(marked(&editor), "The catdog|.");
+        assert_eq!(
+            suggested(&editor),
+            [
+                (SuggestionKind::Deletion, 4..7, "Ann"),
+                (SuggestionKind::Insertion, 7..10, "Ann")
+            ]
+        );
+    }
+
+    #[test]
+    fn undo_removes_a_suggested_deletion() {
+        let mut editor = suggesting("The cat|.");
+        perform(&mut editor, backspace());
+
+        perform(&mut editor, Action::Undo);
+
+        assert_eq!(marked(&editor), "The cat|.");
+        assert_eq!(suggested(&editor), []);
+    }
+
+    #[test]
+    fn without_suggestion_mode_an_edit_changes_the_text() {
+        let mut editor = suggesting("The cat|.");
+        editor.set_suggesting(None);
+
+        perform(&mut editor, backspace());
+
+        assert_eq!(marked(&editor), "The ca|.");
+        assert_eq!(suggested(&editor), []);
     }
 
     #[test]
