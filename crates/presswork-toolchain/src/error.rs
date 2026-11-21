@@ -6,6 +6,8 @@ pub enum ToolchainError {
     InvalidReleaseList(String),
     #[error("the list of known digests has an error on line {0}")]
     InvalidDigestList(usize),
+    #[error("the list of dictionaries has an error on line {0}")]
+    InvalidDictionaryList(usize),
     #[error("the file {0} is not a .zip or a .tar.xz archive")]
     UnsupportedArchive(String),
     #[error("the archive contains an unsafe entry: {0}")]
