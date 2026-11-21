@@ -15,8 +15,10 @@ use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::{font, font_size, size, space as gap};
 
+use crate::dictionary_list::{self, DictionaryList};
 use crate::i18n::{FluentArgs, Localizer};
 
+const DICTIONARIES: &str = "dictionaries";
 const VERSION_WIDTH: f32 = 96.0;
 const SIZE_WIDTH: f32 = 64.0;
 const ROW_HEIGHT: f32 = 28.0;
@@ -85,6 +87,7 @@ pub(crate) struct ToolchainPanel {
     releases: Releases,
     installing: BTreeMap<Version, u8>,
     problem: Option<Problem>,
+    dictionaries: DictionaryList,
 }
 
 #[derive(Debug, Clone)]
@@ -98,10 +101,15 @@ pub(crate) enum Message {
     Installed(Version, Result<(), String>),
     Remove(Version),
     Use(Version),
+    Dictionaries(dictionary_list::Message),
 }
 
 impl ToolchainPanel {
     pub(crate) fn new(root: Option<PathBuf>, embedded: Version) -> Self {
+        let dictionaries = root
+            .as_deref()
+            .and_then(std::path::Path::parent)
+            .map(|data| data.join(DICTIONARIES));
         let mut panel = Self {
             toolchains: root.map(Toolchains::new),
             client: None,
@@ -111,9 +119,14 @@ impl ToolchainPanel {
             releases: Releases::NotLoaded,
             installing: BTreeMap::new(),
             problem: None,
+            dictionaries: DictionaryList::new(dictionaries),
         };
         panel.refresh();
         panel
+    }
+
+    pub(crate) fn dictionary_root(&self) -> Option<PathBuf> {
+        self.dictionaries.root()
     }
 
     pub(crate) fn is_open(&self) -> bool {
@@ -193,6 +206,13 @@ impl ToolchainPanel {
             }
             Message::Remove(version) => self.remove(&version),
             Message::Use(_) => {}
+            Message::Dictionaries(message) => {
+                let client = self.client();
+                return self
+                    .dictionaries
+                    .update(message, client)
+                    .map(Message::Dictionaries);
+            }
         }
         Task::none()
     }
@@ -302,6 +322,9 @@ impl ToolchainPanel {
             container(self.installed_list(localizer, choice)).width(FillPortion(1)),
             rule::vertical(1).style(style::hairline),
             container(self.available_list(localizer, pin)).width(FillPortion(1)),
+            rule::vertical(1).style(style::hairline),
+            container(self.dictionaries.view(localizer).map(Message::Dictionaries))
+                .width(FillPortion(1)),
         ]
         .spacing(gap::L);
         let mut content = column![header].spacing(gap::S);
@@ -621,11 +644,6 @@ fn user_agent() -> String {
 pub(crate) fn toolchain_directory() -> Option<PathBuf> {
     ProjectDirs::from("io.github", "getpresswork", "Presswork")
         .map(|directories| directories.data_local_dir().join("toolchains"))
-}
-
-pub(crate) fn dictionary_directory() -> Option<PathBuf> {
-    ProjectDirs::from("io.github", "getpresswork", "Presswork")
-        .map(|directories| directories.data_local_dir().join("dictionaries"))
 }
 
 #[cfg(test)]

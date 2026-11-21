@@ -3,6 +3,7 @@ mod assist;
 mod chat_panel;
 mod chrome;
 mod compiler;
+mod dictionary_list;
 mod files;
 mod find_bar;
 mod i18n;
@@ -44,7 +45,7 @@ pub fn run() -> iced::Result {
         let mut app = App::new(store.clone());
         let window = app.open_main_window();
         let compile = app.request_compile();
-        let dictionaries = App::load_dictionaries();
+        let dictionaries = app.load_dictionaries();
         let theme = iced::system::theme().map(app::Message::SystemTheme);
         (
             app,

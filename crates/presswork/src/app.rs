@@ -48,9 +48,7 @@ use crate::publish_view::{self, PublishView};
 use crate::server_dialog::{self, ServerDialog};
 use crate::spelling::{self, SpellChecker};
 use crate::task_list::{self, TaskList};
-use crate::toolchain_panel::{
-    self, Choice, ToolchainPanel, dictionary_directory, sentence, toolchain_directory,
-};
+use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
 use crate::typeset_view;
 use crate::unsaved;
 use crate::workspace::Workspace;
@@ -1337,6 +1335,30 @@ impl App {
         spell
     }
 
+    fn toolchain_message(&mut self, message: toolchain_panel::Message) -> Task<Message> {
+        if let toolchain_panel::Message::Use(version) = &message {
+            self.use_typst(version);
+            return self.sync_backend();
+        }
+        let toggled = matches!(message, toolchain_panel::Message::Toggle);
+        let dictionaries = matches!(
+            &message,
+            toolchain_panel::Message::Dictionaries(message) if message.changes_dictionaries()
+        );
+        let task = self.toolchains.update(message);
+        if toggled && self.toolchains.is_open() {
+            self.logs.update(log_panel::Message::Close);
+            self.chat.close();
+        }
+        let sync = self.sync_backend();
+        let reload = if dictionaries {
+            self.load_dictionaries()
+        } else {
+            Task::none()
+        };
+        Task::batch([task.map(Message::Toolchains), sync, reload])
+    }
+
     fn check_spelling(&mut self) -> Task<Message> {
         let (Some(analysis), Some(revision)) =
             (self.pages_analysis.clone(), self.compiled_revision)
@@ -1357,8 +1379,8 @@ impl App {
         task
     }
 
-    pub(crate) fn load_dictionaries() -> Task<Message> {
-        spelling::load_task(dictionary_directory()).map(Message::Spelling)
+    pub(crate) fn load_dictionaries(&self) -> Task<Message> {
+        spelling::load_task(self.toolchains.dictionary_root()).map(Message::Spelling)
     }
 
     #[cfg(test)]
@@ -1427,20 +1449,7 @@ impl App {
                     self.chat.close();
                 }
             }
-            Message::Toolchains(toolchain_panel::Message::Use(version)) => {
-                self.use_typst(&version);
-                return self.sync_backend();
-            }
-            Message::Toolchains(message) => {
-                let toggled = matches!(message, toolchain_panel::Message::Toggle);
-                let task = self.toolchains.update(message);
-                if toggled && self.toolchains.is_open() {
-                    self.logs.update(log_panel::Message::Close);
-                    self.chat.close();
-                }
-                let sync = self.sync_backend();
-                return Task::batch([task.map(Message::Toolchains), sync]);
-            }
+            Message::Toolchains(message) => return self.toolchain_message(message),
             Message::SystemTheme(mode) => {
                 tracing::debug!(?mode, "System theme changed");
                 self.mode = mode;
