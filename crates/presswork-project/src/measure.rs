@@ -56,7 +56,7 @@ fn length(text: &str) -> Option<(u32, LengthUnit)> {
         text.split_at(text.find(|character: char| character.is_ascii_alphabetic())?);
     let unit = LengthUnit::parse(unit.trim())?;
     let micrometers = (number.trim().parse::<f64>().ok()? * unit.micrometers()).round();
-    (1.0..=LONGEST)
+    (0.0..=LONGEST)
         .contains(&micrometers)
         .then(|| (whole(micrometers), unit))
 }
@@ -64,10 +64,56 @@ fn length(text: &str) -> Option<(u32, LengthUnit)> {
 #[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    reason = "the caller keeps the value between 1 and 10 000 000"
+    reason = "the caller keeps the value between 0 and 10 000 000"
 )]
 fn whole(value: f64) -> u32 {
     value as u32
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct Length {
+    pub micrometers: u32,
+    pub unit: LengthUnit,
+}
+
+impl Length {
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let (micrometers, unit) = length(text).ok_or_else(|| {
+            format!("the length \"{text}\" is not valid, for example use \"13pt\"")
+        })?;
+        Ok(Self { micrometers, unit })
+    }
+
+    #[must_use]
+    pub fn points(self) -> f64 {
+        f64::from(self.micrometers) / LengthUnit::Pt.micrometers()
+    }
+}
+
+impl TryFrom<String> for Length {
+    type Error = String;
+
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        Self::parse(&text)
+    }
+}
+
+impl From<Length> for String {
+    fn from(length: Length) -> Self {
+        length.to_string()
+    }
+}
+
+impl fmt::Display for Length {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{}{}",
+            self.unit.format(self.micrometers),
+            self.unit.name()
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +131,9 @@ impl PageSize {
         let (width, height) = text.split_once(['x', 'X', '×']).ok_or_else(invalid)?;
         let (width, unit) = length(width).ok_or_else(invalid)?;
         let (height, _) = length(height).ok_or_else(invalid)?;
+        if width == 0 || height == 0 {
+            return Err(invalid());
+        }
         Ok(Self {
             width,
             height,
@@ -163,6 +212,42 @@ mod tests {
         ] {
             assert!(PageSize::parse(text).is_err(), "{text}");
         }
+    }
+
+    #[test]
+    fn a_length_takes_a_number_and_a_unit() {
+        assert_eq!(
+            Length::parse("13pt"),
+            Ok(Length {
+                micrometers: 4_586,
+                unit: LengthUnit::Pt
+            })
+        );
+        assert_eq!(
+            Length::parse("4.5 mm"),
+            Ok(Length {
+                micrometers: 4_500,
+                unit: LengthUnit::Mm
+            })
+        );
+        assert_eq!(
+            Length::parse("0pt"),
+            Ok(Length {
+                micrometers: 0,
+                unit: LengthUnit::Pt
+            })
+        );
+        for text in ["13", "pt", "-2pt", "13km"] {
+            assert!(Length::parse(text).is_err(), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_length_gives_its_points_and_its_text() {
+        let inch = Length::parse("1in").unwrap();
+
+        assert!((inch.points() - 72.0).abs() < 1e-9);
+        assert_eq!(Length::parse("13pt").unwrap().to_string(), "13pt");
     }
 
     #[test]

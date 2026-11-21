@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ProjectError;
-use crate::measure::PageSize;
+use crate::measure::{Length, PageSize};
 use crate::project::is_inside;
 
 pub const MANIFEST: &str = "presswork.toml";
@@ -17,6 +17,14 @@ pub struct Manifest {
     pub main: PathBuf,
     pub typst: Option<String>,
     pub exports: Vec<ExportProfile>,
+    pub typeset: TypesetSettings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TypesetSettings {
+    pub baseline_grid: Option<Length>,
+    pub baseline_start: Option<Length>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
@@ -130,6 +138,8 @@ struct File {
     project: Section,
     #[serde(default, rename = "export")]
     exports: Vec<ExportProfile>,
+    #[serde(default)]
+    typeset: TypesetSettings,
 }
 
 #[derive(Deserialize)]
@@ -181,11 +191,21 @@ impl Manifest {
     pub fn parse(text: &str) -> Result<Self, ProjectError> {
         let file: File = toml::from_str(text)
             .map_err(|error| ProjectError::InvalidManifest(error.message().to_owned()))?;
+        if file
+            .typeset
+            .baseline_grid
+            .is_some_and(|grid| grid.micrometers == 0)
+        {
+            return Err(ProjectError::InvalidManifest(
+                "the baseline-grid in [typeset] must be larger than 0".to_owned(),
+            ));
+        }
         Ok(Self {
             name: file.project.name,
             main: file.project.main,
             typst: file.project.typst,
             exports: file.exports,
+            typeset: file.typeset,
         })
     }
 }
@@ -193,6 +213,7 @@ impl Manifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::measure::Length;
 
     #[test]
     fn a_manifest_gives_the_name_the_main_file_and_the_pin() {
@@ -208,7 +229,43 @@ mod tests {
                 main: PathBuf::from("book.typ"),
                 typst: Some("0.15".to_owned()),
                 exports: Vec::new(),
+                typeset: TypesetSettings::default(),
             }
+        );
+    }
+
+    #[test]
+    fn the_typeset_table_gives_the_baseline_grid() {
+        let manifest = Manifest::parse(
+            "[project]\nname = \"Book\"\n\n[typeset]\nbaseline-grid = \"13pt\"\nbaseline-start = \"30mm\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.typeset,
+            TypesetSettings {
+                baseline_grid: Some(Length::parse("13pt").unwrap()),
+                baseline_start: Some(Length::parse("30mm").unwrap()),
+            }
+        );
+    }
+
+    #[test]
+    fn without_a_typeset_table_there_is_no_baseline_grid() {
+        let manifest = Manifest::parse("[project]\nname = \"Book\"\n").unwrap();
+
+        assert_eq!(manifest.typeset, TypesetSettings::default());
+    }
+
+    #[test]
+    fn a_baseline_grid_of_zero_is_not_valid() {
+        let error =
+            Manifest::parse("[project]\nname = \"Book\"\n\n[typeset]\nbaseline-grid = \"0pt\"\n")
+                .unwrap_err();
+
+        assert!(
+            matches!(&error, ProjectError::InvalidManifest(message) if message.contains("baseline-grid")),
+            "{error:?}"
         );
     }
 
