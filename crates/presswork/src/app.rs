@@ -9,8 +9,8 @@ use iced::widget::{
     button, column, container, operation, responsive, row, rule, space, stack, text, tooltip,
 };
 use iced::{
-    Element, Fill, FillPortion, Size, Subscription, Task, Theme, event, keyboard, padding, system,
-    window,
+    Element, Fill, FillPortion, Length, Size, Subscription, Task, Theme, event, keyboard, padding,
+    system, window,
 };
 use presswork_api::live::ServerMessage;
 use presswork_api::{Document, SearchHit};
@@ -80,6 +80,7 @@ pub(crate) struct App {
     find: FindBar,
     publish: PublishView,
     quality: Vec<Problem>,
+    shown_problem: Option<usize>,
     proofreader: Proofreader,
     modifiers: keyboard::Modifiers,
     hovered: Option<Position>,
@@ -195,6 +196,7 @@ impl App {
             find: FindBar::default(),
             publish: PublishView::default(),
             quality: Vec::new(),
+            shown_problem: None,
             proofreader: Proofreader::default(),
             modifiers: keyboard::Modifiers::default(),
             hovered: None,
@@ -420,6 +422,7 @@ impl App {
         self.pages_analysis = None;
         self.outline.set_headings(Vec::new());
         self.quality.clear();
+        self.shown_problem = None;
     }
 
     fn load_library(&self) -> Task<Message> {
@@ -772,6 +775,24 @@ impl App {
     }
 
     fn show_layout_problem(&mut self, index: usize) -> Task<Message> {
+        let Some(problem) = self.quality.get(index) else {
+            return Task::none();
+        };
+        self.shown_problem = Some(index);
+        match (problem.page, problem.area) {
+            (Some(page), Some(area)) => {
+                let center = PagePoint {
+                    page,
+                    x: area.x + area.width / 2.0,
+                    y: area.y + area.height / 2.0,
+                };
+                self.preview.show_point(center, Instant::now())
+            }
+            _ => Task::none(),
+        }
+    }
+
+    fn show_layout_source(&mut self, index: usize) -> Task<Message> {
         let source = self
             .quality
             .get(index)
@@ -1462,6 +1483,7 @@ impl App {
                 .pages_analysis
                 .as_ref()
                 .map_or_else(Vec::new, Analysis::quality);
+            self.shown_problem = None;
             let marks = self.problem_marks(&output);
             self.preview.set_problem_marks(marks);
         }
@@ -1692,6 +1714,9 @@ impl App {
             Message::Publish(message) => return self.publish_message(message),
             Message::Typeset(typeset_view::Message::Show(index)) => {
                 return self.show_layout_problem(index);
+            }
+            Message::Typeset(typeset_view::Message::Source(index)) => {
+                return self.show_layout_source(index);
             }
             Message::Proofreading(message) => return self.proofreading_message(message),
             Message::ToggleMenu => self.menu_open = !self.menu_open,
@@ -1983,9 +2008,7 @@ impl App {
             return self.publish_area();
         }
         if workspace == Workspace::Typeset {
-            let available = self.compiler.backend() == &Backend::Embedded;
-            return typeset_view::view(&self.localizer, &self.quality, available)
-                .map(Message::Typeset);
+            return self.typeset_area();
         }
         if workspace == Workspace::Write {
             let colors = ui_theme::colors(&self.theme());
@@ -2050,6 +2073,35 @@ impl App {
         .spacing(gap::S)
         .align_x(Horizontal::Center);
         container(content).center(Fill).style(style::page).into()
+    }
+
+    fn typeset_area(&self) -> Element<'_, Message> {
+        let available = self.compiler.backend() == &Backend::Embedded;
+        let detached = self.preview_window.is_some();
+        let width = if detached {
+            Length::Fill
+        } else {
+            Length::Fixed(typeset_view::PANEL_WIDTH)
+        };
+        let problems = typeset_view::view(
+            &self.localizer,
+            &self.quality,
+            available,
+            self.shown_problem,
+            width,
+        )
+        .map(Message::Typeset);
+        if detached {
+            return problems;
+        }
+        row![
+            problems,
+            rule::vertical(1).style(style::hairline),
+            container(self.preview.view(self.preview_text(), Message::Preview))
+                .width(Fill)
+                .height(Fill)
+        ]
+        .into()
     }
 
     fn publish_area(&self) -> Element<'_, Message> {
@@ -3263,27 +3315,78 @@ mod tests {
     }
 
     const SHORT_END: &str = "A line of text \\ it.";
-    const SHORT_END_PROBLEM: &str = "Page 1: The last line of a paragraph has only 3 characters.";
+    const SHORT_END_PROBLEM: &str = "The last line of a paragraph has only 3 characters.";
 
-    #[test]
-    fn the_typeset_workspace_lists_the_problems_of_the_layout() {
+    fn typeset_app() -> App {
         let mut app = compiled_app(SHORT_END);
-
         send(&mut app, Message::SelectWorkspace(Workspace::Typeset));
-
-        assert!(simulator(app.view()).find(SHORT_END_PROBLEM).is_ok());
+        app
     }
 
     #[test]
-    fn a_click_on_a_layout_problem_selects_its_source() {
-        let mut app = compiled_app(SHORT_END);
-        send(&mut app, Message::SelectWorkspace(Workspace::Typeset));
+    fn the_typeset_workspace_shows_the_preview_beside_the_problems() {
+        let app = typeset_app();
+
+        let mut ui = simulator(app.view());
+
+        assert!(ui.find(SHORT_END_PROBLEM).is_ok());
+        assert!(ui.find(iced::widget::Id::from("page-0".to_owned())).is_ok());
+    }
+
+    #[test]
+    fn a_click_on_a_layout_problem_shows_it_in_the_preview() {
+        let mut app = typeset_app();
 
         click_in(&mut app, SHORT_END_PROBLEM);
+
+        assert_eq!(app.workspace, Workspace::Typeset);
+        let area = app.quality[0].area.unwrap();
+        let marked = app.preview.marked().unwrap();
+        assert_eq!(marked.page, 0);
+        assert!(
+            marked.x > area.x
+                && marked.x < area.x + area.width
+                && marked.y > area.y
+                && marked.y < area.y + area.height,
+            "{marked:?} {area:?}"
+        );
+        assert_eq!(app.shown_problem, Some(0));
+    }
+
+    #[test]
+    fn the_source_button_of_a_layout_problem_selects_its_source() {
+        let mut app = typeset_app();
+
+        click_in(&mut app, iced::widget::Id::from("qa-source-0".to_owned()));
 
         assert_eq!(app.workspace, Workspace::Write);
         let start = SHORT_END.find("it.").unwrap();
         assert_eq!(app.selection_bounds(), (start, start + 3));
+    }
+
+    #[test]
+    fn with_the_preview_in_its_own_window_the_typeset_workspace_shows_only_the_problems() {
+        let mut app = compiled_app(SHORT_END);
+        let _ = detach(&mut app);
+        send(&mut app, Message::SelectWorkspace(Workspace::Typeset));
+
+        let mut ui = simulator(app.view());
+
+        assert!(ui.find(SHORT_END_PROBLEM).is_ok());
+        assert!(
+            ui.find(iced::widget::Id::from("page-0".to_owned()))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_new_compilation_forgets_the_shown_problem() {
+        let mut app = typeset_app();
+        click_in(&mut app, SHORT_END_PROBLEM);
+
+        app.compile_now();
+
+        assert_eq!(app.shown_problem, None);
     }
 
     fn problem_marks(app: &App) -> Vec<(usize, &str, Severity)> {

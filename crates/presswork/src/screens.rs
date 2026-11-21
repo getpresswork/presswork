@@ -33,6 +33,7 @@ use crate::publish_view::Message as PublishMessage;
 use crate::server_dialog::{Connection, Message as ServerMessage, Shelf};
 use crate::task_list::Message as TaskListMessage;
 use crate::toolchain_panel::Message as ToolchainMessage;
+use crate::typeset_view::Message as TypesetMessage;
 use crate::workspace::Workspace;
 use crate::{log_panel, menu, unsaved};
 
@@ -345,6 +346,7 @@ fn render_typeset(app: &mut App) {
     send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
     app.compile_now();
     send(app, Message::SelectWorkspace(Workspace::Typeset));
+    send(app, Message::Typeset(TypesetMessage::Show(0)));
     render(app, "typeset-qa");
 }
 

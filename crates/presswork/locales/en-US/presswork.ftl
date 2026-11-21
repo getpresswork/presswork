@@ -207,6 +207,7 @@ publish-format-svg = SVG
 typeset-title = Typesetting QA
 typeset-empty = Presswork found no problems in the layout.
 typeset-needs-engine = The QA report is available only with the built-in Typst engine.
+typeset-source = Show the source in the Write workspace
 typeset-count = { $count ->
     [one] 1 problem in the layout
    *[other] { $count } problems in the layout
