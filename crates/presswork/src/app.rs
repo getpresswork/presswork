@@ -235,6 +235,7 @@ impl App {
         let (id, opened) = window::open(chrome::settings(PREVIEW_WINDOW, Controls::CURRENT));
         self.preview_window = Some(id);
         self.preview.set_detached(true);
+        self.preview.keep_position(Instant::now());
         tracing::debug!("Preview window opened");
         opened.discard()
     }
@@ -249,6 +250,7 @@ impl App {
         if self.preview_window == Some(id) {
             self.preview_window = None;
             self.preview.set_detached(false);
+            self.preview.keep_position(Instant::now());
             return false;
         }
         id == self.main_window
@@ -547,6 +549,9 @@ impl App {
                 if self.compiler.set_bleed(self.preview.guides()) {
                     return self.request_compile();
                 }
+            }
+            presswork_preview::Action::Scrolled(viewport) => {
+                return self.preview.scrolled(viewport, Instant::now());
             }
             presswork_preview::Action::Detach => return self.detach_preview(),
             presswork_preview::Action::Attach => {
@@ -1264,6 +1269,9 @@ impl App {
 
     fn select_workspace(&mut self, workspace: Workspace) -> Task<Message> {
         tracing::debug!(?workspace, "Workspace selected");
+        if workspace != self.workspace {
+            self.preview.keep_position(Instant::now());
+        }
         self.workspace = workspace;
         match (workspace, &self.tasks, &self.live) {
             (Workspace::Plan, Some(tasks), Some(live)) => {
@@ -4146,6 +4154,59 @@ mod tests {
 
         assert_eq!(app.preview_window, None);
         assert!(simulator(app.view()).find(EMPTY_PREVIEW).is_ok());
+    }
+
+    const THREE_PAGES: &str = "One.\n#pagebreak()\nTwo.\n#pagebreak()\nThree.";
+
+    fn scrolled_to(top: f32) -> Message {
+        Message::Preview(presswork_preview::Action::Scrolled(
+            presswork_preview::Viewport::new(top, 600.0, 640.0),
+        ))
+    }
+
+    #[test]
+    fn the_preview_keeps_its_place_when_the_workspace_changes() {
+        let mut app = compiled_app(THREE_PAGES);
+        send(&mut app, scrolled_to(1500.0));
+        send(&mut app, Message::SelectWorkspace(Workspace::Typeset));
+
+        let task = app.update(scrolled_to(0.0));
+
+        assert!(task.units() > 0);
+    }
+
+    #[test]
+    fn a_scroll_to_the_top_in_the_same_workspace_stays_there() {
+        let mut app = compiled_app(THREE_PAGES);
+        send(&mut app, scrolled_to(1500.0));
+        send(&mut app, Message::SelectWorkspace(Workspace::Write));
+
+        let task = app.update(scrolled_to(0.0));
+
+        assert_eq!(task.units(), 0);
+    }
+
+    #[test]
+    fn the_preview_keeps_its_place_when_it_moves_into_its_own_window() {
+        let mut app = compiled_app(THREE_PAGES);
+        send(&mut app, scrolled_to(1500.0));
+        let _ = detach(&mut app);
+
+        let task = app.update(scrolled_to(0.0));
+
+        assert!(task.units() > 0);
+    }
+
+    #[test]
+    fn the_preview_keeps_its_place_when_its_window_closes() {
+        let mut app = compiled_app(THREE_PAGES);
+        let preview = detach(&mut app);
+        send(&mut app, scrolled_to(1500.0));
+        send(&mut app, Message::WindowClosed(preview));
+
+        let task = app.update(scrolled_to(0.0));
+
+        assert!(task.units() > 0);
     }
 
     #[test]
