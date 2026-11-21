@@ -199,6 +199,7 @@ In milestone 2, the preview also does these things (D180):
 - The **Spreads** button (a book) shows facing pages side by side, as in a printed book. The first page is a right-hand page alone. Then each spread has the next page on the left and the page after it on the right. Fit width then fits two pages.
 - The **Thumbnails** button (a panel at the left of the toolbar) shows small images of all pages at the left of the preview. Click a thumbnail to scroll the preview to its page. The thumbnail of the page in the middle of the preview has the accent color.
 - The **Guides** button (a frame) shows the bleed around each page and a line at the trim box, where the printer cuts the page (D181). Thus you see the content that goes into the bleed. When you switch the guides on or off, the engine compiles the document again. If the document has no bleed, the guides show nothing. The guides need the built-in Typst engine. The preview does not show the text area yet.
+- The **Problems** button (a warning triangle) shows or hides the problem marks (D191). After each compilation with pages, the preview puts a box around each problem of the typesetting QA report in the warning color, and around each preflight problem in the error color. If the mouse pointer stays on a box for half a second, a tooltip tells the problem. The marks are on by default. They need the built-in Typst engine.
 
 ## Source and pages
 

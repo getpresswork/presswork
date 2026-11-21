@@ -1382,7 +1382,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D185. Details of the typesetting QA report
 
-- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Status:** Accepted, 2026-11-20. D191 adds marks on the pages of the preview. **Origin:** Default.
 - **Decision:**
   - The report finds paragraphs from the paragraph tags of the Typst output, and lines from the vertical position of the text. A change of more than half the text size starts a new line.
   - A widow is the last line of a paragraph on a new page or at the top of a new column. An orphan is the first line of a paragraph before such a break.
@@ -1450,3 +1450,15 @@ Do not change what an accepted decision says. You can correct its language. To c
   - If Presswork cannot write the file, the notice bar tells the problem.
 - **Reason:** The word list is a file in the project folder (D188). Thus an added word goes into the version control of the team, and `presswork-cli check` also permits it. A new line at the end keeps the order and the comments of the team.
 - **Other options:** A personal dictionary for each user. The word in small letters. A sorted list. A separate shortcut or a context menu. A command that permits the word only until Presswork closes.
+
+## D191. Problem marks in the preview
+
+- **Status:** Accepted, 2026-11-21. **Origin:** Default.
+- **Decision:**
+  - Each problem on a page has an area. A layout problem has the box of its line, and stacked hyphens have the box of their lines until a break. A preflight problem has the box of the image, of the shape or the text with the color, or of the first missing glyph. Transformations of groups count. A problem in a tiling has the area of the shape that the tiling fills. Problems of the document and of the page size have no area.
+  - After each compilation with pages, Presswork runs preflight for each export profile of the project, as `presswork-cli check` does (D184). Without a project, it uses the default PDF profile.
+  - The preview puts a box around each area, 2 pixels larger on each side: the warning color for layout problems and the error color for preflight problems. The boxes use the colors of the light theme also in the dark theme, because the pages are white.
+  - If the mouse pointer stays on a box for half a second, a tooltip above the box tells the problem. The tooltip of a problem of a profile starts with the name of the profile.
+  - The **Problems** button (a warning triangle) in the toolbar of the preview shows or hides the boxes. The boxes are on by default. The thumbnails show no boxes.
+- **Reason:** Typesetters examine the pages, thus a problem must show where it is. The same preflight as in the command-line tool gives the same problems in both. Preflight problems make `check` fail and layout problems do not, thus the error color and the warning color agree with the command-line tool.
+- **Other options:** Boxes only for layout problems. Preflight only with the rules of the first profile. Boxes that are off by default. A list of the preflight problems in the Typeset workspace. Boxes in the thumbnails. Preflight on a separate thread.

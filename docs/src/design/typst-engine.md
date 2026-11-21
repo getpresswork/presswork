@@ -144,6 +144,8 @@ In milestone 2, preflight finds all these problems, with the rules of the export
 
 Each problem has its page, if it has one, and if possible its source. Problems do not stop an export.
 
+A problem on a page also has its area: the image, the shape or the text with the color, or the first missing glyph. After each compilation with pages, the preview puts a box in the error color around the preflight problems of all export profiles of the project (D191). The tooltip of a problem of a profile, for example a color, starts with the name of the profile. A problem of the document, for example an image without alternative text, shows one time.
+
 After an export, veraPDF can validate PDF/A and PDF/UA files. Refer to [Toolchains](toolchains.md).
 
 Checklists can use preflight results as automatic items. Refer to [Domain model](domain-model.md).
