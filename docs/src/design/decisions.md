@@ -1382,7 +1382,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D185. Details of the typesetting QA report
 
-- **Status:** Accepted, 2026-11-20. D191 adds marks on the pages of the preview. D192 changes the click on a problem. **Origin:** Default.
+- **Status:** Accepted, 2026-11-20. D191 adds marks on the pages of the preview. D192 changes the click on a problem. D195 adds lines off the baseline grid. **Origin:** Default.
 - **Decision:**
   - The report finds paragraphs from the paragraph tags of the Typst output, and lines from the vertical position of the text. A change of more than half the text size starts a new line.
   - A widow is the last line of a paragraph on a new page or at the top of a new column. An orphan is the first line of a paragraph before such a break.
@@ -1487,3 +1487,23 @@ Do not change what an accepted decision says. You can correct its language. To c
   - At the top of the document, the preview stays at the top.
 - **Reason:** The scroll area of iced starts again at the top when its part of the layout changes, and the same position in pixels shows a different place at a different scale. A place on a page gives the same view in all layouts.
 - **Other options:** The same position in pixels. The page in the middle of the view. One preview in the same part of the layout for all workspaces.
+
+## D194. The baseline grid in the manifest
+
+- **Status:** Accepted, 2026-11-21. **Origin:** Project owner.
+- **Decision:** The baseline grid comes from a `[typeset]` table in `presswork.toml`. `baseline-grid` gives the distance between the grid lines and starts the check. The optional `baseline-start` gives the first grid line from the top of the page. Without `baseline-start`, the first line of body text in the document gives the first grid line.
+- **Reason:** A grid in the manifest is clear and goes into the version control of the team. Documents that are not set on a grid get no problems.
+- **Other options:** A grid from the document: the most frequent distance between the lines of body text, and the first line of body text. A grid from Typst metadata that the template sets, for example `#metadata((step: 13pt, start: 30mm)) <presswork-grid>`.
+
+## D195. Details of the baseline grid check
+
+- **Status:** Accepted, 2026-11-21. **Origin:** Default.
+- **Decision:**
+  - A length in the manifest is a number and a unit: `mm`, `cm`, `in`, or `pt`. Presswork keeps the number in thousandths of the unit, thus `"12pt"` gives exactly 12 pt. `baseline-grid` must be larger than 0.
+  - The grid starts from the top edge of the trim box, without the bleed. Typst does not give the margins, thus the grid cannot start at the top margin (D181).
+  - Body text is the lines of paragraphs (D185) in the most frequent text size, to 0.05 pt.
+  - A line is off the grid when its baseline is more than 0.1 pt from the nearest grid line. A line in the middle between two grid lines is below the upper grid line, because a space of a half line moves text down.
+  - Lines off the grid are layout problems: the Typeset workspace lists them, the preview marks them in the warning color, and `presswork-cli check` lists them as warnings.
+  - With the guides on, the preview draws each grid line as a line of one pixel in the guide color at 45 % opacity, across the trim box. If two grid lines are closer than two pixels, the preview draws no grid lines.
+- **Reason:** Exact lengths in points keep a long page on the grid without errors from rounding. A tolerance of 0.1 pt is smaller than the reader can see. A thin line in the guide color agrees with the trim line.
+- **Other options:** Lengths in micrometers, as for page sizes. A tolerance in the manifest. Grid lines above the first grid line. A grid for each page or for each column.

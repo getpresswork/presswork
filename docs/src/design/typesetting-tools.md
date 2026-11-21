@@ -68,7 +68,15 @@ The Typeset workspace shows the report of the last compilation in a panel at the
 
 ## Baseline grid check
 
-The baseline grid check finds lines of body text that are not on the baseline grid of the page design. The grid comes from the style file of the project.
+The baseline grid check finds lines of body text that are not on the baseline grid of the page design. The grid comes from the manifest of the project (D194).
+
+In milestone 2, the baseline grid check does these things (D195):
+
+- `baseline-grid` in the `[typeset]` table of `presswork.toml` sets the distance between the grid lines and starts the check. `baseline-start` sets the first grid line, from the top of the page. Without `baseline-start`, the baseline of the first line of body text in the document is the first grid line. Refer to [Interface](interface.md) for the keys.
+- Body text is the lines of paragraphs in the most frequent text size. Thus headings, footnotes in a smaller size, and display text do not count.
+- A line is on the grid when its baseline is 0.1 pt or less from a grid line. Each other line of body text is a problem in the typesetting QA report. The problem gives the distance to the nearest grid line, in the unit of `baseline-grid`. A line in the middle between two grid lines is below the upper grid line.
+- The guides of the preview show the grid lines, from the first grid line to the bottom of the page.
+- `presswork-cli check` lists the lines off the grid as warnings, with the other problems of the QA report.
 
 ## Soft proof
 

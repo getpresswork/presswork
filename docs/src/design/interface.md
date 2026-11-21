@@ -204,6 +204,19 @@ format = "png"
 output = "out/pages/page-{0p}.png"
 ```
 
+The manifest can also have a `[typeset]` table for the typesetting QA report (D194):
+
+| Key | Value | Default |
+| --- | --- | --- |
+| `baseline-grid` | The distance between two lines of the baseline grid, as a number with a unit: `mm`, `cm`, `in`, or `pt`. For example `"13pt"`. The value must be larger than 0. | No grid and no grid check |
+| `baseline-start` | The distance of the first grid line from the top of the page. | The baseline of the first line of body text in the document |
+
+```toml
+[typeset]
+baseline-grid = "13pt"
+baseline-start = "30mm"
+```
+
 ### Export
 
 The Publish workspace shows the export profiles of the project. If the manifest has no `[[export]]` tables, the workspace shows one PDF profile.

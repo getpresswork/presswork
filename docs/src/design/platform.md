@@ -21,7 +21,7 @@ In milestone 2, the program has the `build` and `check` commands (D183):
 - `--profile NAME` selects an export profile. To select more profiles, give the option again. Without the option, the command uses all profiles of the manifest. If the manifest has no profiles, the command uses one PDF profile, as the Publish workspace does.
 - `build` compiles the project and writes the files and the build report of each profile. It writes the path of each new file to the standard output, one path on each line.
 - Each command runs preflight for each selected profile. A problem of the document shows one time. A problem of a profile shows with the name of the profile (D184).
-- `check` also lists the problems of the typesetting QA report, for example widows and loose lines. These problems do not change the exit code (D185).
+- `check` also lists the problems of the typesetting QA report, for example widows, loose lines, and lines off the baseline grid of the project. These problems do not change the exit code (D185, D195).
 - `check` also checks the spelling with the downloaded dictionaries. Misspelled words make the check fail. `--dictionaries FOLDER` gives a different folder with dictionaries, for example a cache in a CI system. The default is the folder of the desktop application (D188).
 - `check` also checks the house style rules in `presswork-style.toml`. House style problems make the check fail. A house style file that is not valid is an error (D189).
 - `check` compiles the project and runs preflight. It writes no files. The quote checker comes later.
