@@ -3,10 +3,12 @@ use std::time::Instant;
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::scrollable::{AbsoluteOffset, Direction, Scrollbar};
 use iced::widget::{
-    button, column, container, image, operation, responsive, row, rule, scrollable, space, text,
+    button, column, container, image, operation, pin, responsive, row, rule, scrollable, space,
+    stack, text, tooltip,
 };
-use iced::{Element, Fill, Point, Rectangle, Size, Task};
+use iced::{Border, Color, Element, Fill, Point, Rectangle, Size, Task};
 use presswork_typst::{Insets, Output, PagePoint};
+use presswork_ui::color::LIGHT;
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::{font, font_size, size, space as gap};
@@ -26,6 +28,26 @@ const EMPTY_WIDTH: f32 = 320.0;
 const PERCENT_WIDTH: f32 = 48.0;
 const THUMBNAIL_WIDTH: f32 = 72.0;
 const THUMBNAIL_STRIP: f32 = 120.0;
+const PROBLEM_PADDING: f32 = 2.0;
+const PROBLEM_BORDER: f32 = 1.5;
+const PROBLEM_RADIUS: f32 = 2.0;
+const PROBLEM_FILL_ALPHA: f32 = 0.12;
+const TIP_WIDTH: f32 = 320.0;
+const TIP_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Severity {
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProblemMark {
+    pub page: usize,
+    pub area: presswork_typst::Area,
+    pub text: String,
+    pub severity: Severity,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Zoom {
@@ -41,6 +63,13 @@ pub enum Arrangement {
     Spreads,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Visibility {
+    #[default]
+    Shown,
+    Hidden,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Action {
     ZoomIn,
@@ -51,6 +80,7 @@ pub enum Action {
     Thumbnails,
     GoToPage(usize),
     ShowProblem,
+    ProblemMarks,
     Detach,
     Attach,
     Click(PagePoint),
@@ -100,9 +130,54 @@ pub struct Preview {
     detached: bool,
     viewport: Option<Viewport>,
     mark: Option<(PagePoint, Instant)>,
+    problem_marks: Vec<ProblemMark>,
+    problem_marks_visibility: Visibility,
 }
 
 impl Preview {
+    pub fn set_problem_marks(&mut self, marks: Vec<ProblemMark>) {
+        self.problem_marks = marks;
+    }
+
+    #[must_use]
+    pub fn problem_marks(&self) -> &[ProblemMark] {
+        &self.problem_marks
+    }
+
+    #[must_use]
+    pub fn shows_problem_marks(&self) -> bool {
+        self.problem_marks_visibility == Visibility::Shown
+    }
+
+    fn problem_marks_on(&self, page: usize, scale: f32) -> Vec<(Rectangle, &ProblemMark)> {
+        let Some(shown) = self.pages.get(page).filter(|_| self.shows_problem_marks()) else {
+            return Vec::new();
+        };
+        let ratio = PX_PER_PT * scale;
+        let bounds = Rectangle::new(
+            Point::ORIGIN,
+            Size::new(shown.width * ratio, shown.height * ratio),
+        );
+        self.problem_marks
+            .iter()
+            .filter(|mark| mark.page == page)
+            .filter_map(|mark| {
+                let area = mark.area;
+                let marked = Rectangle::new(
+                    Point::new(
+                        (to_f32(area.x) + shown.bleed.left) * ratio - PROBLEM_PADDING,
+                        (to_f32(area.y) + shown.bleed.top) * ratio - PROBLEM_PADDING,
+                    ),
+                    Size::new(
+                        to_f32(area.width) * ratio + 2.0 * PROBLEM_PADDING,
+                        to_f32(area.height) * ratio + 2.0 * PROBLEM_PADDING,
+                    ),
+                );
+                marked.intersection(&bounds).map(|visible| (visible, mark))
+            })
+            .collect()
+    }
+
     pub fn show(&mut self, output: &Output, pixel_per_pt: f32) {
         if let Some(pages) = &output.pages {
             self.pages = pages
@@ -262,6 +337,13 @@ impl Preview {
                 self.guides = !self.guides;
                 return;
             }
+            Action::ProblemMarks => {
+                self.problem_marks_visibility = match self.problem_marks_visibility {
+                    Visibility::Shown => Visibility::Hidden,
+                    Visibility::Hidden => Visibility::Shown,
+                };
+                return;
+            }
             Action::GoToPage(_)
             | Action::ShowProblem
             | Action::Detach
@@ -403,6 +485,11 @@ impl Preview {
                 on_action(Action::Spreads)
             ),
             tool(Icon::Frame, self.guides, on_action(Action::Guides)),
+            tool(
+                Icon::TriangleAlert,
+                self.shows_problem_marks(),
+                on_action(Action::ProblemMarks)
+            ),
             space().width(gap::S),
             tool(Icon::ZoomOut, false, on_action(Action::ZoomOut)),
             text(format!("{percent:.0}%"))
@@ -526,6 +613,25 @@ impl Preview {
         )
         .style(style::paper)
         .id(format!("page-{index}"));
+        let marks = self.problem_marks_on(index, scale);
+        let content: Element<'a, Message> = if marks.is_empty() {
+            content.into()
+        } else {
+            marks
+                .into_iter()
+                .enumerate()
+                .fold(stack![content], |layers, (number, (bounds, mark))| {
+                    layers.push(
+                        pin(problem_view(
+                            mark,
+                            bounds.size(),
+                            format!("problem-{index}-{number}"),
+                        ))
+                        .position(bounds.position()),
+                    )
+                })
+                .into()
+        };
         page_area(content, move |point| {
             on_action(Action::Click(PagePoint {
                 page: index,
@@ -553,6 +659,42 @@ fn pixels(value: u32) -> f32 {
 )]
 fn to_f32(value: f64) -> f32 {
     value as f32
+}
+
+fn problem_view<'a, Message: 'a>(
+    mark: &'a ProblemMark,
+    size: Size,
+    id: String,
+) -> Element<'a, Message> {
+    let color = match mark.severity {
+        Severity::Warning => LIGHT.warning,
+        Severity::Error => LIGHT.danger,
+    };
+    let area = container(space().width(size.width).height(size.height))
+        .id(id)
+        .style(move |_| container::Style {
+            background: Some(
+                Color {
+                    a: PROBLEM_FILL_ALPHA,
+                    ..color
+                }
+                .into(),
+            ),
+            border: Border {
+                color,
+                width: PROBLEM_BORDER,
+                radius: PROBLEM_RADIUS.into(),
+            },
+            ..container::Style::default()
+        });
+    let card = container(text(mark.text.as_str()).size(font_size::CAPTION))
+        .max_width(TIP_WIDTH)
+        .padding([gap::XXS, gap::S])
+        .style(style::popup);
+    tooltip(area, card, tooltip::Position::Top)
+        .gap(gap::XS)
+        .delay(TIP_DELAY)
+        .into()
 }
 
 fn tool<'a, Message: Clone + 'a>(
@@ -1091,5 +1233,152 @@ mod tests {
         assert!((mark.x - 30.0 * PX_PER_PT).abs() < 0.01, "{mark:?}");
         assert!((mark.y - 60.0 * PX_PER_PT).abs() < 0.01, "{mark:?}");
         assert_eq!(since, now);
+    }
+
+    const SHORT_LINE: &str = "The last line of a paragraph has only 3 characters.";
+
+    fn short_line(page: usize) -> ProblemMark {
+        ProblemMark {
+            page,
+            area: presswork_typst::Area {
+                x: 30.0,
+                y: 60.0,
+                width: 100.0,
+                height: 12.0,
+            },
+            text: SHORT_LINE.to_owned(),
+            severity: Severity::Warning,
+        }
+    }
+
+    #[test]
+    fn a_problem_mark_covers_its_area_on_its_page() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages_with_bleed(2), 2.0);
+
+        preview.set_problem_marks(vec![short_line(1)]);
+
+        assert_eq!(preview.problem_marks_on(0, 1.0), []);
+        let marks = preview.problem_marks_on(1, 1.0);
+        assert_eq!(marks.len(), 1);
+        let (bounds, mark) = marks[0];
+        assert_eq!(mark, &short_line(1));
+        let expected = Rectangle::new(
+            Point::new(
+                40.0 * PX_PER_PT - PROBLEM_PADDING,
+                70.0 * PX_PER_PT - PROBLEM_PADDING,
+            ),
+            Size::new(
+                100.0 * PX_PER_PT + 2.0 * PROBLEM_PADDING,
+                12.0 * PX_PER_PT + 2.0 * PROBLEM_PADDING,
+            ),
+        );
+        assert!(
+            (bounds.x - expected.x).abs() < 0.01
+                && (bounds.y - expected.y).abs() < 0.01
+                && (bounds.width - expected.width).abs() < 0.01
+                && (bounds.height - expected.height).abs() < 0.01,
+            "{bounds:?}"
+        );
+    }
+
+    #[test]
+    fn the_toolbar_shows_and_hides_the_problem_marks() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(1), 2.0);
+        preview.set_problem_marks(vec![short_line(0)]);
+
+        assert_eq!(
+            clicked(&preview, Icon::TriangleAlert),
+            [Action::ProblemMarks]
+        );
+        preview.perform(Action::ProblemMarks);
+        assert!(!preview.shows_problem_marks());
+        assert_eq!(preview.problem_marks_on(0, 1.0), []);
+        preview.perform(Action::ProblemMarks);
+        assert_eq!(preview.problem_marks_on(0, 1.0).len(), 1);
+    }
+
+    #[test]
+    fn a_problem_mark_shows_over_the_page_in_its_color() {
+        let mut preview = Preview::default();
+        preview.show(&a5_page(), 2.0);
+        preview.perform(Action::ZoomIn);
+        preview.perform(Action::ZoomOut);
+        preview.set_problem_marks(vec![short_line(0)]);
+        let mut ui = simulator(preview.view(EMPTY.to_owned(), |action| action));
+        let page = ui
+            .find(iced::widget::Id::from("page-0".to_owned()))
+            .unwrap()
+            .bounds();
+        let folder = tempfile::tempdir().unwrap();
+        let theme = presswork_ui::theme::light();
+        let _ = ui.snapshot(&theme).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        ui.snapshot(&theme)
+            .unwrap()
+            .matches_image(folder.path().join("problem"))
+            .unwrap();
+
+        let left = page.x + 30.0 * PX_PER_PT - PROBLEM_PADDING + PROBLEM_BORDER / 2.0;
+        let middle = page.y + 66.0 * PX_PER_PT;
+        let [red, green, blue, _] =
+            crate::testing::pixel(folder.path(), physical(left), physical(middle));
+        let warning = presswork_ui::color::LIGHT.warning.into_rgba8();
+        let near = |a: u8, b: u8| a.abs_diff(b) < 40;
+        assert!(
+            near(red, warning[0]) && near(green, warning[1]) && near(blue, warning[2]),
+            "{:?}",
+            [red, green, blue]
+        );
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "test coordinates are small positive numbers"
+    )]
+    fn physical(logical: f32) -> usize {
+        (logical * 2.0) as usize
+    }
+
+    fn picture(ui: &mut iced_test::Simulator<'_, Action>) -> crate::testing::Picture {
+        let folder = tempfile::tempdir().unwrap();
+        let theme = presswork_ui::theme::light();
+        let _ = ui.snapshot(&theme).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        ui.snapshot(&theme)
+            .unwrap()
+            .matches_image(folder.path().join("view"))
+            .unwrap();
+        crate::testing::Picture::read(folder.path())
+    }
+
+    #[test]
+    fn resting_on_a_problem_mark_shows_its_text_above_it() {
+        let mut preview = Preview::default();
+        preview.show(&a5_page(), 2.0);
+        preview.set_problem_marks(vec![short_line(0)]);
+        let mut ui = simulator(preview.view(EMPTY.to_owned(), |action| action));
+        let mark = ui
+            .find(iced::widget::Id::from("problem-0-0".to_owned()))
+            .unwrap()
+            .bounds();
+        let before = picture(&mut ui);
+        let moved = iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: mark.center(),
+        });
+
+        ui.point_at(mark.center());
+        let _ = ui.simulate([moved.clone()]);
+        std::thread::sleep(TIP_DELAY + std::time::Duration::from_millis(50));
+        let _ = ui.simulate([moved]);
+        let after = picture(&mut ui);
+
+        let changed = (physical(mark.x)..physical(mark.x + mark.width))
+            .flat_map(|x| (physical(mark.y - 30.0)..physical(mark.y)).map(move |y| (x, y)))
+            .filter(|&(x, y)| before.pixel(x, y) != after.pixel(x, y))
+            .count();
+        assert!(changed > 100, "{changed}");
     }
 }

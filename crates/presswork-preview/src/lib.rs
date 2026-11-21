@@ -1,4 +1,6 @@
 mod page;
 mod preview;
+#[cfg(test)]
+mod testing;
 
-pub use preview::{Action, Arrangement, Preview, Viewport, Zoom};
+pub use preview::{Action, Arrangement, Preview, ProblemMark, Severity, Viewport, Zoom};

@@ -244,6 +244,7 @@ mod tests {
     use iced_test::simulator;
 
     use super::*;
+    use crate::testing::pixel;
 
     #[test]
     fn a_click_gives_the_point_in_the_area() {
@@ -276,21 +277,6 @@ mod tests {
 
         assert!(shows(now, now + Duration::from_millis(100)));
         assert!(!shows(now, now + MARK_TIME));
-    }
-
-    fn pixel(folder: &std::path::Path, x: usize, y: usize) -> [u8; 4] {
-        let file = std::fs::read_dir(folder)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .find(|path| path.extension().is_some_and(|extension| extension == "png"))
-            .unwrap();
-        let decoder =
-            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(file).unwrap()));
-        let mut reader = decoder.read_info().unwrap();
-        let mut bytes = vec![0; reader.output_buffer_size().unwrap()];
-        let info = reader.next_frame(&mut bytes).unwrap();
-        let at = (y * info.width as usize + x) * 4;
-        [bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]
     }
 
     #[test]
