@@ -84,6 +84,10 @@ impl Document {
         Ok(())
     }
 
+    pub fn break_group(&mut self) {
+        self.history.break_group();
+    }
+
     pub fn undo(&mut self) -> Result<Option<ChangeSet>, TextError> {
         let transaction = self
             .history

@@ -39,6 +39,8 @@ pub enum Action {
     Insert(String),
     Newline,
     Delete(Deletion),
+    Accept(Range<Position>),
+    Reject(Range<Position>),
     Undo,
     Redo,
 }

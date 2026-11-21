@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use presswork_text::{
     Assoc, Buffer, ChangeSet, Document, Edit, LineColumn, Position, Query, Search, Selection,
-    SelectionRange, TextError, Transaction, Unit,
+    SelectionRange, Suggestion, SuggestionKind, TextError, Transaction, Unit,
 };
 
 use crate::action::{Action, Deletion, Motion};
@@ -184,6 +184,8 @@ impl Editor {
                 now,
             ),
             Action::Delete(deletion) => self.delete(deletion, now),
+            Action::Accept(range) => self.resolve(&range, true, now),
+            Action::Reject(range) => self.resolve(&range, false, now),
             Action::Undo => {
                 let changes = self.document.undo()?;
                 self.count(changes.as_ref());
@@ -596,6 +598,47 @@ impl Editor {
         self.change(Transaction::new(changes), now)
     }
 
+    fn resolve(
+        &mut self,
+        range: &Range<Position>,
+        accept: bool,
+        now: Instant,
+    ) -> Result<Option<ChangeSet>, TextError> {
+        let chosen = |suggestion: &Suggestion| {
+            if range.start == range.end {
+                suggestion.range.start <= range.start && range.start <= suggestion.range.end
+            } else {
+                suggestion.range.start < range.end && range.start < suggestion.range.end
+            }
+        };
+        let (chosen, kept): (Vec<&Suggestion>, Vec<&Suggestion>) = self
+            .document
+            .suggestions()
+            .iter()
+            .partition(|suggestion| chosen(suggestion));
+        if chosen.is_empty() {
+            return Ok(None);
+        }
+        let removals = chosen
+            .iter()
+            .filter(|suggestion| (suggestion.kind == SuggestionKind::Deletion) == accept)
+            .map(|suggestion| Edit::delete(suggestion.range.clone()));
+        let changes = ChangeSet::new(self.document.buffer().len(), removals)?;
+        let kept: Vec<Suggestion> = kept
+            .iter()
+            .filter_map(|suggestion| suggestion.map(&changes))
+            .collect();
+        self.document.break_group();
+        self.document.apply(
+            Transaction::new(changes.clone()).with_suggestions(kept),
+            now,
+        )?;
+        self.revision += 1;
+        self.map_folds(&changes);
+        self.reveal();
+        Ok(Some(changes))
+    }
+
     fn change(
         &mut self,
         transaction: Transaction,
@@ -901,6 +944,66 @@ mod tests {
 
         assert_eq!(marked(&editor), "The cat|.");
         assert_eq!(suggested(&editor), []);
+    }
+
+    fn replaced_cat() -> Editor {
+        let mut editor = suggesting("The [cat|.");
+        perform(&mut editor, insert("dog"));
+        editor
+    }
+
+    fn everything(editor: &Editor) -> Range<Position> {
+        Position::default()..Position::new(editor.document().buffer().len())
+    }
+
+    #[test]
+    fn accepting_keeps_an_insertion_and_removes_a_deletion() {
+        let mut editor = replaced_cat();
+        let all = everything(&editor);
+
+        perform(&mut editor, Action::Accept(all));
+
+        assert_eq!(editor.document().buffer().to_string(), "The dog.");
+        assert_eq!(suggested(&editor), []);
+    }
+
+    #[test]
+    fn rejecting_removes_an_insertion_and_keeps_a_deletion() {
+        let mut editor = replaced_cat();
+        let all = everything(&editor);
+
+        perform(&mut editor, Action::Reject(all));
+
+        assert_eq!(editor.document().buffer().to_string(), "The cat.");
+        assert_eq!(suggested(&editor), []);
+    }
+
+    #[test]
+    fn a_cursor_in_a_suggestion_accepts_only_that_suggestion() {
+        let mut editor = replaced_cat();
+
+        perform(
+            &mut editor,
+            Action::Accept(Position::new(5)..Position::new(5)),
+        );
+
+        assert_eq!(editor.document().buffer().to_string(), "The dog.");
+        assert_eq!(
+            suggested(&editor),
+            [(SuggestionKind::Insertion, 4..7, "Ann")]
+        );
+    }
+
+    #[test]
+    fn undo_brings_back_an_accepted_suggestion() {
+        let mut editor = replaced_cat();
+        let all = everything(&editor);
+        perform(&mut editor, Action::Accept(all));
+
+        perform(&mut editor, Action::Undo);
+
+        assert_eq!(editor.document().buffer().to_string(), "The catdog.");
+        assert_eq!(suggested(&editor).len(), 2);
     }
 
     #[test]

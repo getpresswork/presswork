@@ -10,9 +10,10 @@ use iced::advanced::{Clipboard, Shell, clipboard, mouse};
 use iced::alignment::Vertical;
 use iced::keyboard::{self, Key, key::Named, key::Physical};
 use iced::{
-    Border, Element, Event, Length, Pixels, Point, Rectangle, Renderer, Size, Theme, Vector, window,
+    Border, Color, Element, Event, Length, Pixels, Point, Rectangle, Renderer, Size, Theme, Vector,
+    window,
 };
-use presswork_text::{Position, Unit};
+use presswork_text::{Position, SuggestionKind, Unit};
 use presswork_ui::color::Colors;
 use presswork_ui::font;
 use presswork_ui::icon::Icon;
@@ -42,6 +43,8 @@ const FOLD_MARK_WIDTH: f32 = 24.0;
 const FOLD_MARK_INSET: f32 = 3.0;
 const MARK_THICKNESS: f32 = 1.5;
 const MARK_OFFSET: f32 = 4.0;
+const SUGGESTION_TINT: f32 = 0.14;
+const STRIKE_HEIGHT: f32 = 0.55;
 const DOT: f32 = 2.0;
 const EMPTY_MARK_WIDTH: f32 = 6.0;
 const TAB: &str = "  ";
@@ -196,6 +199,91 @@ impl<'a, Message> EditorView<'a, Message> {
                         ..Quad::default()
                     },
                     self.colors.editor.find_match,
+                );
+            }
+        }
+    }
+
+    fn shown_suggestions(
+        &self,
+        state: &State,
+        visible: &std::ops::Range<f32>,
+    ) -> impl Iterator<Item = (Color, Vec<Rectangle>, SuggestionKind)> {
+        let mut lines = state.layout.visible(visible.clone()).map(|(_, line)| line);
+        let shown = match lines.next() {
+            Some(first) => {
+                let last = lines.last().unwrap_or(first);
+                first.start..last.start + last.len
+            }
+            None => 0..0,
+        };
+        let colors = self.colors;
+        self.editor
+            .document()
+            .suggestions()
+            .iter()
+            .filter(move |suggestion| {
+                suggestion.range.end.offset() >= shown.start
+                    && suggestion.range.start.offset() <= shown.end
+            })
+            .map(move |suggestion| {
+                let color = match suggestion.kind {
+                    SuggestionKind::Insertion => colors.success,
+                    SuggestionKind::Deletion => colors.danger,
+                };
+                (
+                    color,
+                    state.layout.selection(suggestion.range.clone()),
+                    suggestion.kind,
+                )
+            })
+    }
+
+    fn draw_suggestion_tints(
+        &self,
+        state: &State,
+        renderer: &mut Renderer,
+        offset: Vector,
+        visible: &std::ops::Range<f32>,
+    ) {
+        for (color, rows, _) in self.shown_suggestions(state, visible) {
+            for row in rows {
+                renderer.fill_quad(
+                    Quad {
+                        bounds: row + offset,
+                        ..Quad::default()
+                    },
+                    Color {
+                        a: SUGGESTION_TINT,
+                        ..color
+                    },
+                );
+            }
+        }
+    }
+
+    fn draw_suggestion_lines(
+        &self,
+        state: &State,
+        renderer: &mut Renderer,
+        origin: Point,
+        visible: &std::ops::Range<f32>,
+    ) {
+        for (color, rows, kind) in self.shown_suggestions(state, visible) {
+            for row in rows {
+                let y = match kind {
+                    SuggestionKind::Insertion => row.y + row.height - MARK_OFFSET,
+                    SuggestionKind::Deletion => row.y + row.height * STRIKE_HEIGHT,
+                };
+                renderer.fill_quad(
+                    Quad {
+                        bounds: Rectangle::new(
+                            Point::new(origin.x + row.x, origin.y + y),
+                            Size::new(row.width, MARK_THICKNESS),
+                        ),
+                        ..Quad::default()
+                    },
+                    color,
                 );
             }
         }
@@ -1153,6 +1241,7 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
                 );
             }
             self.draw_matches(state, renderer, offset, &visible);
+            self.draw_suggestion_tints(state, renderer, offset, &visible);
             for range in selection.ranges().iter().filter(|range| !range.is_empty()) {
                 for row in state.layout.selection(range.start()..range.end()) {
                     if row.y + row.height < visible.start || row.y > visible.end {
@@ -1192,6 +1281,9 @@ impl<Message> Widget<Message, Theme, Renderer> for EditorView<'_, Message> {
             }
             self.draw_folds(state, renderer, bounds, &visible);
             self.draw_marks(state, renderer, origin, &visible);
+            renderer.with_layer(bounds, |renderer| {
+                self.draw_suggestion_lines(state, renderer, origin, &visible);
+            });
             if state.focus.is_some_and(|focus| focus.caret_visible()) {
                 for range in selection.ranges() {
                     let caret = state.layout.caret(range.head);
@@ -1789,6 +1881,61 @@ mod tests {
             kind,
         }];
         pixels_with_color(view(&editor, &LIGHT, |action| action).marks(marks), color)
+    }
+
+    fn with_suggestion(delete: bool) -> Editor {
+        let mut editor = Editor::new("        \nmore text");
+        editor.set_suggesting(Some("Ann".to_owned()));
+        let now = std::time::Instant::now();
+        let at = |position: usize, extend: bool| Action::MoveTo {
+            position: Position::new(position),
+            extend,
+            goal: None,
+        };
+        if delete {
+            editor.perform(at(9, false), now).unwrap();
+            editor.perform(at(18, true), now).unwrap();
+            editor
+                .perform(Action::Delete(crate::action::Deletion::Backward), now)
+                .unwrap();
+        } else {
+            editor.perform(at(18, false), now).unwrap();
+            editor
+                .perform(Action::Insert(" and more".to_owned()), now)
+                .unwrap();
+        }
+        editor
+    }
+
+    #[test]
+    fn a_suggested_deletion_has_a_line_through_it_in_the_danger_color() {
+        load_fonts();
+        let danger = LIGHT.danger;
+        let plain = Editor::new("        \nmore text");
+
+        let struck = pixels_with_color(
+            view(&with_suggestion(true), &LIGHT, |action| action),
+            danger,
+        );
+
+        assert!(struck > 0, "{struck}");
+        assert_eq!(
+            pixels_with_color(view(&plain, &LIGHT, |action| action), danger),
+            0
+        );
+    }
+
+    #[test]
+    fn a_suggested_insertion_has_a_line_below_it_in_the_success_color() {
+        load_fonts();
+        let success = LIGHT.success;
+
+        let underlined = pixels_with_color(
+            view(&with_suggestion(false), &LIGHT, |action| action),
+            success,
+        );
+
+        assert!(underlined > 0, "{underlined}");
     }
 
     #[test]
