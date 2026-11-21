@@ -1379,3 +1379,18 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The PDF creation date and the time in the report are the same moment.
 - **Reason:** Printers reject files with missing glyphs, a wrong trim size, or RGB colors in a CMYK job. The Typst warning is the only record of a missing font family. A report next to the files goes with them into archives and CI artifacts, and the digests show if a file changed.
 - **Other options:** Color checks for images. Paper names such as `a5` for `page-size`. A check of the page count. Reports in the data folder of the application. A `--report` option of the command-line tool. Reports only on request. A history of reports.
+
+## D185. Details of the typesetting QA report
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - The report finds paragraphs from the paragraph tags of the Typst output, and lines from the vertical position of the text. A change of more than half the text size starts a new line.
+  - A widow is the last line of a paragraph on a new page or at the top of a new column. An orphan is the first line of a paragraph before such a break.
+  - A line is hyphenated when its text ends with a soft hyphen, `-`, or `‐`. More than three hyphenated lines in sequence in one paragraph are one problem, at the first of these lines.
+  - A line is loose when a word space is wider than 150 % of the normal width of the space glyph. This is the largest word space that Typst prefers. The last line of a paragraph is never loose.
+  - A last line with fewer than five characters, without spaces, is short. A paragraph with one line has no short last line.
+  - The limits are constants. The report does not find text outside of the margins.
+  - The Typeset workspace shows the report of each compilation with pages. A click on a problem selects the source of the line in the Write workspace, and the preview marks the place.
+  - `presswork-cli check` lists the problems as warnings. They do not change its exit code, because a typesetter must decide about each break.
+- **Reason:** The tags of the output give paragraphs exactly, and the positions of the text give the lines that the reader sees. Fixed limits from common practice give a useful report now.
+- **Other options:** Limits in the manifest, for example a `[qa]` table. Marks for all problems on the pages of the preview. A failure of `check` on layout problems. Paragraphs from the source text.

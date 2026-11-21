@@ -55,6 +55,17 @@ The typesetting QA report examines the compiled layout. It finds these problems:
 
 The preview marks each problem on its page. The QA panel lists the problems, and each item links to its source. AI assistance can propose small text edits that correct a break.
 
+In milestone 2, the report finds the first five problems (D185):
+
+- The report finds the paragraphs from the tags of the Typst output. Thus headings, table cells, and other text outside of paragraphs do not count. The lines of a paragraph come from the positions of its text.
+- A widow or an orphan is a line alone on a different page or in a different column. A two-line paragraph across a break has both.
+- A line is hyphenated when it ends with a soft hyphen that Typst added, or with a hyphen. More than three hyphenated lines in sequence are one problem.
+- A line is loose when one of its word spaces is wider than 150 % of the normal width of the space. The last line of a paragraph is never loose.
+- A last line is short when it has fewer than five characters, without spaces. Paragraphs with one line do not count.
+- The limits are fixed now. Text outside of the margins needs the margins, and Typst does not give them (D181).
+
+The Typeset workspace shows the report of the last compilation. A click on a problem opens the Write workspace and selects the source of the line. The preview then marks the place. The report needs the built-in Typst engine. `presswork-cli check` also lists these problems, but they do not change its exit code.
+
 ## Baseline grid check
 
 The baseline grid check finds lines of body text that are not on the baseline grid of the page design. The grid comes from the style file of the project.

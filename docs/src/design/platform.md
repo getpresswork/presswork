@@ -21,6 +21,7 @@ In milestone 2, the program has the `build` and `check` commands (D183):
 - `--profile NAME` selects an export profile. To select more profiles, give the option again. Without the option, the command uses all profiles of the manifest. If the manifest has no profiles, the command uses one PDF profile, as the Publish workspace does.
 - `build` compiles the project and writes the files and the build report of each profile. It writes the path of each new file to the standard output, one path on each line.
 - Each command runs preflight for each selected profile. A problem of the document shows one time. A problem of a profile shows with the name of the profile (D184).
+- `check` also lists the problems of the typesetting QA report, for example widows and loose lines. These problems do not change the exit code (D185).
 - `check` compiles the project and runs preflight. It writes no files. The quote checker, the spell checker, and the house style rules come later.
 - Errors, warnings, and preflight problems go to the standard error stream, one on each line, for example `chapters/one.typ:12:5: error: unknown variable: x`. Lines and columns start at 1. Preflight problems are warnings.
 - The exit code is 0 for success and 1 for a failure. `check` fails if the document has errors or preflight problems. `build` fails if the document has errors or if a profile cannot write its files. Preflight problems do not stop `build`.
