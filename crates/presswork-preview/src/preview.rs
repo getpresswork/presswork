@@ -34,6 +34,7 @@ const PROBLEM_RADIUS: f32 = 2.0;
 const PROBLEM_FILL_ALPHA: f32 = 0.12;
 const TIP_WIDTH: f32 = 320.0;
 const TIP_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+const KEEP_TIME: std::time::Duration = std::time::Duration::from_millis(500);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProblemMark {
@@ -88,6 +89,19 @@ pub struct Viewport {
     width: f32,
 }
 
+impl Viewport {
+    #[must_use]
+    pub fn new(top: f32, height: f32, width: f32) -> Self {
+        Self { top, height, width }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Anchor {
+    Top,
+    Row { page: usize, within: f32 },
+}
+
 impl From<scrollable::Viewport> for Viewport {
     fn from(viewport: scrollable::Viewport) -> Self {
         let bounds = viewport.bounds();
@@ -126,9 +140,80 @@ pub struct Preview {
     mark: Option<(PagePoint, Instant)>,
     problem_marks: Vec<ProblemMark>,
     problem_marks_visibility: Visibility,
+    anchor: Option<Anchor>,
+    keep_until: Option<Instant>,
 }
 
 impl Preview {
+    pub fn keep_position(&mut self, now: Instant) {
+        self.keep_until = Some(now + KEEP_TIME);
+    }
+
+    pub fn scrolled<T>(&mut self, viewport: Viewport, now: Instant) -> Task<T> {
+        self.restore_target(viewport, now)
+            .map_or_else(Task::none, scroll_task)
+    }
+
+    fn restore_target(&mut self, viewport: Viewport, now: Instant) -> Option<f32> {
+        let previous = self.viewport.replace(viewport);
+        let kept = self.keep_until.take().is_some_and(|until| now <= until);
+        let resized = previous.is_some_and(|previous| {
+            (previous.width - viewport.width).abs() > 0.5
+                || (previous.height - viewport.height).abs() > 0.5
+        });
+        if (kept || resized)
+            && let Some(anchor) = self.anchor
+            && let Some(target) = self.anchor_top(anchor, viewport.width)
+            && (target - viewport.top).abs() > 0.5
+        {
+            return Some(target);
+        }
+        self.anchor = self.anchor_at(viewport);
+        None
+    }
+
+    fn anchor_at(&self, viewport: Viewport) -> Option<Anchor> {
+        if viewport.top <= 0.5 {
+            return Some(Anchor::Top);
+        }
+        let Frame { scale, .. } = self.frame(viewport.width);
+        let rows = self.rows();
+        let mut top = PADDING;
+        for row in &rows {
+            let height = self.row_height(row) * PX_PER_PT * scale + PAGE_GAP;
+            if viewport.top < top + height {
+                return Some(Anchor::Row {
+                    page: row.start,
+                    within: (viewport.top - top) / height,
+                });
+            }
+            top += height;
+        }
+        rows.last().map(|row| Anchor::Row {
+            page: row.start,
+            within: 1.0,
+        })
+    }
+
+    fn anchor_top(&self, anchor: Anchor, width: f32) -> Option<f32> {
+        let Anchor::Row { page, within } = anchor else {
+            return Some(0.0);
+        };
+        let Frame { scale, .. } = self.frame(width);
+        let rows = self.rows();
+        let row = rows.iter().find(|row| row.contains(&page))?;
+        let height = self.row_height(row) * PX_PER_PT * scale + PAGE_GAP;
+        Some((self.row_top(page, scale)? + within * height).max(0.0))
+    }
+
+    fn scroll_to<T>(&mut self, target: Option<f32>) -> Task<T> {
+        let (Some(top), Some(viewport)) = (target, self.viewport) else {
+            return Task::none();
+        };
+        self.anchor = self.anchor_at(Viewport { top, ..viewport });
+        scroll_task(top)
+    }
+
     pub fn set_problem_marks(&mut self, marks: Vec<ProblemMark>) {
         self.problem_marks = marks;
     }
@@ -297,7 +382,7 @@ impl Preview {
             Zoom::Percent(percent) => percent,
             Zoom::FitWidth => FULL_SIZE,
         };
-        self.zoom = match action {
+        let zoom = match action {
             Action::FitWidth => Zoom::FitWidth,
             Action::ZoomIn => Zoom::Percent(
                 STEPS
@@ -313,7 +398,7 @@ impl Preview {
                     .unwrap_or(STEPS[0]),
             ),
             Action::Scrolled(viewport) => {
-                self.viewport = Some(viewport);
+                let _ = self.restore_target(viewport, Instant::now());
                 return;
             }
             Action::Spreads => {
@@ -321,6 +406,7 @@ impl Preview {
                     Arrangement::Pages => Arrangement::Spreads,
                     Arrangement::Spreads => Arrangement::Pages,
                 };
+                self.keep_position(Instant::now());
                 return;
             }
             Action::Thumbnails => {
@@ -344,33 +430,21 @@ impl Preview {
             | Action::Attach
             | Action::Click(_) => return,
         };
+        if zoom != self.zoom {
+            self.zoom = zoom;
+            self.keep_position(Instant::now());
+        }
     }
 
     pub fn go_to_page<T>(&mut self, page: usize) -> Task<T> {
-        match self.page_target(page) {
-            Some(top) => operation::scroll_to(
-                PAGES,
-                AbsoluteOffset {
-                    x: None,
-                    y: Some(top),
-                },
-            ),
-            None => Task::none(),
-        }
+        let target = self.page_target(page);
+        self.scroll_to(target)
     }
 
     pub fn show_point<T>(&mut self, point: PagePoint, now: Instant) -> Task<T> {
         self.mark = Some((point, now));
-        match self.scroll_target(point) {
-            Some(top) => operation::scroll_to(
-                PAGES,
-                AbsoluteOffset {
-                    x: None,
-                    y: Some(top),
-                },
-            ),
-            None => Task::none(),
-        }
+        let target = self.scroll_target(point);
+        self.scroll_to(target)
     }
 
     fn scroll_target(&self, point: PagePoint) -> Option<f32> {
@@ -653,6 +727,16 @@ fn pixels(value: u32) -> f32 {
 )]
 fn to_f32(value: f64) -> f32 {
     value as f32
+}
+
+fn scroll_task<T>(top: f32) -> Task<T> {
+    operation::scroll_to(
+        PAGES,
+        AbsoluteOffset {
+            x: None,
+            y: Some(top),
+        },
+    )
 }
 
 fn problem_view<'a, Message: 'a>(
@@ -1334,6 +1418,140 @@ mod tests {
     )]
     fn physical(logical: f32) -> usize {
         (logical * 2.0) as usize
+    }
+
+    fn view_at(top: f32, height: f32, width: f32) -> Viewport {
+        Viewport { top, height, width }
+    }
+
+    fn assert_same_place(found: Option<Anchor>, expected: Option<Anchor>) {
+        match (found, expected) {
+            (
+                Some(Anchor::Row { page, within }),
+                Some(Anchor::Row {
+                    page: expected_page,
+                    within: expected_within,
+                }),
+            ) => assert!(
+                page == expected_page && (within - expected_within).abs() < 1e-3,
+                "{found:?} {expected:?}"
+            ),
+            _ => assert_eq!(found, expected),
+        }
+    }
+
+    #[test]
+    fn a_rebuilt_view_of_the_same_size_scrolls_back_to_its_place() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        let now = Instant::now();
+        let _ = preview.restore_target(view_at(1000.0, 600.0, 640.0), now);
+
+        preview.keep_position(now);
+        let target = preview.restore_target(view_at(0.0, 600.0, 640.0), now);
+
+        assert!(
+            target.is_some_and(|top| (top - 1000.0).abs() < 0.5),
+            "{target:?}"
+        );
+    }
+
+    #[test]
+    fn a_view_of_a_new_size_keeps_its_place_on_the_pages() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        let now = Instant::now();
+        let _ = preview.restore_target(view_at(1200.0, 600.0, 640.0), now);
+        let before = preview.anchor;
+
+        let top = preview
+            .restore_target(view_at(1200.0, 600.0, 900.0), now)
+            .unwrap();
+
+        assert!(matches!(before, Some(Anchor::Row { page: 1, .. })));
+        assert_same_place(preview.anchor_at(view_at(top, 600.0, 900.0)), before);
+    }
+
+    #[test]
+    fn a_scroll_in_a_view_of_the_same_size_does_not_move_the_view() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        let now = Instant::now();
+
+        assert_eq!(
+            preview.restore_target(view_at(1000.0, 600.0, 640.0), now),
+            None
+        );
+        assert_eq!(
+            preview.restore_target(view_at(0.0, 600.0, 640.0), now),
+            None
+        );
+    }
+
+    #[test]
+    fn a_kept_place_is_forgotten_after_a_short_time() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        let now = Instant::now();
+        let _ = preview.restore_target(view_at(1000.0, 600.0, 640.0), now);
+
+        preview.keep_position(now);
+
+        assert_eq!(
+            preview.restore_target(view_at(0.0, 600.0, 640.0), now + 2 * KEEP_TIME),
+            None
+        );
+    }
+
+    #[test]
+    fn a_zoom_keeps_the_place_on_the_pages() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        let _ = preview.restore_target(view_at(1200.0, 600.0, 640.0), Instant::now());
+        let before = preview.anchor;
+
+        preview.perform(Action::ZoomIn);
+        let top = preview
+            .restore_target(view_at(1200.0, 600.0, 640.0), Instant::now())
+            .unwrap();
+
+        assert_same_place(preview.anchor_at(view_at(top, 600.0, 640.0)), before);
+    }
+
+    #[test]
+    fn a_view_at_the_top_stays_at_the_top() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        let now = Instant::now();
+        let _ = preview.restore_target(view_at(0.0, 600.0, 640.0), now);
+
+        assert_eq!(
+            preview.restore_target(view_at(0.0, 600.0, 900.0), now),
+            None
+        );
+        assert_eq!(preview.anchor, Some(Anchor::Top));
+    }
+
+    #[test]
+    fn a_shown_point_becomes_the_place_to_keep() {
+        let mut preview = Preview::default();
+        preview.show(&a5_pages(3), 2.0);
+        let now = Instant::now();
+        let _ = preview.restore_target(view_at(0.0, 600.0, 640.0), now);
+
+        let _ = preview.show_point::<Action>(point(2, 50.0, 300.0), now);
+        preview.keep_position(now);
+        let top = preview
+            .restore_target(view_at(0.0, 600.0, 900.0), now)
+            .unwrap();
+
+        assert!(
+            matches!(
+                preview.anchor_at(view_at(top, 600.0, 900.0)),
+                Some(Anchor::Row { page: 2, .. })
+            ),
+            "{top}"
+        );
     }
 
     fn picture(ui: &mut iced_test::Simulator<'_, Action>) -> crate::testing::Picture {
