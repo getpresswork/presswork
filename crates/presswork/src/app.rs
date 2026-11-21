@@ -1492,6 +1492,11 @@ impl App {
                 .pages_analysis
                 .as_ref()
                 .map_or_else(Vec::new, |analysis| analysis.quality(&settings));
+            self.preview.set_baseline_grid(
+                self.pages_analysis
+                    .as_ref()
+                    .and_then(|analysis| analysis.baseline_grid(&settings)),
+            );
             self.shown_problem = None;
             let marks = self.problem_marks(&output);
             self.preview.set_problem_marks(marks);
@@ -3431,6 +3436,24 @@ mod tests {
         open(&mut app, &without);
         app.compile_now();
         assert_eq!(grid_problems(&app), 0);
+    }
+
+    #[test]
+    fn the_preview_gets_the_baseline_grid_of_the_project() {
+        let grid = "[project]\nname = \"The Book\"\n\n[typeset]\nbaseline-grid = \"12pt\"\nbaseline-start = \"30pt\"\n";
+        let folder = project_folder(&[("presswork.toml", grid), ("main.typ", "Text.")]);
+        let mut app = app();
+        open(&mut app, &folder);
+
+        app.compile_now();
+
+        assert_eq!(
+            app.preview.baseline_grid(),
+            Some(presswork_typst::Grid {
+                start: 30.0,
+                step: 12.0
+            })
+        );
     }
 
     fn problem_marks(app: &App) -> Vec<(usize, &str, Severity)> {
