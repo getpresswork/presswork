@@ -210,11 +210,19 @@ The manifest can also have a `[typeset]` table for the typesetting QA report (D1
 | --- | --- | --- |
 | `baseline-grid` | The distance between two lines of the baseline grid, as a number with a unit: `mm`, `cm`, `in`, or `pt`. For example `"13pt"`. The value must be larger than 0. | No grid and no grid check |
 | `baseline-start` | The distance of the first grid line from the top of the page. | The baseline of the first line of body text in the document |
+| `widows` | `true` finds widows, `false` does not. | `true` |
+| `orphans` | `true` finds orphans, `false` does not. | `true` |
+| `stacked-hyphens` | The largest number of hyphenated lines in sequence that the report accepts. | `3` |
+| `short-last-line` | The smallest number of characters, without spaces, that the last line of a paragraph must have. `0` accepts all last lines. | `5` |
+| `loose-spacing` | The widest word space that the report accepts, in percent of the normal width of the space. The value must be 100 or more. | `150` |
 
 ```toml
 [typeset]
 baseline-grid = "13pt"
 baseline-start = "30mm"
+widows = false
+stacked-hyphens = 2
+loose-spacing = 180
 ```
 
 ### Export

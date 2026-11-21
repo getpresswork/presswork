@@ -1382,7 +1382,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D185. Details of the typesetting QA report
 
-- **Status:** Accepted, 2026-11-20. D191 adds marks on the pages of the preview. D192 changes the click on a problem. D195 adds lines off the baseline grid. **Origin:** Default.
+- **Status:** Accepted, 2026-11-20. D191 adds marks on the pages of the preview. D192 changes the click on a problem. D195 adds lines off the baseline grid. D196 moves the limits into the manifest. **Origin:** Default.
 - **Decision:**
   - The report finds paragraphs from the paragraph tags of the Typst output, and lines from the vertical position of the text. A change of more than half the text size starts a new line.
   - A widow is the last line of a paragraph on a new page or at the top of a new column. An orphan is the first line of a paragraph before such a break.
@@ -1507,3 +1507,14 @@ Do not change what an accepted decision says. You can correct its language. To c
   - With the guides on, the preview draws each grid line as a line of one pixel in the guide color at 45 % opacity, across the trim box. If two grid lines are closer than two pixels, the preview draws no grid lines.
 - **Reason:** Exact lengths in points keep a long page on the grid without errors from rounding. A tolerance of 0.1 pt is smaller than the reader can see. A thin line in the guide color agrees with the trim line.
 - **Other options:** Lengths in micrometers, as for page sizes. A tolerance in the manifest. Grid lines above the first grid line. A grid for each page or for each column.
+
+## D196. The limits of the QA report in the manifest
+
+- **Status:** Accepted, 2026-11-21. **Origin:** Default.
+- **Decision:**
+  - The `[typeset]` table of `presswork.toml` has the limits of the typesetting QA report. The names of the keys agree with the names of the problems: `widows`, `orphans`, `stacked-hyphens`, `short-last-line`, and `loose-spacing`.
+  - The defaults are the fixed limits of D185: widows and orphans on, three hyphenated lines in sequence, five characters in a last line, and 150 % for word spaces. A table without a key uses the default of that key.
+  - `widows = false` and `orphans = false` switch off these problems. `short-last-line = 0` accepts all last lines. `loose-spacing` must be 100 or more, because a smaller value finds lines with normal word spaces.
+  - `presswork-cli check` and the Typeset workspace use the same limits.
+- **Reason:** Each house and each book has its own rules for breaks. The limits belong to the project, as the baseline grid does (D194).
+- **Other options:** A separate `[qa]` table. Limits for each language. Limits in the settings of the user. Percent values as text, for example `"150%"`.

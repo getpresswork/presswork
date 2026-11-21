@@ -59,10 +59,10 @@ In milestone 2, the report finds the first five problems (D185):
 
 - The report finds the paragraphs from the tags of the Typst output. Thus headings, table cells, and other text outside of paragraphs do not count. The lines of a paragraph come from the positions of its text.
 - A widow or an orphan is a line alone on a different page or in a different column. A two-line paragraph across a break has both.
-- A line is hyphenated when it ends with a soft hyphen that Typst added, or with a hyphen. More than three hyphenated lines in sequence are one problem.
-- A line is loose when one of its word spaces is wider than 150 % of the normal width of the space. The last line of a paragraph is never loose.
-- A last line is short when it has fewer than five characters, without spaces. Paragraphs with one line do not count.
-- The limits are fixed now. Text outside of the margins needs the margins, and Typst does not give them (D181).
+- A line is hyphenated when it ends with a soft hyphen that Typst added, or with a hyphen. By default, more than three hyphenated lines in sequence are one problem.
+- A line is loose when one of its word spaces is wider than the limit, by default 150 % of the normal width of the space. The last line of a paragraph is never loose.
+- A last line is short when it has fewer characters than the limit, by default five characters, without spaces. Paragraphs with one line do not count.
+- The `[typeset]` table of the manifest can change the limits and can switch off widows and orphans (D196). Refer to [Interface](interface.md) for the keys. Text outside of the margins needs the margins, and Typst does not give them (D181).
 
 The Typeset workspace shows the report of the last compilation in a panel at the left, and the preview at the right (D192). Each problem gives its page. A click on a problem scrolls the preview to the problem and marks its place. The pen button at the right of a problem opens the Write workspace and selects the source of the line. The preview puts a box in the warning color around each problem on its page, and the tooltip of the box tells the problem (D191). The report needs the built-in Typst engine. `presswork-cli check` also lists these problems, but they do not change its exit code.
 
