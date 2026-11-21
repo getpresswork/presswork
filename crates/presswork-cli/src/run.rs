@@ -3,12 +3,14 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use presswork_language::{Dictionaries, Dictionary, WordList};
-use presswork_project::{Colors, ExportProfile, Manifest, Project, ProjectError, WORD_LIST};
+use presswork_language::{Dictionaries, Dictionary, HouseStyle, RuleProblem, StyleError, WordList};
+use presswork_project::{
+    Colors, ExportProfile, HOUSE_STYLE, Manifest, Project, ProjectError, WORD_LIST,
+};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
     Analysis, Diagnostic, Fonts, Misspelling, Output, Problem, ProblemKind, ProfileError, Rules,
-    Severity, SourceRange, World, analyze, today,
+    Severity, SourceRange, StyleProblem, World, analyze, today,
 };
 
 use crate::cli::{Cli, Command, Target};
@@ -89,7 +91,11 @@ fn work(target: &Target, build: bool, console: &mut Console<'_>) -> Result<(), F
             .analysis
             .as_ref()
             .is_some_and(|analysis| check_spelling(target, &project, analysis, &places, console));
-        return if problems.is_empty() && !misspelled {
+        let styled = output
+            .analysis
+            .as_ref()
+            .is_some_and(|analysis| check_style(&project, analysis, &places, console));
+        return if problems.is_empty() && !misspelled && !styled {
             Ok(())
         } else {
             Err(Failed)
@@ -137,6 +143,29 @@ fn check_spelling(
         found = true;
     }
     found
+}
+
+fn check_style(
+    project: &Project,
+    analysis: &Analysis,
+    places: &Places<'_>,
+    console: &mut Console<'_>,
+) -> bool {
+    let Ok(text) = fs::read_to_string(project.root().join(HOUSE_STYLE)) else {
+        return false;
+    };
+    let style = match HouseStyle::parse(&text) {
+        Ok(style) => style,
+        Err(error) => {
+            console.style_error(&error);
+            return true;
+        }
+    };
+    let problems = analysis.style(&style);
+    for problem in &problems {
+        console.style_problem(places, &style, problem);
+    }
+    !problems.is_empty()
 }
 
 fn default_dictionaries() -> Option<PathBuf> {
@@ -371,6 +400,47 @@ impl Console<'_> {
         let message = self.localizer.format("problem-spelling", &args);
         let place = places.location(&misspelling.source);
         self.report(Some(place), Severity::Warning, &message);
+    }
+
+    fn style_problem(&mut self, places: &Places<'_>, style: &HouseStyle, problem: &StyleProblem) {
+        let mut args = FluentArgs::new();
+        args.set("text", problem.text.clone());
+        let mut message = style.message(problem.rule).map_or_else(
+            || self.localizer.format("problem-style", &args),
+            str::to_owned,
+        );
+        if let Some(replacement) = &problem.replacement {
+            let mut args = FluentArgs::new();
+            args.set("message", message);
+            args.set("replacement", replacement.clone());
+            message = self.localizer.format("problem-style-replacement", &args);
+        }
+        let place = places.location(&problem.source);
+        self.report(Some(place), Severity::Warning, &message);
+    }
+
+    fn style_error(&mut self, error: &StyleError) {
+        let mut args = FluentArgs::new();
+        args.set("file", HOUSE_STYLE);
+        let id = match error {
+            StyleError::File(problem) => {
+                args.set("problem", problem.clone());
+                "style-error-file"
+            }
+            StyleError::Rule { rule, problem } => {
+                args.set("rule", *rule);
+                match problem {
+                    RuleProblem::Missing => "style-error-missing",
+                    RuleProblem::Both => "style-error-both",
+                    RuleProblem::Empty => "style-error-empty",
+                    RuleProblem::Pattern(problem) => {
+                        args.set("problem", problem.clone());
+                        "style-error-pattern"
+                    }
+                }
+            }
+        };
+        self.fail(id, &args);
     }
 
     fn missing_dictionary(&mut self, language: &str) {
@@ -780,6 +850,54 @@ mod tests {
             (
                 SUCCESS,
                 "warning: Presswork has no dictionary for de, so it did not check the spelling of this text.\n"
+            )
+        );
+    }
+
+    const STYLE: &str = "[[rule]]\ntext = \"organise\"\nreplacement = \"organize\"\n\n\
+                         [[rule]]\npattern = '(\\d+)-(\\d+)'\nreplacement = '$1–$2'\n\
+                         message = \"Use an en dash between two numbers.\"\n\n\
+                         [[rule]]\ntext = \"utilize\"\n";
+
+    #[test]
+    fn a_check_finds_house_style_problems() {
+        let folder = project(&[
+            ("presswork.toml", MANIFEST),
+            ("main.typ", "We organise pages 12-19.\nWe utilize them."),
+            ("presswork-style.toml", STYLE),
+        ]);
+
+        let ran = presswork(&["check", &argument(&folder)]);
+
+        let main = place(&folder, "main.typ");
+        assert_eq!(
+            (ran.code, ran.err),
+            (
+                FAILURE,
+                format!(
+                    "{main}:1:4: warning: The house style does not permit “organise”. Use “organize”.\n\
+                     {main}:1:19: warning: Use an en dash between two numbers. Use “12–19”.\n\
+                     {main}:2:4: warning: The house style does not permit “utilize”.\n"
+                )
+            )
+        );
+    }
+
+    #[test]
+    fn a_house_style_file_that_is_not_valid_fails_the_check() {
+        let folder = project(&[
+            ("presswork.toml", MANIFEST),
+            ("main.typ", "Hello."),
+            ("presswork-style.toml", "[[rule]]\nmessage = \"No text.\"\n"),
+        ]);
+
+        let ran = presswork(&["check", &argument(&folder)]);
+
+        assert_eq!(
+            (ran.code, ran.err.as_str()),
+            (
+                FAILURE,
+                "error: Rule 1 in presswork-style.toml has no text and no pattern.\n"
             )
         );
     }

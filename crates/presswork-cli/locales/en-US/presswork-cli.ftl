@@ -31,6 +31,13 @@ problem-short-line = The last line of a paragraph has only { $characters ->
 problem-loose-line = The word spaces in this line are { $spacing }% of their normal width.
 problem-spelling = The word “{ $word }” is not in the dictionary for { $language }.
 spelling-missing = Presswork has no dictionary for { $language }, so it did not check the spelling of this text.
+problem-style = The house style does not permit “{ $text }”.
+problem-style-replacement = { $message } Use “{ $replacement }”.
+style-error-file = The house style file { $file } is not valid: { $problem }
+style-error-missing = Rule { $rule } in { $file } has no text and no pattern.
+style-error-both = Rule { $rule } in { $file } has a text and a pattern. Use only one of them.
+style-error-empty = Rule { $rule } in { $file } has an empty text or pattern.
+style-error-pattern = The pattern of rule { $rule } in { $file } is not valid: { $problem }.
 colors-cmyk = CMYK, gray, and spot colors
 colors-gray = gray colors
 
