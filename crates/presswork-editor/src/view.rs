@@ -42,6 +42,7 @@ const FOLD_MARK_WIDTH: f32 = 24.0;
 const FOLD_MARK_INSET: f32 = 3.0;
 const MARK_THICKNESS: f32 = 1.5;
 const MARK_OFFSET: f32 = 4.0;
+const DOT: f32 = 2.0;
 const EMPTY_MARK_WIDTH: f32 = 6.0;
 const TAB: &str = "  ";
 const HOVER_DELAY: Duration = Duration::from_millis(500);
@@ -76,6 +77,7 @@ pub enum MarkKind {
     Error,
     Warning,
     Match,
+    Spelling,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,7 +209,7 @@ impl<'a, Message> EditorView<'a, Message> {
     ) {
         for mark in self.shown_marks(state, visible) {
             let color = match mark.kind {
-                MarkKind::Error => self.colors.editor.error,
+                MarkKind::Error | MarkKind::Spelling => self.colors.editor.error,
                 MarkKind::Warning => self.colors.warning,
                 MarkKind::Match => continue,
             };
@@ -224,19 +226,26 @@ impl<'a, Message> EditorView<'a, Message> {
                 if row.y + row.height < visible.start || row.y > visible.end {
                     continue;
                 }
-                renderer.fill_quad(
-                    Quad {
-                        bounds: Rectangle::new(
-                            Point::new(
-                                origin.x + row.x,
-                                origin.y + row.y + row.height - MARK_OFFSET,
+                let y = origin.y + row.y + row.height - MARK_OFFSET;
+                let (dash, step) = if mark.kind == MarkKind::Spelling {
+                    (DOT, DOT * 2.0)
+                } else {
+                    (row.width, row.width.max(1.0))
+                };
+                let mut x = 0.0;
+                while x < row.width {
+                    renderer.fill_quad(
+                        Quad {
+                            bounds: Rectangle::new(
+                                Point::new(origin.x + row.x + x, y),
+                                Size::new(dash.min(row.width - x), MARK_THICKNESS),
                             ),
-                            Size::new(row.width, MARK_THICKNESS),
-                        ),
-                        ..Quad::default()
-                    },
-                    color,
-                );
+                            ..Quad::default()
+                        },
+                        color,
+                    );
+                    x += step;
+                }
             }
         }
     }
@@ -1692,6 +1701,31 @@ mod tests {
         let wanted = color.into_rgba8();
         let (pixels, _) = bytes.as_chunks::<4>();
         pixels.iter().filter(|pixel| **pixel == wanted).count()
+    }
+
+    #[test]
+    fn a_spelling_mark_is_a_dotted_line_in_the_error_color() {
+        load_fonts();
+        let editor = Editor::new("        \nmore text");
+        let mark = |kind| {
+            vec![Mark {
+                range: Position::new(9)..Position::new(18),
+                kind,
+            }]
+        };
+        let error = LIGHT.editor.error;
+
+        let solid = pixels_with_color(
+            view(&editor, &LIGHT, |action| action).marks(mark(MarkKind::Error)),
+            error,
+        );
+        let dotted = pixels_with_color(
+            view(&editor, &LIGHT, |action| action).marks(mark(MarkKind::Spelling)),
+            error,
+        );
+
+        assert!(dotted > 0, "{dotted}");
+        assert!(dotted * 3 < solid * 2, "{dotted} of {solid}");
     }
 
     fn found(start: usize, end: usize) -> Vec<Mark> {
