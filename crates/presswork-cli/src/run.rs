@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use presswork_project::{Colors, ExportProfile, Manifest, Project, ProjectError};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
-    Diagnostic, Fonts, Output, Problem, ProblemKind, ProfileError, Rules, Severity, SourceRange,
-    World, analyze, today,
+    Analysis, Diagnostic, Fonts, Output, Problem, ProblemKind, ProfileError, Rules, Severity,
+    SourceRange, World, analyze, today,
 };
 
 use crate::cli::{Cli, Command, Target};
@@ -77,6 +77,13 @@ fn work(target: &Target, build: bool, console: &mut Console<'_>) -> Result<(), F
         console.problem(&places, problem, &profile.name);
     }
     if !build {
+        let layout = output
+            .analysis
+            .as_ref()
+            .map_or_else(Vec::new, Analysis::quality);
+        for problem in &layout {
+            console.problem(&places, problem, "");
+        }
         return if problems.is_empty() {
             Ok(())
         } else {
@@ -614,6 +621,27 @@ mod tests {
         );
         assert_eq!(ran.code, FAILURE);
         assert_eq!(ran.err.matches(&problem).count(), 1, "{}", ran.err);
+    }
+
+    #[test]
+    fn a_check_lists_layout_problems_but_does_not_fail_on_them() {
+        let folder = project(&[
+            ("presswork.toml", MANIFEST),
+            ("main.typ", "A line of text \\ it."),
+        ]);
+
+        let ran = presswork(&["check", &argument(&folder)]);
+
+        assert_eq!(
+            (ran.code, ran.err),
+            (
+                SUCCESS,
+                format!(
+                    "{}:1:18: warning: Page 1: The last line of a paragraph has only 3 characters.\n",
+                    place(&folder, "main.typ")
+                )
+            )
+        );
     }
 
     #[test]
