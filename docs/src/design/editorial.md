@@ -32,8 +32,9 @@ In milestone 2, the spell checker does these things (D186, D187, D188):
 - The editor shows each misspelled word in the main file with a dotted line in the error color. The check runs on a separate thread after each compilation.
 - A tooltip on a misspelled word tells the problem. Ctrl+. on the word shows the suggestions of the dictionary (D189).
 - The file `presswork-words.txt` in the project folder is the word list of the team. It has one word on each line. Lines that start with `#` are comments. A word in small letters also permits the same word with capitals, for example `typst` permits "Typst". The editor reads the list again before each check.
+- To add a misspelled word to the word list, push Ctrl+. on the word and select the last item of the list (D190). The editor adds the word on a new line at the end of the file. If there is no file, the editor makes it. The editor removes the dotted lines of the word immediately.
 - `presswork-cli check` lists the misspelled words, and they make the check fail. If the document has text in a language without a dictionary, the command names the language one time. Without any dictionary, the command does not check the spelling.
-- Personal dictionaries and the command to add a word to the list come later.
+- Personal dictionaries come later.
 
 ## House style
 

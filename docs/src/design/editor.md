@@ -101,9 +101,10 @@ Tooltips and completions use the text in the editor, also if it changed after th
 
 ### Corrections
 
-Push Ctrl+. on a word with a dotted line to show the corrections in the completion list (D189):
+Push Ctrl+. on a word with a dotted line to show the corrections in the completion list (D189, D190):
 
 - For a misspelled word, the list shows the suggestions of the dictionary.
+- In a project, the last item for a misspelled word is "Add “word” to the word list". It adds the word to `presswork-words.txt` and does not change the text (D190). If Presswork cannot write the file, the notice bar tells the problem.
 - For a house style problem, the list shows the replacement of the rule.
 - Enter or Tab replaces all of the marked text with the selected item. If you type or move the cursor, the list closes.
 - If there are no corrections, a tooltip tells you.

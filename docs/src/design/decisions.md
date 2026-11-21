@@ -1411,7 +1411,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D188. Details of the spell checker
 
-- **Status:** Accepted, 2026-11-20. D189 adds the suggestions in the editor. **Origin:** Default.
+- **Status:** Accepted, 2026-11-20. D189 adds the suggestions in the editor. D190 adds the command that adds a word to the word list. **Origin:** Default.
 - **Decision:**
   - The list has 14 dictionaries from commit `c0865a85` (2026-11-06): en-US, en-GB, de-DE, de-AT, de-CH, fr-FR, es-ES, it-IT, nl-NL, pt-BR, pt-PT, pl-PL, ru-RU, and da-DK. Swedish is not in the list, because its folder has no spelling files.
   - The order of the list selects the dictionary for a language without a region: `en` uses en-US, `de` uses de-DE, and `pt` uses pt-BR.
@@ -1437,3 +1437,16 @@ Do not change what an accepted decision says. You can correct its language. To c
   - In `presswork-cli check`, house style problems make the check fail. A house style file that is not valid is an error.
 - **Reason:** A TOML file in the project folder goes into the version control of the team, as the manifest and the word list do. Whole words, and small letters for both cases, give the expected result for most rules without regular expressions. A check after each compilation shows a changed rule without a new start of the project.
 - **Other options:** Rules in `presswork.toml`. The Vale rule format. Regular expressions with look-ahead through `fancy-regex`. Problems as warnings that do not make `check` fail. Rules for each language. Rules from the termbase. A command that applies all replacements. Corrections as suggestions in suggestion mode.
+
+## D190. Add a word to the word list
+
+- **Status:** Accepted, 2026-11-21. **Origin:** Default.
+- **Decision:**
+  - For a misspelled word in a project, the corrections list (D189) has one more item at the end: "Add “word” to the word list". The suggestions of the dictionary stay first, thus Enter still selects the first suggestion. For a word without suggestions, the list has only this item.
+  - The item adds the word as it is in the text to `presswork-words.txt` (D188). A word with a capital letter, for example at the start of a sentence, then permits only the same letters. To permit all forms, change the word in the file to small letters.
+  - The editor adds the word on a new line at the end of the file, with the line ending that the file uses. It does not change the order of the list or other lines. If there is no file, the editor makes it.
+  - The editor removes the dotted lines of the word immediately, before the next check.
+  - A document from the server has no project folder, thus its list has no such item.
+  - If Presswork cannot write the file, the notice bar tells the problem.
+- **Reason:** The word list is a file in the project folder (D188). Thus an added word goes into the version control of the team, and `presswork-cli check` also permits it. A new line at the end keeps the order and the comments of the team.
+- **Other options:** A personal dictionary for each user. The word in small letters. A sorted list. A separate shortcut or a context menu. A command that permits the word only until Presswork closes.
