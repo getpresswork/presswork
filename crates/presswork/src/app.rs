@@ -87,7 +87,7 @@ pub(crate) struct App {
     tooltip: Option<presswork_editor::Tooltip>,
     completions: Option<presswork_editor::CompletionList>,
     explicit_completion: bool,
-    word_to_add: Option<String>,
+    word_to_add: Option<(String, Vec<WordTarget>)>,
     project: Option<Project>,
     saved: u64,
     notice: Option<String>,
@@ -101,6 +101,12 @@ pub(crate) struct App {
     chat: ChatPanel,
     tasks: Option<TaskList>,
     library: Option<LibraryView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WordTarget {
+    Project,
+    Personal,
 }
 
 #[derive(Debug, Clone)]
@@ -172,7 +178,10 @@ pub(crate) enum Message {
 
 impl App {
     pub(crate) fn new(store: LogStore) -> Self {
-        Self::with_toolchains(store, toolchain_directory())
+        let mut app = Self::with_toolchains(store, toolchain_directory());
+        app.proofreader
+            .set_personal_list(proofreading::personal_word_list());
+        app
     }
 
     pub(crate) fn with_toolchains(store: LogStore, toolchains: Option<PathBuf>) -> Self {
@@ -988,7 +997,6 @@ impl App {
         if revision != self.editor.revision() {
             return;
         }
-        let word = word.filter(|_| self.project.is_some());
         let mut items: Vec<CompletionItem> = suggestions
             .into_iter()
             .map(|text| CompletionItem {
@@ -998,21 +1006,43 @@ impl App {
                 text,
             })
             .collect();
+        let mut targets = Vec::new();
+        if word.is_some() {
+            if self.project.is_some() {
+                targets.push(WordTarget::Project);
+            }
+            if self.proofreader.has_personal_list() {
+                targets.push(WordTarget::Personal);
+            }
+        }
         if let Some(word) = &word {
             let mut args = FluentArgs::new();
             args.set("word", word.clone());
-            items.push(CompletionItem {
-                label: self.localizer.format("proofreading-add-word", &args),
-                detail: Some(self.localizer.text("proofreading-add-word-detail")),
-                text: String::new(),
-                select: 0..0,
-            });
+            for target in &targets {
+                let (label, detail) = match target {
+                    WordTarget::Project => {
+                        ("proofreading-add-word", "proofreading-add-word-detail")
+                    }
+                    WordTarget::Personal => (
+                        "proofreading-add-personal",
+                        "proofreading-add-personal-detail",
+                    ),
+                };
+                items.push(CompletionItem {
+                    label: self.localizer.format(label, &args),
+                    detail: Some(self.localizer.text(detail)),
+                    text: String::new(),
+                    select: 0..0,
+                });
+            }
         }
         if items.is_empty() {
             self.show_no_corrections();
             return;
         }
-        self.word_to_add = word;
+        self.word_to_add = word
+            .filter(|_| !targets.is_empty())
+            .map(|word| (word, targets));
         self.completions = Some(CompletionList {
             from: Position::new(range.start),
             to: Some(Position::new(range.end)),
@@ -1022,15 +1052,27 @@ impl App {
         self.explicit_completion = false;
     }
 
-    fn add_to_word_list(&mut self, word: &str) {
-        let Some(project) = &self.project else {
-            return;
+    fn add_to_word_list(&mut self, word: &str, target: WordTarget) {
+        let (result, error_id) = match target {
+            WordTarget::Project => {
+                let Some(project) = &self.project else {
+                    return;
+                };
+                (
+                    self.proofreader.add_word(project.root(), word),
+                    "proofreading-add-word-error",
+                )
+            }
+            WordTarget::Personal => (
+                self.proofreader.add_personal_word(word),
+                "proofreading-add-personal-error",
+            ),
         };
-        if let Err(error) = self.proofreader.add_word(project.root(), word) {
-            tracing::warn!(%error, "The word list was not written");
+        if let Err(error) = result {
+            tracing::warn!(%error, ?target, "The word list was not written");
             let mut args = FluentArgs::new();
             args.set("error", error.to_string());
-            self.notice = Some(self.localizer.format("proofreading-add-word-error", &args));
+            self.notice = Some(self.localizer.format(error_id, &args));
         }
     }
 
@@ -1046,11 +1088,13 @@ impl App {
         let Some(list) = self.completions.take() else {
             return Task::none();
         };
-        if let Some(word) = self.word_to_add.take()
+        if let Some((word, targets)) = self.word_to_add.take()
             && list.to.is_some()
-            && index + 1 == list.items.len()
+            && let Some(&target) = index
+                .checked_sub(list.items.len().saturating_sub(targets.len()))
+                .and_then(|at| targets.get(at))
         {
-            self.add_to_word_list(&word);
+            self.add_to_word_list(&word, target);
             return Task::none();
         }
         match list.apply(index, self.cursor()) {
@@ -1573,6 +1617,7 @@ impl App {
     }
 
     fn read_project_files(&mut self) {
+        self.proofreader.read_personal();
         let Some(project) = &self.project else {
             return;
         };
@@ -1604,6 +1649,11 @@ impl App {
 
     pub(crate) fn load_dictionaries(&self) -> Task<Message> {
         proofreading::load_task(self.toolchains.dictionary_root()).map(Message::Proofreading)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_personal_list(&mut self, path: PathBuf) {
+        self.proofreader.set_personal_list(Some(path));
     }
 
     #[cfg(test)]
@@ -3275,6 +3325,57 @@ mod tests {
         assert_eq!(app.editor.document().buffer().to_string(), STYLE_BOOK);
         assert_eq!(spelling_marks(&app), []);
         assert_eq!(app.completions, None);
+    }
+
+    const PERSONAL: &str = "personal-words.txt";
+
+    fn personal_list(app: &mut App) -> tempfile::TempDir {
+        let folder = tempfile::tempdir().unwrap();
+        app.proofreader
+            .set_personal_list(Some(folder.path().join(PERSONAL)));
+        folder
+    }
+
+    #[test]
+    fn with_a_project_the_corrections_offer_both_word_lists() {
+        let (mut app, folder) = proofread_spelling_book();
+        let personal = personal_list(&mut app);
+        let found = misspelling_found(&app, &["mat"]);
+        send(&mut app, found);
+        assert_eq!(
+            labels(&app),
+            [
+                "mat",
+                "Add “mta” to the word list",
+                "Add “mta” to the personal dictionary"
+            ]
+        );
+
+        send(&mut app, Message::Complete(CompletionEvent::Choose(2)));
+
+        assert_eq!(
+            fs::read_to_string(personal.path().join(PERSONAL)).unwrap(),
+            "mta\n"
+        );
+        assert!(!folder.path().join("presswork-words.txt").exists());
+        assert_eq!(spelling_marks(&app), []);
+    }
+
+    #[test]
+    fn without_a_project_the_corrections_offer_the_personal_dictionary() {
+        let mut app = compiled_app(STYLE_BOOK);
+        let _personal = personal_list(&mut app);
+        send(&mut app, english_dictionary());
+        app.proofread_now();
+        send(&mut app, move_to(20));
+        let found = misspelling_found(&app, &["mat"]);
+
+        send(&mut app, found);
+
+        assert_eq!(
+            labels(&app),
+            ["mat", "Add “mta” to the personal dictionary"]
+        );
     }
 
     #[test]

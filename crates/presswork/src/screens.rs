@@ -318,6 +318,8 @@ fn render_house_style(app: &mut App) {
     render(app, "house-style");
 
     send(app, Message::Hover(None));
+    let personal = tempfile::tempdir().unwrap();
+    app.set_personal_list(personal.path().join("personal-words.txt"));
     let papr = STYLED_NOTES.find("papr").unwrap();
     send(
         app,

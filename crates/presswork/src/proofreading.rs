@@ -1,6 +1,6 @@
 use std::fs;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures::channel::oneshot;
@@ -14,6 +14,8 @@ use presswork_typst::{Analysis, Misspelling, SourceRange, Spelling, StyleProblem
 use crate::chrome::shortcut;
 use crate::i18n::{FluentArgs, Localizer};
 use crate::toolchain_panel::sentence;
+
+const PERSONAL_WORDS: &str = "personal-words.txt";
 
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
@@ -59,9 +61,44 @@ pub(crate) struct Proofreader {
     checked: Option<(u64, Arc<Findings>)>,
     running: bool,
     queued: Option<(Analysis, u64)>,
+    personal_path: Option<PathBuf>,
+    personal: WordList,
+    personal_text: String,
 }
 
 impl Proofreader {
+    pub(crate) fn set_personal_list(&mut self, path: Option<PathBuf>) {
+        self.personal_path = path;
+    }
+
+    pub(crate) fn has_personal_list(&self) -> bool {
+        self.personal_path.is_some()
+    }
+
+    pub(crate) fn read_personal(&mut self) {
+        let Some(path) = &self.personal_path else {
+            return;
+        };
+        let text = fs::read_to_string(path).unwrap_or_default();
+        if text != self.personal_text {
+            self.personal = WordList::parse(&text);
+            self.personal_text = text;
+        }
+    }
+
+    pub(crate) fn add_personal_word(&mut self, word: &str) -> std::io::Result<()> {
+        let path = self.personal_path.clone().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "no personal dictionary")
+        })?;
+        if let Some(folder) = path.parent() {
+            fs::create_dir_all(folder)?;
+        }
+        let text = append_word(&path, word)?;
+        self.personal = WordList::parse(&text);
+        self.personal_text = text;
+        Ok(())
+    }
+
     pub(crate) fn read_project(&mut self, root: &Path) -> Option<StyleError> {
         let words = fs::read_to_string(root.join(WORD_LIST)).unwrap_or_default();
         if words != self.words_text {
@@ -88,19 +125,7 @@ impl Proofreader {
     }
 
     pub(crate) fn add_word(&mut self, root: &Path, word: &str) -> std::io::Result<()> {
-        let path = root.join(WORD_LIST);
-        let mut text = match fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-            Err(error) => return Err(error),
-        };
-        let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
-        if !text.is_empty() && !text.ends_with('\n') {
-            text.push_str(newline);
-        }
-        text.push_str(word);
-        text.push_str(newline);
-        fs::write(&path, &text)?;
+        let text = append_word(&root.join(WORD_LIST), word)?;
         self.words = WordList::parse(&text);
         self.words_text = text;
         Ok(())
@@ -211,7 +236,10 @@ impl Proofreader {
         let misspellings = findings
             .into_iter()
             .flat_map(|findings| &findings.spelling.misspellings)
-            .filter(|misspelling| !self.words.contains(&misspelling.word))
+            .filter(|misspelling| {
+                !self.words.contains(&misspelling.word)
+                    && !self.personal.contains(&misspelling.word)
+            })
             .filter_map(|misspelling| {
                 Some((
                     main_range(&misspelling.source)?,
@@ -233,6 +261,27 @@ impl Proofreader {
             findings: Arc::new(findings),
         });
     }
+}
+
+pub(crate) fn personal_word_list() -> Option<PathBuf> {
+    directories::ProjectDirs::from("io.github", "getpresswork", "Presswork")
+        .map(|directories| directories.data_dir().join(PERSONAL_WORDS))
+}
+
+fn append_word(path: &Path, word: &str) -> std::io::Result<String> {
+    let mut text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error),
+    };
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push_str(newline);
+    }
+    text.push_str(word);
+    text.push_str(newline);
+    fs::write(path, &text)?;
+    Ok(text)
 }
 
 pub(crate) async fn suggestions(
@@ -482,6 +531,41 @@ mod tests {
         assert!(found("en").contains(&"mat".to_owned()), "{:?}", found("en"));
         assert!(found("en-US").contains(&"mat".to_owned()));
         assert_eq!(found("de"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_word_of_the_personal_list_has_no_mark() {
+        let folder = project(&[("personal-words.txt", "# Mine\nmta\n")]);
+        let mut proofreader = proofreader(&folder, english());
+        proofreader.set_personal_list(Some(folder.path().join("personal-words.txt")));
+
+        proofreader.read_personal();
+        proofreader.check_now(&analysis(TEXT), 7);
+
+        assert_eq!(proofreader.marks(7), []);
+    }
+
+    #[test]
+    fn an_added_personal_word_goes_into_the_personal_file_and_loses_its_mark() {
+        let folder = project(&[]);
+        let path = folder.path().join("data").join("personal-words.txt");
+        let mut proofreader = proofreader(&folder, english());
+        proofreader.set_personal_list(Some(path.clone()));
+        proofreader.check_now(&analysis(TEXT), 7);
+
+        proofreader.add_personal_word("mta").unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "mta\n");
+        assert_eq!(proofreader.marks(7), []);
+        assert!(!folder.path().join(WORD_LIST).exists());
+    }
+
+    #[test]
+    fn without_a_personal_list_no_word_can_go_into_it() {
+        let mut proofreader = Proofreader::default();
+
+        assert!(proofreader.add_personal_word("mta").is_err());
+        assert!(!proofreader.has_personal_list());
     }
 
     #[test]
