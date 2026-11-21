@@ -26,7 +26,7 @@ pub(crate) enum Message {
     ShowProblem(usize, usize),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum State {
     Running(u64),
     Done(Export),
@@ -313,6 +313,7 @@ mod tests {
                     minimum: 300,
                 },
                 source: None,
+                area: None,
             }],
             report: PathBuf::from("out/print.report.json"),
         }

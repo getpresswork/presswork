@@ -1,10 +1,11 @@
 use typst::introspection::Tag;
-use typst::layout::{Frame, FrameItem, Point};
+use typst::layout::{Frame, FrameItem, Point, Transform};
 use typst::model::ParElem;
 use typst::syntax::Span;
 use typst::text::TextItem;
 use typst_layout::PagedDocument;
 
+use crate::area::{Area, text_rect};
 use crate::ide::Analysis;
 use crate::preflight::{Problem, ProblemKind};
 
@@ -22,12 +23,14 @@ struct Line {
     text: String,
     spacing: u32,
     span: Span,
+    area: Area,
 }
 
 struct Finding {
     page: usize,
     kind: ProblemKind,
     span: Span,
+    area: Area,
 }
 
 impl Analysis {
@@ -47,23 +50,25 @@ impl Analysis {
                 page: Some(finding.page),
                 kind: finding.kind,
                 source: self.source_range(finding.span),
+                area: Some(finding.area),
             })
             .collect()
     }
 }
 
 fn check(lines: &[Line], found: &mut Vec<Finding>) {
-    let mut add = |line: &Line, kind| {
+    let mut add = |line: &Line, kind, area| {
         found.push(Finding {
             page: line.page,
             kind,
             span: line.span,
+            area,
         });
     };
     if let [first, second, ..] = lines
         && moved(first, second)
     {
-        add(first, ProblemKind::Orphan);
+        add(first, ProblemKind::Orphan, first.area);
     }
     let mut run: Option<(usize, usize)> = None;
     for (index, line) in lines.iter().enumerate() {
@@ -75,7 +80,11 @@ fn check(lines: &[Line], found: &mut Vec<Finding>) {
         if let Some((start, count)) = run.take()
             && count > HYPHEN_RUN
         {
-            add(&lines[start], ProblemKind::StackedHyphens { lines: count });
+            add(
+                &lines[start],
+                ProblemKind::StackedHyphens { lines: count },
+                run_area(&lines[start..start + count]),
+            );
         }
     }
     let Some((last, before)) = lines.split_last() else {
@@ -88,6 +97,7 @@ fn check(lines: &[Line], found: &mut Vec<Finding>) {
                 ProblemKind::LooseLine {
                     spacing: line.spacing,
                 },
+                line.area,
             );
         }
     }
@@ -95,7 +105,7 @@ fn check(lines: &[Line], found: &mut Vec<Finding>) {
         return;
     };
     if moved(previous, last) {
-        add(last, ProblemKind::Widow);
+        add(last, ProblemKind::Widow, last.area);
     }
     let characters = last
         .text
@@ -103,8 +113,19 @@ fn check(lines: &[Line], found: &mut Vec<Finding>) {
         .filter(|character| !character.is_whitespace())
         .count();
     if characters < SHORT_LINE {
-        add(last, ProblemKind::ShortLastLine { characters });
+        add(last, ProblemKind::ShortLastLine { characters }, last.area);
     }
+}
+
+fn run_area(lines: &[Line]) -> Area {
+    let mut area = lines[0].area;
+    for pair in lines.windows(2) {
+        if moved(&pair[0], &pair[1]) {
+            break;
+        }
+        area = area.union(pair[1].area);
+    }
+    area
 }
 
 fn moved(before: &Line, after: &Line) -> bool {
@@ -160,6 +181,7 @@ impl Paragraphs {
         };
         let lines = &mut self.lines[index];
         let y = at.y.to_pt();
+        let area = Area::of(text_rect(text), Transform::translate(at.x, at.y));
         let continues = lines
             .last()
             .is_some_and(|line| line.page == page && (line.y - y).abs() <= NEW_LINE * line.size);
@@ -174,11 +196,13 @@ impl Paragraphs {
                     .glyphs
                     .first()
                     .map_or_else(Span::detached, |glyph| glyph.span.0),
+                area,
             });
         }
         if let Some(line) = lines.last_mut() {
             line.text.push_str(&text.text);
             line.spacing = line.spacing.max(spacing(text));
+            line.area = line.area.union(area);
         }
     }
 }
@@ -235,6 +259,12 @@ mod tests {
             text: text.to_owned(),
             spacing: 100,
             span: Span::detached(),
+            area: Area {
+                x: 0.0,
+                y: y - 8.0,
+                width: 100.0,
+                height: 10.0,
+            },
         }
     }
 
@@ -328,6 +358,52 @@ mod tests {
             problems[0].source,
             Some(crate::outline::SourceRange::Main(_))
         ));
+    }
+
+    #[test]
+    fn each_problem_has_the_area_of_its_line() {
+        let world = Mutex::new(World::new(
+            Arc::new(Fonts::embedded()),
+            Datetime::from_ymd(2026, 11, 21),
+        ));
+        let analysis = analyze(&world, &format!("{NARROW}A line of text \\ it."))
+            .analysis
+            .unwrap();
+
+        let problems = analysis.quality();
+
+        let area = problems[0].area.unwrap();
+        assert!((area.x - 10.0).abs() < 0.5, "{area:?}");
+        assert!(area.width > 5.0 && area.width < 20.0, "{area:?}");
+        assert!(area.y > 15.0 && area.y < 30.0, "{area:?}");
+        assert!(area.height > 9.0 && area.height < 15.0, "{area:?}");
+    }
+
+    #[test]
+    fn stacked_hyphens_have_the_area_of_all_their_lines() {
+        let hyphenated = |y| line(0, y, "hyphen\u{ad}");
+        let lines = [
+            line(0, 10.0, "Start"),
+            hyphenated(24.0),
+            hyphenated(38.0),
+            hyphenated(52.0),
+            hyphenated(66.0),
+            line(0, 80.0, "and the end of the paragraph."),
+        ];
+        let mut found = Vec::new();
+
+        check(&lines, &mut found);
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].area,
+            Area {
+                x: 0.0,
+                y: 16.0,
+                width: 100.0,
+                height: 52.0
+            }
+        );
     }
 
     #[test]

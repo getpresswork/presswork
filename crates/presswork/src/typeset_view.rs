@@ -76,6 +76,7 @@ mod tests {
             page: Some(0),
             kind: ProblemKind::ShortLastLine { characters: 3 },
             source: Some(SourceRange::Main(17..20)),
+            area: None,
         }
     }
 

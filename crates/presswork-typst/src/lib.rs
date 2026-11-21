@@ -1,3 +1,4 @@
+mod area;
 mod assist;
 mod clock;
 mod compile;
@@ -19,6 +20,7 @@ mod style;
 mod version;
 mod world;
 
+pub use area::Area;
 pub use assist::{Completion, CompletionKind, Completions, Definition, Tooltip};
 pub use clock::today;
 pub use compile::{Compilation, Diagnostic, Severity, compile};

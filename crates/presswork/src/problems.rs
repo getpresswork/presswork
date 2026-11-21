@@ -86,6 +86,7 @@ mod tests {
                 page,
                 kind,
                 source: None,
+                area: None,
             },
             &Localizer::english(),
         )

@@ -3,11 +3,12 @@ use std::collections::HashSet;
 use presswork_project::{Colors, ExportProfile, PageSize};
 use serde::Serialize;
 use typst::foundations::Repr as _;
-use typst::layout::{Abs, Frame, FrameItem, Size};
+use typst::layout::{Abs, Frame, FrameItem, Point, Rect, Size, Transform};
 use typst::syntax::Span;
 use typst::text::TextItem;
 use typst::visualize::{Color, ColorSpace, Image, ImageKind, Paint, ProcessColorSpace};
 
+use crate::area::{Area, glyph_rect, text_rect};
 use crate::ide::Analysis;
 use crate::job::Output;
 use crate::outline::SourceRange;
@@ -78,11 +79,12 @@ pub enum ProblemKind {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Problem {
     pub page: Option<usize>,
     pub kind: ProblemKind,
     pub source: Option<SourceRange>,
+    pub area: Option<Area>,
 }
 
 impl Output {
@@ -100,6 +102,7 @@ impl Output {
                         family: family.to_owned(),
                     },
                     source: diagnostic.source.clone(),
+                    area: None,
                 })
             })
             .collect();
@@ -122,12 +125,14 @@ impl Analysis {
             spaces: HashSet::new(),
             missing: Vec::new(),
             missing_source: None,
+            missing_area: None,
+            inside: None,
         };
         if let Some(document) = self.document() {
             for (page, content) in document.pages().iter().enumerate() {
                 check.page = page;
                 check.page_size(&content.frame);
-                check.frame(&content.frame, (1.0, 1.0));
+                check.frame(&content.frame, Transform::identity());
                 check.missing_glyphs();
             }
         }
@@ -144,14 +149,17 @@ struct Check<'a> {
     spaces: HashSet<String>,
     missing: Vec<char>,
     missing_source: Option<SourceRange>,
+    missing_area: Option<Area>,
+    inside: Option<Area>,
 }
 
 impl Check<'_> {
-    fn push(&mut self, kind: ProblemKind, source: Option<SourceRange>) {
+    fn push(&mut self, kind: ProblemKind, source: Option<SourceRange>, area: Option<Area>) {
         self.problems.push(Problem {
             page: Some(self.page),
             kind,
             source,
+            area: self.inside.or(area),
         });
     }
 
@@ -171,44 +179,52 @@ impl Check<'_> {
                     needed,
                 },
                 None,
+                None,
             );
         }
     }
 
-    fn frame(&mut self, frame: &Frame, scale: (f64, f64)) {
-        for (_, item) in frame.items() {
+    fn frame(&mut self, frame: &Frame, transform: Transform) {
+        for (position, item) in frame.items() {
+            let transform = transform.pre_concat(Transform::translate(position.x, position.y));
             match item {
                 FrameItem::Group(group) => {
-                    let transform = group.transform;
-                    let scale_x = transform.sx.get().hypot(transform.ky.get()) * scale.0;
-                    let scale_y = transform.kx.get().hypot(transform.sy.get()) * scale.1;
-                    self.frame(&group.frame, (scale_x, scale_y));
+                    self.frame(&group.frame, transform.pre_concat(group.transform));
                 }
-                FrameItem::Text(text) => self.text(text, scale),
+                FrameItem::Text(text) => self.text(text, transform),
                 FrameItem::Shape(shape, span) => {
+                    let area = Area::of(shape.bbox(false), transform);
                     if let Some(fill) = &shape.fill {
-                        self.paint(fill, *span, scale);
+                        self.paint(fill, *span, transform, area);
                     }
                     if let Some(stroke) = &shape.stroke {
-                        self.paint(&stroke.paint, *span, scale);
+                        self.paint(&stroke.paint, *span, transform, area);
                     }
                 }
-                FrameItem::Image(image, size, span) => self.image(image, *size, *span, scale),
+                FrameItem::Image(image, size, span) => {
+                    self.image(image, *size, *span, transform);
+                }
                 FrameItem::Link(..) | FrameItem::Tag(_) => {}
             }
         }
     }
 
-    fn text(&mut self, text: &TextItem, scale: (f64, f64)) {
+    fn text(&mut self, text: &TextItem, transform: Transform) {
         let span = text
             .glyphs
             .first()
             .map_or_else(Span::detached, |glyph| glyph.span.0);
-        self.paint(&text.fill, span, scale);
+        let area = Area::of(text_rect(text), transform);
+        self.paint(&text.fill, span, transform, area);
         if let Some(stroke) = &text.stroke {
-            self.paint(&stroke.paint, span, scale);
+            self.paint(&stroke.paint, span, transform, area);
         }
-        for glyph in text.glyphs.iter().filter(|glyph| glyph.id == 0) {
+        for (index, glyph) in text
+            .glyphs
+            .iter()
+            .enumerate()
+            .filter(|(_, glyph)| glyph.id == 0)
+        {
             let range = usize::from(glyph.range.start)..usize::from(glyph.range.end);
             let characters = text.text.get(range).unwrap_or_default();
             for character in characters
@@ -217,6 +233,12 @@ impl Check<'_> {
             {
                 if self.missing_source.is_none() {
                     self.missing_source = self.analysis.source_range(glyph.span.0);
+                }
+                if self.missing_area.is_none() {
+                    self.missing_area = Some(
+                        self.inside
+                            .unwrap_or_else(|| Area::of(glyph_rect(text, index), transform)),
+                    );
                 }
                 if !self.missing.contains(&character) {
                     self.missing.push(character);
@@ -237,51 +259,67 @@ impl Check<'_> {
             .collect::<Vec<_>>()
             .join(" ");
         let source = self.missing_source.take();
-        self.push(ProblemKind::MissingGlyphs { characters }, source);
+        let area = self.missing_area.take();
+        self.push(ProblemKind::MissingGlyphs { characters }, source, area);
     }
 
-    fn paint(&mut self, paint: &Paint, span: Span, scale: (f64, f64)) {
+    fn paint(&mut self, paint: &Paint, span: Span, transform: Transform, area: Area) {
         let Some(permitted) = self.rules.colors else {
             return;
         };
         match paint {
-            Paint::Solid(color) => self.color(color, permitted, span),
+            Paint::Solid(color) => self.color(color, permitted, span, area),
             Paint::Gradient(gradient) => {
                 let space = gradient.space();
                 if !permits(permitted, &space) {
                     let space = space_name(&space).to_owned();
                     if self.spaces.insert(space.clone()) {
                         let source = self.analysis.source_range(span);
-                        self.push(ProblemKind::GradientSpace { space, permitted }, source);
+                        self.push(
+                            ProblemKind::GradientSpace { space, permitted },
+                            source,
+                            Some(area),
+                        );
                     }
                 }
             }
-            Paint::Tiling(tiling) => self.frame(tiling.frame(), scale),
+            Paint::Tiling(tiling) => {
+                let outer = self.inside;
+                self.inside = Some(outer.unwrap_or(area));
+                self.frame(tiling.frame(), transform);
+                self.inside = outer;
+            }
         }
     }
 
-    fn color(&mut self, color: &Color, permitted: Colors, span: Span) {
+    fn color(&mut self, color: &Color, permitted: Colors, span: Span, area: Area) {
         if permits(permitted, &color.space()) {
             return;
         }
         let color = color.repr().to_string();
         if self.colors.insert(color.clone()) {
             let source = self.analysis.source_range(span);
-            self.push(ProblemKind::Color { color, permitted }, source);
+            self.push(ProblemKind::Color { color, permitted }, source, Some(area));
         }
     }
 
-    fn image(&mut self, image: &Image, size: Size, span: Span, scale: (f64, f64)) {
+    fn image(&mut self, image: &Image, size: Size, span: Span, transform: Transform) {
         let source = self.analysis.source_range(span);
+        let area = Some(Area::of(
+            Rect::from_pos_size(Point::zero(), size),
+            transform,
+        ));
         if image.alt().is_none() {
-            self.push(ProblemKind::MissingAltText, source.clone());
+            self.push(ProblemKind::MissingAltText, source.clone(), area);
         }
         if let (Some(minimum), ImageKind::Raster(raster)) = (self.rules.minimum_ppi, image.kind()) {
-            let across = f64::from(raster.width()) / (size.x.to_pt() * scale.0 / POINTS_PER_INCH);
-            let down = f64::from(raster.height()) / (size.y.to_pt() * scale.1 / POINTS_PER_INCH);
+            let scale_x = transform.sx.get().hypot(transform.ky.get());
+            let scale_y = transform.kx.get().hypot(transform.sy.get());
+            let across = f64::from(raster.width()) / (size.x.to_pt() * scale_x / POINTS_PER_INCH);
+            let down = f64::from(raster.height()) / (size.y.to_pt() * scale_y / POINTS_PER_INCH);
             let ppi = whole(across.min(down));
             if ppi < minimum {
-                self.push(ProblemKind::LowResolution { ppi, minimum }, source);
+                self.push(ProblemKind::LowResolution { ppi, minimum }, source, area);
             }
         }
     }
@@ -385,6 +423,77 @@ mod tests {
         }
     }
 
+    const MARGIN: &str = "#set page(margin: 10pt)\n";
+
+    fn assert_area(area: Option<Area>, expected: [f64; 4]) {
+        let area = area.expect("an area");
+        let actual = [area.x, area.y, area.width, area.height];
+        assert!(
+            actual
+                .iter()
+                .zip(expected)
+                .all(|(actual, expected)| (actual - expected).abs() < 0.5),
+            "{area:?}"
+        );
+    }
+
+    #[test]
+    fn an_image_problem_has_the_area_of_the_image() {
+        let found = problems(
+            &format!("{MARGIN}#image(\"dot.png\", width: 1in)"),
+            Rules::default(),
+        );
+
+        assert_eq!(kinds(&found), [(Some(0), ProblemKind::MissingAltText)]);
+        assert_area(found[0].area, [10.0, 10.0, 72.0, 72.0]);
+    }
+
+    #[test]
+    fn the_area_of_a_scaled_image_counts_the_scale() {
+        let found = problems(
+            &format!("{MARGIN}#scale(50%)[#image(\"dot.png\", width: 1in)]"),
+            Rules::default(),
+        );
+
+        assert_area(found[0].area, [28.0, 28.0, 36.0, 36.0]);
+    }
+
+    #[test]
+    fn a_color_problem_has_the_area_of_its_first_use() {
+        let found = problems(
+            &format!(
+                "{MARGIN}#rect(width: 50pt, height: 20pt, fill: rgb(\"#ff0000\"))\n\
+                 #rect(fill: rgb(\"#ff0000\"))"
+            ),
+            colors(Colors::Cmyk),
+        );
+
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_area(found[0].area, [10.0, 10.0, 50.0, 20.0]);
+    }
+
+    #[test]
+    fn a_color_in_a_tiling_has_the_area_of_the_filled_shape() {
+        let tiling = "tiling(size: (5pt, 5pt))[#square(size: 2pt, fill: rgb(\"#ff0000\"))]";
+
+        let found = problems(
+            &format!("{MARGIN}#rect(width: 50pt, height: 20pt, fill: {tiling})"),
+            colors(Colors::Cmyk),
+        );
+
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_area(found[0].area, [10.0, 10.0, 50.0, 20.0]);
+    }
+
+    #[test]
+    fn missing_glyphs_have_the_area_of_the_first_one() {
+        let found = problems(&format!("{MARGIN}日 and 本"), Rules::default());
+
+        let area = found[0].area.unwrap();
+        assert!((area.x - 10.0).abs() < 0.5, "{area:?}");
+        assert!(area.width > 1.0 && area.width < 12.0, "{area:?}");
+    }
+
     #[test]
     fn a_small_image_at_a_large_size_has_a_low_resolution() {
         let found = problems(
@@ -461,6 +570,7 @@ mod tests {
             )]
         );
         assert!(matches!(found[0].source, Some(SourceRange::Main(_))));
+        assert_eq!(found[0].area, None);
     }
 
     #[test]
@@ -513,6 +623,7 @@ mod tests {
                 }
             )]
         );
+        assert_eq!(found[0].area, None);
         assert_eq!(needed.unit, LengthUnit::Mm);
     }
 

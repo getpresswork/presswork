@@ -15,7 +15,7 @@ use crate::report::{Inputs, report, report_path};
 
 const POINTS_PER_INCH: f32 = 72.0;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Export {
     pub files: Vec<PathBuf>,
     pub problems: Vec<Problem>,
