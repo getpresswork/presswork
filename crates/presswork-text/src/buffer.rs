@@ -60,19 +60,24 @@ impl Buffer {
     }
 
     pub(crate) fn check_selection(&self, selection: &Selection) -> Result<(), TextError> {
-        for range in selection.ranges() {
-            let (start, end) = (range.start().offset(), range.end().offset());
-            if end > self.len() {
-                return Err(TextError::InvalidRange {
-                    start,
-                    end,
-                    len: self.len(),
-                });
-            }
-            for offset in [start, end] {
-                if !self.is_char_boundary(offset) {
-                    return Err(TextError::NotCharBoundary(offset));
-                }
+        selection
+            .ranges()
+            .iter()
+            .try_for_each(|range| self.check_range(&(range.start()..range.end())))
+    }
+
+    pub(crate) fn check_range(&self, range: &Range<Position>) -> Result<(), TextError> {
+        let (start, end) = (range.start.offset(), range.end.offset());
+        if start > end || end > self.len() {
+            return Err(TextError::InvalidRange {
+                start,
+                end,
+                len: self.len(),
+            });
+        }
+        for offset in [start, end] {
+            if !self.is_char_boundary(offset) {
+                return Err(TextError::NotCharBoundary(offset));
             }
         }
         Ok(())

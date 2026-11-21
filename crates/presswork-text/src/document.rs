@@ -6,6 +6,7 @@ use crate::error::TextError;
 use crate::history::History;
 use crate::position::Position;
 use crate::selection::Selection;
+use crate::suggestion::{Suggestion, map_all};
 use crate::transaction::Transaction;
 
 #[derive(Debug, Clone)]
@@ -13,6 +14,7 @@ pub struct Document {
     buffer: Buffer,
     selection: Selection,
     history: History,
+    suggestions: Vec<Suggestion>,
 }
 
 impl Document {
@@ -22,7 +24,13 @@ impl Document {
             buffer: Buffer::from(text),
             selection: Selection::cursor(Position::default()),
             history: History::default(),
+            suggestions: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn suggestions(&self) -> &[Suggestion] {
+        &self.suggestions
     }
 
     #[must_use]
@@ -41,22 +49,35 @@ impl Document {
     }
 
     pub fn apply(&mut self, transaction: Transaction, at: Instant) -> Result<(), TextError> {
-        let Transaction { changes, selection } = transaction;
+        let Transaction {
+            changes,
+            selection,
+            suggestions,
+        } = transaction;
         let inverse = changes.invert(&self.buffer)?;
         self.buffer.apply(&changes)?;
-        let selection = match selection {
-            Some(selection) => {
-                if let Err(error) = self.buffer.check_selection(&selection) {
-                    self.buffer.apply(&inverse)?;
-                    return Err(error);
-                }
-                selection
-            }
-            None => self.selection.map(&changes),
-        };
+        let checked = match &selection {
+            Some(selection) => self.buffer.check_selection(selection),
+            None => Ok(()),
+        }
+        .and_then(|()| {
+            suggestions
+                .iter()
+                .flatten()
+                .try_for_each(|suggestion| self.buffer.check_range(&suggestion.range))
+        });
+        if let Err(error) = checked {
+            self.buffer.apply(&inverse)?;
+            return Err(error);
+        }
+        let selection = selection.unwrap_or_else(|| self.selection.map(&changes));
+        let mapped = map_all(&self.suggestions, &changes);
+        let suggested = suggestions.as_ref().is_some_and(|next| *next != mapped);
+        let earlier = std::mem::replace(&mut self.suggestions, suggestions.unwrap_or(mapped));
         let before = std::mem::replace(&mut self.selection, selection);
-        if !changes.is_empty() {
-            self.history.record(inverse, &changes, before, at)?;
+        if !changes.is_empty() || suggested {
+            self.history
+                .record(inverse, &changes, before, earlier, at)?;
         } else if self.selection != before {
             self.history.break_group();
         }
@@ -64,12 +85,16 @@ impl Document {
     }
 
     pub fn undo(&mut self) -> Result<Option<ChangeSet>, TextError> {
-        let transaction = self.history.undo(&self.buffer, &self.selection)?;
+        let transaction = self
+            .history
+            .undo(&self.buffer, &self.selection, &self.suggestions)?;
         self.restore(transaction)
     }
 
     pub fn redo(&mut self) -> Result<Option<ChangeSet>, TextError> {
-        let transaction = self.history.redo(&self.buffer, &self.selection)?;
+        let transaction = self
+            .history
+            .redo(&self.buffer, &self.selection, &self.suggestions)?;
         self.restore(transaction)
     }
 
@@ -78,6 +103,7 @@ impl Document {
         self.history.rebase(changes)?;
         self.buffer.apply(changes)?;
         self.selection = self.selection.map(changes);
+        self.suggestions = map_all(&self.suggestions, changes);
         Ok(())
     }
 
@@ -85,11 +111,17 @@ impl Document {
         &mut self,
         transaction: Option<Transaction>,
     ) -> Result<Option<ChangeSet>, TextError> {
-        let Some(Transaction { changes, selection }) = transaction else {
+        let Some(Transaction {
+            changes,
+            selection,
+            suggestions,
+        }) = transaction
+        else {
             return Ok(None);
         };
         self.buffer.apply(&changes)?;
         self.selection = selection.unwrap_or_else(|| self.selection.map(&changes));
+        self.suggestions = suggestions.unwrap_or_else(|| map_all(&self.suggestions, &changes));
         Ok(Some(changes))
     }
 }
@@ -103,6 +135,7 @@ mod tests {
     use super::*;
     use crate::change::Edit;
     use crate::selection::SelectionRange;
+    use crate::suggestion::SuggestionKind;
     use crate::testing::{RawEdits, edits_for, raw_edits, text};
 
     fn at(offset: usize) -> Position {
@@ -303,6 +336,102 @@ mod tests {
         assert!(document.undo().unwrap().is_some());
         assert_eq!(text_of(&document), "abc");
         assert!(document.undo().unwrap().is_none());
+    }
+
+    fn suggestion(kind: SuggestionKind, range: std::ops::Range<usize>) -> Suggestion {
+        Suggestion {
+            kind,
+            range: at(range.start)..at(range.end),
+            author: "Ann".to_owned(),
+            time: 0,
+        }
+    }
+
+    fn insertion(range: std::ops::Range<usize>) -> Suggestion {
+        suggestion(SuggestionKind::Insertion, range)
+    }
+
+    fn deletion(range: std::ops::Range<usize>) -> Suggestion {
+        suggestion(SuggestionKind::Deletion, range)
+    }
+
+    fn suggest(document: &mut Document, suggestions: Vec<Suggestion>) {
+        let transaction = edit(document, vec![]).with_suggestions(suggestions);
+        document.apply(transaction, Instant::now()).unwrap();
+    }
+
+    #[test]
+    fn suggestions_move_with_the_text_around_them() {
+        let mut document = Document::new("abcdef");
+        suggest(&mut document, vec![insertion(2..4)]);
+
+        let edits = vec![
+            Edit::insert(at(0), "xy"),
+            Edit::insert(at(2), "1"),
+            Edit::insert(at(4), "2"),
+        ];
+        document
+            .apply(edit(&document, edits), Instant::now())
+            .unwrap();
+
+        assert_eq!(text_of(&document), "xyab1cd2ef");
+        assert_eq!(document.suggestions(), [insertion(5..7)]);
+    }
+
+    #[test]
+    fn a_suggestion_without_text_goes_away() {
+        let mut document = Document::new("abcdef");
+        suggest(&mut document, vec![deletion(2..4)]);
+
+        document
+            .apply(
+                edit(&document, vec![Edit::delete(at(1)..at(5))]),
+                Instant::now(),
+            )
+            .unwrap();
+
+        assert_eq!(document.suggestions(), []);
+    }
+
+    #[test]
+    fn a_change_of_the_suggestions_alone_is_one_undo_step() {
+        let mut document = Document::new("abcdef");
+        suggest(&mut document, vec![deletion(1..3)]);
+        assert_eq!(document.suggestions(), [deletion(1..3)]);
+
+        assert!(document.undo().unwrap().is_some());
+        assert_eq!(document.suggestions(), []);
+        assert!(document.redo().unwrap().is_some());
+        assert_eq!(document.suggestions(), [deletion(1..3)]);
+        assert_eq!(text_of(&document), "abcdef");
+    }
+
+    #[test]
+    fn undo_of_a_suggested_insertion_removes_its_text_and_its_mark() {
+        let mut document = Document::new("abc");
+        let transaction = edit(&document, vec![Edit::insert(at(3), "XY")])
+            .with_selection(Selection::cursor(at(5)))
+            .with_suggestions(vec![insertion(3..5)]);
+        document.apply(transaction, Instant::now()).unwrap();
+
+        document.undo().unwrap();
+
+        assert_eq!(text_of(&document), "abc");
+        assert_eq!(document.suggestions(), []);
+    }
+
+    #[test]
+    fn remote_changes_move_the_suggestions_and_keep_their_undo() {
+        let mut document = Document::new("abc");
+        suggest(&mut document, vec![deletion(1..2)]);
+
+        document
+            .apply_remote(&ChangeSet::new(3, [Edit::insert(at(0), "R")]).unwrap())
+            .unwrap();
+
+        assert_eq!(document.suggestions(), [deletion(2..3)]);
+        assert!(document.undo().unwrap().is_some());
+        assert_eq!(document.suggestions(), []);
     }
 
     fn apply_local(document: &mut Document, raw: RawEdits, time: Instant) {

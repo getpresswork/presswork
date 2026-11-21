@@ -6,6 +6,7 @@ use crate::change::{Assoc, ChangeSet};
 use crate::error::TextError;
 use crate::position::Position;
 use crate::selection::Selection;
+use crate::suggestion::{Suggestion, map_all};
 use crate::transaction::Transaction;
 
 pub const GROUP_DELAY: Duration = Duration::from_millis(500);
@@ -14,6 +15,7 @@ pub const GROUP_DELAY: Duration = Duration::from_millis(500);
 struct Entry {
     changes: ChangeSet,
     selection: Selection,
+    suggestions: Vec<Suggestion>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +64,7 @@ impl History {
         inverse: ChangeSet,
         changes: &ChangeSet,
         selection: Selection,
+        suggestions: Vec<Suggestion>,
         at: Instant,
     ) -> Result<(), TextError> {
         let joins = self.last.as_ref().is_some_and(|last| {
@@ -77,6 +80,7 @@ impl History {
             _ => self.undo.push(Entry {
                 changes: inverse,
                 selection,
+                suggestions,
             }),
         }
         self.redo.clear();
@@ -95,18 +99,32 @@ impl History {
         &mut self,
         buffer: &Buffer,
         selection: &Selection,
+        suggestions: &[Suggestion],
     ) -> Result<Option<Transaction>, TextError> {
         self.last = None;
-        step(&mut self.undo, &mut self.redo, buffer, selection)
+        step(
+            &mut self.undo,
+            &mut self.redo,
+            buffer,
+            selection,
+            suggestions,
+        )
     }
 
     pub fn redo(
         &mut self,
         buffer: &Buffer,
         selection: &Selection,
+        suggestions: &[Suggestion],
     ) -> Result<Option<Transaction>, TextError> {
         self.last = None;
-        step(&mut self.redo, &mut self.undo, buffer, selection)
+        step(
+            &mut self.redo,
+            &mut self.undo,
+            buffer,
+            selection,
+            suggestions,
+        )
     }
 
     pub fn rebase(&mut self, remote: &ChangeSet) -> Result<(), TextError> {
@@ -130,6 +148,7 @@ fn step(
     to: &mut Vec<Entry>,
     buffer: &Buffer,
     selection: &Selection,
+    suggestions: &[Suggestion],
 ) -> Result<Option<Transaction>, TextError> {
     let Some(entry) = from.pop() else {
         return Ok(None);
@@ -144,9 +163,12 @@ fn step(
     to.push(Entry {
         changes: reverse,
         selection: selection.clone(),
+        suggestions: suggestions.to_vec(),
     });
     Ok(Some(
-        Transaction::new(entry.changes).with_selection(entry.selection),
+        Transaction::new(entry.changes)
+            .with_selection(entry.selection)
+            .with_suggestions(entry.suggestions),
     ))
 }
 
@@ -156,12 +178,20 @@ fn rebase(stack: &[Entry], remote: &ChangeSet) -> Result<Vec<Entry>, TextError> 
     for entry in stack.iter().rev() {
         let changes = entry.changes.map(&mapping, false)?;
         mapping = mapping.map(&entry.changes, true)?;
-        rebased.push(Entry {
-            changes,
-            selection: entry.selection.map(&mapping),
-        });
+        let suggestions_only = entry.changes.is_empty();
+        rebased.push((
+            suggestions_only,
+            Entry {
+                changes,
+                selection: entry.selection.map(&mapping),
+                suggestions: map_all(&entry.suggestions, &mapping),
+            },
+        ));
     }
     rebased.reverse();
-    rebased.retain(|entry| !entry.changes.is_empty());
-    Ok(rebased)
+    Ok(rebased
+        .into_iter()
+        .filter(|(suggestions_only, entry)| *suggestions_only || !entry.changes.is_empty())
+        .map(|(_, entry)| entry)
+        .collect())
 }
