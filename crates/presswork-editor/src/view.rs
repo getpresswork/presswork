@@ -501,15 +501,8 @@ impl<'a, Message> EditorView<'a, Message> {
         let detail = list
             .items
             .get(list.selected)
-            .and_then(|item| item.detail.as_deref())
-            .map(|detail| {
-                Paragraph::with_text(small_text(
-                    detail,
-                    font::UI,
-                    complete::LIST_WIDTH - 2.0 * TOOLTIP_PADDING,
-                    text::Wrapping::WordOrGlyph,
-                ))
-            });
+            .and_then(|item| item.detail.as_deref());
+        let detail_width = complete::LIST_WIDTH - 2.0 * TOOLTIP_PADDING;
         renderer.with_layer(bounds, |renderer| {
             fill_box(renderer, area, colors);
             for (row, index) in visible.enumerate() {
@@ -542,7 +535,7 @@ impl<'a, Message> EditorView<'a, Message> {
                     small_text(
                         item.label.clone(),
                         font::MONO,
-                        row_bounds.width - 2.0 * TOOLTIP_PADDING,
+                        Size::new(row_bounds.width - 2.0 * TOOLTIP_PADDING, row_bounds.height),
                         text::Wrapping::None,
                     ),
                     Point::new(row_bounds.x + TOOLTIP_PADDING, top + inset),
@@ -550,8 +543,14 @@ impl<'a, Message> EditorView<'a, Message> {
                     row_bounds,
                 );
             }
-            if let Some(paragraph) = &detail {
-                let text_size = paragraph.min_bounds();
+            if let Some(detail) = detail {
+                let text_size = Paragraph::with_text(small_text(
+                    detail,
+                    font::UI,
+                    Size::new(detail_width, f32::INFINITY),
+                    text::Wrapping::WordOrGlyph,
+                ))
+                .min_bounds();
                 let size = Size::new(
                     complete::LIST_WIDTH,
                     text_size.height + 2.0 * TOOLTIP_PADDING,
@@ -564,8 +563,13 @@ impl<'a, Message> EditorView<'a, Message> {
                 };
                 let detail_box = Rectangle::new(Point::new(area.x, y), size);
                 fill_box(renderer, detail_box, colors);
-                renderer.fill_paragraph(
-                    paragraph,
+                renderer.fill_text(
+                    small_text(
+                        detail.to_owned(),
+                        font::UI,
+                        Size::new(detail_width, bounds.height),
+                        text::Wrapping::WordOrGlyph,
+                    ),
                     Point::new(detail_box.x + TOOLTIP_PADDING, y + TOOLTIP_PADDING),
                     colors.ink_muted,
                     bounds,
@@ -669,13 +673,15 @@ impl<'a, Message> EditorView<'a, Message> {
         if !bounds.intersects(&anchor) {
             return;
         }
-        let paragraph = Paragraph::with_text(small_text(
+        let font = if tooltip.code { font::MONO } else { font::UI };
+        let width = TOOLTIP_WIDTH - 2.0 * TOOLTIP_PADDING;
+        let text_size = Paragraph::with_text(small_text(
             tooltip.text.as_str(),
-            if tooltip.code { font::MONO } else { font::UI },
-            TOOLTIP_WIDTH - 2.0 * TOOLTIP_PADDING,
+            font,
+            Size::new(width, f32::INFINITY),
             text::Wrapping::WordOrGlyph,
-        ));
-        let text_size = paragraph.min_bounds();
+        ))
+        .min_bounds();
         let size = Size::new(
             text_size.width + 2.0 * TOOLTIP_PADDING,
             text_size.height + 2.0 * TOOLTIP_PADDING,
@@ -683,8 +689,13 @@ impl<'a, Message> EditorView<'a, Message> {
         let placed = tooltip_bounds(anchor, size, bounds);
         renderer.with_layer(bounds, |renderer| {
             fill_box(renderer, placed, self.colors);
-            renderer.fill_paragraph(
-                &paragraph,
+            renderer.fill_text(
+                small_text(
+                    tooltip.text.clone(),
+                    font,
+                    Size::new(width, bounds.height),
+                    text::Wrapping::WordOrGlyph,
+                ),
                 Point::new(placed.x + TOOLTIP_PADDING, placed.y + TOOLTIP_PADDING),
                 self.colors.ink,
                 bounds,
@@ -976,12 +987,12 @@ impl operation::Focusable for State {
 fn small_text<Content>(
     content: Content,
     font: iced::Font,
-    width: f32,
+    bounds: Size,
     wrapping: text::Wrapping,
 ) -> Text<Content> {
     Text {
         content,
-        bounds: Size::new(width, f32::INFINITY),
+        bounds,
         size: Pixels(TOOLTIP_TEXT_SIZE),
         line_height: text::LineHeight::Relative(LINE_HEIGHT),
         font,
@@ -1341,6 +1352,8 @@ impl<'a, Message: 'a> From<EditorView<'a, Message>> for Element<'a, Message, The
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use iced::keyboard::key::Code;
     use iced::keyboard::{Location, Modifiers};
     use iced_test::{Simulator, simulator};
@@ -1682,6 +1695,25 @@ mod tests {
     }
 
     fn pixels_with_color(view: EditorView<'_, Action>, color: iced::Color) -> usize {
+        let wanted = color.into_rgba8();
+        let (_, pixels) = snapshot_pixels(view);
+        pixels.iter().filter(|pixel| **pixel == wanted).count()
+    }
+
+    fn dark_rows(view: EditorView<'_, Action>, limit: u8) -> BTreeSet<usize> {
+        let (width, pixels) = snapshot_pixels(view);
+        pixels
+            .chunks(width)
+            .enumerate()
+            .filter(|(_, row)| {
+                row.iter()
+                    .any(|pixel| pixel[..3].iter().all(|channel| *channel < limit))
+            })
+            .map(|(y, _)| y)
+            .collect()
+    }
+
+    fn snapshot_pixels(view: EditorView<'_, Action>) -> (usize, Vec<[u8; 4]>) {
         let mut ui = simulator(view);
         let folder = tempfile::tempdir().unwrap();
         ui.snapshot(&presswork_ui::theme::light())
@@ -1697,10 +1729,56 @@ mod tests {
             png::Decoder::new(std::io::BufReader::new(std::fs::File::open(file).unwrap()));
         let mut reader = decoder.read_info().unwrap();
         let mut bytes = vec![0; reader.output_buffer_size().unwrap()];
-        reader.next_frame(&mut bytes).unwrap();
-        let wanted = color.into_rgba8();
+        let info = reader.next_frame(&mut bytes).unwrap();
         let (pixels, _) = bytes.as_chunks::<4>();
-        pixels.iter().filter(|pixel| **pixel == wanted).count()
+        (usize::try_from(info.width).unwrap(), pixels.to_vec())
+    }
+
+    const LINE_TEN: usize = 9 * 9 + 1;
+
+    fn blank() -> Editor {
+        Editor::new(&"        \n".repeat(20))
+    }
+
+    #[test]
+    fn a_tooltip_shows_its_text_in_one_line() {
+        load_fonts();
+        let editor = blank();
+        let tooltip = Tooltip {
+            position: Position::new(LINE_TEN),
+            text: "The house style does not permit this text.".to_owned(),
+            code: false,
+        };
+
+        let plain = dark_rows(view(&editor, &LIGHT, |action| action), 0x50);
+        let shown = dark_rows(
+            view(&editor, &LIGHT, |action| action).tooltip(Some(&tooltip)),
+            0x50,
+        );
+        let added = shown.difference(&plain).count();
+
+        assert!((3..30).contains(&added), "{added} rows");
+    }
+
+    #[test]
+    fn a_completion_detail_shows_its_text_in_one_line() {
+        load_fonts();
+        let editor = blank();
+        let detailed = completion_list(LINE_TEN, &["alpha"]);
+        let mut plain_list = detailed.clone();
+        plain_list.items[0].detail = None;
+
+        let plain = dark_rows(
+            view(&editor, &LIGHT, |action| action).completions(Some(&plain_list)),
+            0x70,
+        );
+        let shown = dark_rows(
+            view(&editor, &LIGHT, |action| action).completions(Some(&detailed)),
+            0x70,
+        );
+        let added = shown.difference(&plain).count();
+
+        assert!((3..30).contains(&added), "{added} rows");
     }
 
     #[test]
