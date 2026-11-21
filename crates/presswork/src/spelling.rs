@@ -8,8 +8,6 @@ use presswork_language::{Dictionaries, Dictionary, WordList};
 use presswork_text::Position;
 use presswork_typst::{Analysis, SourceRange, Spelling};
 
-pub(crate) const WORD_LIST: &str = "presswork-words.txt";
-
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
     Loaded(Arc<Dictionaries>),

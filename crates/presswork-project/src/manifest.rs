@@ -7,6 +7,7 @@ use crate::measure::PageSize;
 use crate::project::is_inside;
 
 pub const MANIFEST: &str = "presswork.toml";
+pub const WORD_LIST: &str = "presswork-words.txt";
 const DEFAULT_PPI: u32 = 144;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

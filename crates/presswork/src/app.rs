@@ -20,7 +20,7 @@ use presswork_editor::{
 use presswork_language::WordList;
 use presswork_log::{Level, LogStore};
 use presswork_preview::Preview;
-use presswork_project::{ExportProfile, Project};
+use presswork_project::{ExportProfile, Project, WORD_LIST};
 use presswork_text::{ChangeSet, Position, Unit};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
@@ -358,7 +358,7 @@ impl App {
                 self.saved = self.editor.revision();
                 let root = opened.project.root().to_path_buf();
                 let main = opened.project.manifest().main.clone();
-                let words = fs::read_to_string(root.join(spelling::WORD_LIST)).unwrap_or_default();
+                let words = fs::read_to_string(root.join(WORD_LIST)).unwrap_or_default();
                 self.spelling.set_words(WordList::parse(&words));
                 self.project = Some(opened.project);
                 let backend = self.backend();

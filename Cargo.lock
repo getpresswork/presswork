@@ -5419,7 +5419,9 @@ name = "presswork-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "directories",
  "fluent-bundle",
+ "presswork-language",
  "presswork-project",
  "presswork-toolchain",
  "presswork-typst",

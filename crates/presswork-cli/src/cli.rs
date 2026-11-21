@@ -30,6 +30,12 @@ pub(crate) struct Target {
     )]
     pub(crate) profiles: Vec<String>,
     #[arg(
+        long = "dictionaries",
+        value_name = "FOLDER",
+        help = "The folder with the downloaded dictionaries. The default is the folder of the desktop application."
+    )]
+    pub(crate) dictionaries: Option<PathBuf>,
+    #[arg(
         value_name = "FOLDER",
         default_value = ".",
         help = "The project folder."
@@ -59,6 +65,7 @@ mod tests {
             parse(&["build"]).command,
             Command::Build(Target {
                 profiles: Vec::new(),
+                dictionaries: None,
                 folder: PathBuf::from("."),
             })
         );
@@ -78,6 +85,7 @@ mod tests {
             .command,
             Command::Check(Target {
                 profiles: vec!["print".to_owned(), "screen".to_owned()],
+                dictionaries: None,
                 folder: PathBuf::from("books/notes"),
             })
         );

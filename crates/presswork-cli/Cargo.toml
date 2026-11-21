@@ -14,7 +14,9 @@ workspace = true
 
 [dependencies]
 clap.workspace = true
+directories.workspace = true
 fluent-bundle.workspace = true
+presswork-language.workspace = true
 presswork-project.workspace = true
 presswork-toolchain.workspace = true
 presswork-typst.workspace = true

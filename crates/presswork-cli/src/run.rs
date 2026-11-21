@@ -1,13 +1,14 @@
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use presswork_project::{Colors, ExportProfile, Manifest, Project, ProjectError};
+use presswork_language::{Dictionaries, Dictionary, WordList};
+use presswork_project::{Colors, ExportProfile, Manifest, Project, ProjectError, WORD_LIST};
 use presswork_toolchain::{Engine, Version, choose, parse_pin};
 use presswork_typst::{
-    Analysis, Diagnostic, Fonts, Output, Problem, ProblemKind, ProfileError, Rules, Severity,
-    SourceRange, World, analyze, today,
+    Analysis, Diagnostic, Fonts, Misspelling, Output, Problem, ProblemKind, ProfileError, Rules,
+    Severity, SourceRange, World, analyze, today,
 };
 
 use crate::cli::{Cli, Command, Target};
@@ -84,7 +85,11 @@ fn work(target: &Target, build: bool, console: &mut Console<'_>) -> Result<(), F
         for problem in &layout {
             console.problem(&places, problem, "");
         }
-        return if problems.is_empty() {
+        let misspelled = output
+            .analysis
+            .as_ref()
+            .is_some_and(|analysis| check_spelling(target, &project, analysis, &places, console));
+        return if problems.is_empty() && !misspelled {
             Ok(())
         } else {
             Err(Failed)
@@ -102,6 +107,57 @@ fn work(target: &Target, build: bool, console: &mut Console<'_>) -> Result<(), F
         }
     }
     result
+}
+
+fn check_spelling(
+    target: &Target,
+    project: &Project,
+    analysis: &Analysis,
+    places: &Places<'_>,
+    console: &mut Console<'_>,
+) -> bool {
+    let folder = target.dictionaries.clone().or_else(default_dictionaries);
+    let dictionaries = load_dictionaries(folder.as_deref());
+    if dictionaries.is_empty() {
+        return false;
+    }
+    let words =
+        WordList::parse(&fs::read_to_string(project.root().join(WORD_LIST)).unwrap_or_default());
+    let spelling = analysis.spelling(&dictionaries);
+    for language in &spelling.missing {
+        console.missing_dictionary(language);
+    }
+    let mut found = false;
+    for misspelling in spelling
+        .misspellings
+        .iter()
+        .filter(|misspelling| !words.contains(&misspelling.word))
+    {
+        console.misspelling(places, misspelling);
+        found = true;
+    }
+    found
+}
+
+fn default_dictionaries() -> Option<PathBuf> {
+    directories::ProjectDirs::from("io.github", "getpresswork", "Presswork")
+        .map(|directories| directories.data_local_dir().join("dictionaries"))
+}
+
+fn load_dictionaries(folder: Option<&Path>) -> Dictionaries {
+    let mut dictionaries = Dictionaries::default();
+    let (Some(folder), Ok(catalog)) = (folder, presswork_toolchain::catalog()) else {
+        return dictionaries;
+    };
+    let installed = presswork_toolchain::Dictionaries::new(folder, &catalog);
+    for source in &catalog.sources {
+        if let Some((aff, dic)) = installed.read(&source.tag)
+            && let Ok(dictionary) = Dictionary::new(&aff, &dic)
+        {
+            dictionaries.insert(&source.tag, dictionary);
+        }
+    }
+    dictionaries
 }
 
 fn accept_pin(manifest: &Manifest, console: &mut Console<'_>) -> Result<(), Failed> {
@@ -308,6 +364,22 @@ impl Console<'_> {
         self.report(place, Severity::Warning, &message);
     }
 
+    fn misspelling(&mut self, places: &Places<'_>, misspelling: &Misspelling) {
+        let mut args = FluentArgs::new();
+        args.set("word", misspelling.word.clone());
+        args.set("language", misspelling.language.clone());
+        let message = self.localizer.format("problem-spelling", &args);
+        let place = places.location(&misspelling.source);
+        self.report(Some(place), Severity::Warning, &message);
+    }
+
+    fn missing_dictionary(&mut self, language: &str) {
+        let mut args = FluentArgs::new();
+        args.set("language", language.to_owned());
+        let message = self.localizer.format("spelling-missing", &args);
+        self.report(None, Severity::Warning, &message);
+    }
+
     fn written(&mut self, places: &Places<'_>, file: &Path) {
         let _ = writeln!(self.out, "{}", places.shown(file));
     }
@@ -386,9 +458,14 @@ mod tests {
     }
 
     fn presswork(arguments: &[&str]) -> Ran {
-        let cli =
-            Cli::try_parse_from(std::iter::once("presswork-cli").chain(arguments.iter().copied()))
-                .unwrap();
+        let empty = tempfile::tempdir().unwrap();
+        let empty = empty.path().display().to_string();
+        let mut all = vec!["presswork-cli", arguments[0]];
+        if !arguments.contains(&"--dictionaries") {
+            all.extend(["--dictionaries", empty.as_str()]);
+        }
+        all.extend(&arguments[1..]);
+        let cli = Cli::try_parse_from(all).unwrap();
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let code = run(&cli, &mut out, &mut err);
         Ran {
@@ -621,6 +698,90 @@ mod tests {
         );
         assert_eq!(ran.code, FAILURE);
         assert_eq!(ran.err.matches(&problem).count(), 1, "{}", ran.err);
+    }
+
+    fn dictionary_folder(words: &str) -> tempfile::TempDir {
+        let folder = tempfile::tempdir().unwrap();
+        let english = folder.path().join("en-US");
+        fs::create_dir_all(&english).unwrap();
+        fs::write(english.join("dictionary.aff"), "SET UTF-8\n").unwrap();
+        let count = words.split(' ').count();
+        fs::write(
+            english.join("dictionary.dic"),
+            format!("{count}\n{}\n", words.replace(' ', "\n")),
+        )
+        .unwrap();
+        folder
+    }
+
+    #[test]
+    fn a_check_finds_misspelled_words() {
+        let dictionaries = dictionary_folder("the cat sat on");
+        let folder = project(&[
+            ("presswork.toml", MANIFEST),
+            ("main.typ", "The cat sat on the mta."),
+        ]);
+
+        let ran = presswork(&[
+            "check",
+            "--dictionaries",
+            &argument(&dictionaries),
+            &argument(&folder),
+        ]);
+
+        assert_eq!(
+            (ran.code, ran.err),
+            (
+                FAILURE,
+                format!(
+                    "{}:1:20: warning: The word “mta” is not in the dictionary for en.\n",
+                    place(&folder, "main.typ")
+                )
+            )
+        );
+    }
+
+    #[test]
+    fn the_word_list_of_the_project_permits_its_words() {
+        let dictionaries = dictionary_folder("the cat sat on");
+        let folder = project(&[
+            ("presswork.toml", MANIFEST),
+            ("main.typ", "The cat sat on the mta."),
+            ("presswork-words.txt", "mta\n"),
+        ]);
+
+        let ran = presswork(&[
+            "check",
+            "--dictionaries",
+            &argument(&dictionaries),
+            &argument(&folder),
+        ]);
+
+        assert_eq!((ran.code, ran.err.as_str()), (SUCCESS, ""));
+    }
+
+    #[test]
+    fn a_language_without_a_dictionary_is_named_once() {
+        let dictionaries = dictionary_folder("the cat");
+        let folder = project(&[
+            ("presswork.toml", MANIFEST),
+            ("main.typ", "#set text(lang: \"de\")\nDas Haus. Die Katze."),
+        ]);
+
+        let ran = presswork(&[
+            "check",
+            "--dictionaries",
+            &argument(&dictionaries),
+            &argument(&folder),
+        ]);
+
+        assert_eq!(
+            (ran.code, ran.err.as_str()),
+            (
+                SUCCESS,
+                "warning: Presswork has no dictionary for de, so it did not check the spelling of this text.\n"
+            )
+        );
     }
 
     #[test]

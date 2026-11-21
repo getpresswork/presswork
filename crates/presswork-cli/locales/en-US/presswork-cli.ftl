@@ -29,6 +29,8 @@ problem-short-line = The last line of a paragraph has only { $characters ->
    *[other] { $characters } characters
 }.
 problem-loose-line = The word spaces in this line are { $spacing }% of their normal width.
+problem-spelling = The word “{ $word }” is not in the dictionary for { $language }.
+spelling-missing = Presswork has no dictionary for { $language }, so it did not check the spelling of this text.
 colors-cmyk = CMYK, gray, and spot colors
 colors-gray = gray colors
 

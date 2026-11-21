@@ -79,6 +79,8 @@ mod tests {
             "problem-hyphens",
             "problem-short-line",
             "problem-loose-line",
+            "problem-spelling",
+            "spelling-missing",
             "colors-cmyk",
             "colors-gray",
             "export-outside",
