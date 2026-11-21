@@ -23,6 +23,17 @@ Other functions also make suggestions: the concordance, the house style correcti
 - The team has shared dictionaries for names and special words. Each person can also have a personal dictionary.
 - The language of each part of the text comes from the Typst `lang` setting.
 
+In milestone 2, the spell checker does these things (D186, D187, D188):
+
+- You download the dictionaries in the Toolchains panel. There are 14 dictionaries: English (United States and United Kingdom), German (Germany, Austria, and Switzerland), French, Spanish, Italian, Dutch, Portuguese (Brazil and Portugal), Polish, Russian, and Danish. Refer to [Toolchains](toolchains.md).
+- The checker examines the text parts of all Typst files that the document shows. It finds the language of each text part in the layout: the `lang` and `region` that Typst used for that text. A language without a region uses the first dictionary of that language in the list, for example `en` uses English (United States).
+- It does not check words with digits, words in capital letters only, code, math, raw text, and text that the document does not show.
+- A word with an apostrophe, for example "can't", is one word.
+- The editor shows each misspelled word in the main file with a dotted line in the error color. The check runs on a separate thread after each compilation.
+- The file `presswork-words.txt` in the project folder is the word list of the team. It has one word on each line. Lines that start with `#` are comments. A word in small letters also permits the same word with capitals, for example `typst` permits "Typst".
+- `presswork-cli check` lists the misspelled words, and they make the check fail. If the document has text in a language without a dictionary, the command names the language one time. Without any dictionary, the command does not check the spelling.
+- Personal dictionaries, suggestions in the editor, and the command to add a word to the list come later.
+
 ## House style
 
 A house style is a set of rules. Examples:

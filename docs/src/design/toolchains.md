@@ -67,9 +67,25 @@ To make or extend the list of digests, do these steps:
 3. Compare some digests with a record that is independent of the workflow, for example the history of the Typst manifest in the Scoop main bucket.
 4. Copy the result of the workflow into `digests.txt`, and add a test for the digests that you compared.
 
+## Dictionaries
+
+The manager downloads the Hunspell dictionaries for the spell checker from the LibreOffice dictionaries repository on GitHub, at one fixed commit (D187). The file `crates/presswork-toolchain/dictionaries.txt` has the commit and one line for each dictionary: the language tag, the license, and the path, the size, and the SHA-256 digest of the `.aff` file, the `.dic` file, and the license file.
+
+- The Toolchains panel shows the dictionaries in a third column. **Download** gets the three files of a dictionary. The manager compares each file with its digest. A file with a different digest stops the download, and Presswork keeps nothing.
+- The manager puts each dictionary into the `dictionaries` folder in the local data folder of Presswork, in a folder with the language tag, for example `dictionaries/de-DE`.
+- **Remove** deletes the folder of a dictionary.
+
+To change the commit or to add a language, do these steps:
+
+1. Select a new commit of the LibreOffice dictionaries repository.
+2. Download the three files of each dictionary at that commit, and calculate their sizes and digests.
+3. Read the license file of each new dictionary, and write its license into the list.
+4. Make sure that each dictionary loads: set `PRESSWORK_TEST_DICTIONARIES` to a folder with the installed dictionaries, and run the ignored test `the_libreoffice_dictionaries_know_common_words` in `presswork-language`.
+5. Update `dictionaries.txt`, and add the English name of each new language to the Fluent files of the desktop application.
+
 ## Network access
 
-Presswork connects to GitHub only when you open the Toolchains panel, click "Try again", or install a version. It reads the release list from `api.github.com` and downloads the release files from `github.com`. The requests contain no personal data. They identify the application as "Presswork" with its version.
+Presswork connects to GitHub only when you open the Toolchains panel, click "Try again", install a version, or download a dictionary. It reads the release list from `api.github.com` and downloads the release files from `github.com`. The requests contain no personal data. They identify the application as "Presswork" with its version.
 
 ## Milestone 1
 

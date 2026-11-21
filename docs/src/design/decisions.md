@@ -1394,3 +1394,32 @@ Do not change what an accepted decision says. You can correct its language. To c
   - `presswork-cli check` lists the problems as warnings. They do not change its exit code, because a typesetter must decide about each break.
 - **Reason:** The tags of the output give paragraphs exactly, and the positions of the text give the lines that the reader sees. Fixed limits from common practice give a useful report now.
 - **Other options:** Limits in the manifest, for example a `[qa]` table. Marks for all problems on the pages of the preview. A failure of `check` on layout problems. Paragraphs from the source text.
+
+## D186. spellbook for the spell checker
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Project owner.
+- **Decision:** The spell checker uses `spellbook` 0.4.2. It reads Hunspell dictionaries and checks words. `encoding_rs`, which was already in the dependency tree through `reqwest`, changes dictionaries in other encodings, for example ISO-8859-1, into UTF-8.
+- **Reason:** `spellbook` is pure Rust under MPL-2.0, and the Helix editor team maintains it. It adds only one crate, because its dependencies `hashbrown` and `foldhash` were already in the tree. It can also make suggestions.
+- **Other options:** `harper-core` 3.2.0, which checks only English and adds about 30 crates. `zspell`, which had no release after 2024-06 and no license in its metadata.
+
+## D187. LibreOffice dictionaries at a fixed commit
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Project owner.
+- **Decision:** The toolchain manager downloads the dictionaries from the LibreOffice dictionaries repository on GitHub, at one fixed commit. A reviewed list in the repository has the size and the SHA-256 digest of each file.
+- **Reason:** LibreOffice keeps the dictionaries up to date. A fixed commit and the digests give the same files to all users, and the manager refuses changed files.
+- **Other options:** The dictionaries of `wooorm/dictionaries`, which are all in UTF-8 but did not change after 2024-09. Only English dictionaries at first.
+
+## D188. Details of the spell checker
+
+- **Status:** Accepted, 2026-11-20. **Origin:** Default.
+- **Decision:**
+  - The list has 14 dictionaries from commit `c0865a85` (2026-11-06): en-US, en-GB, de-DE, de-AT, de-CH, fr-FR, es-ES, it-IT, nl-NL, pt-BR, pt-PT, pl-PL, ru-RU, and da-DK. Swedish is not in the list, because its folder has no spelling files.
+  - The order of the list selects the dictionary for a language without a region: `en` uses en-US, `de` uses de-DE, and `pt` uses pt-BR.
+  - A line of a `.dic` file that `spellbook` cannot read is skipped, as in Hunspell, to a maximum of 50 lines. The Danish dictionary has three such lines, for example `"A/S"`.
+  - The checker finds the language of each text node of the source from the glyphs of that node in the layout. Text that the layout does not show is not checked. Words with digits and words with only capital letters are not checked.
+  - The word list of a project is the file `presswork-words.txt`. A word in small letters in the list also permits capital letters.
+  - The editor shows misspelled words of the main file as dotted lines in the error color, only while the text agrees with the checked text. A new check waits until the running check is complete.
+  - The dictionaries are in the folder `dictionaries` next to the folder `toolchains`. The button for a dictionary is **Download**, because a dictionary is a file and not a program.
+  - In `presswork-cli check`, misspelled words make the check fail. `--dictionaries` gives a different folder.
+- **Reason:** The layout gives the language exactly as Typst uses it. Skipped lines keep a dictionary usable when a few lines have errors. A word list in the project folder goes into the version control of the team.
+- **Other options:** Suggestions and a command to add a word in the editor now. A personal dictionary now. A `download` command in `presswork-cli`. A language from the source text in place of the layout.
