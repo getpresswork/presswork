@@ -1938,6 +1938,7 @@ mod tests {
     fn completion_list(from: usize, labels: &[&str]) -> CompletionList {
         CompletionList {
             from: Position::new(from),
+            to: None,
             items: labels
                 .iter()
                 .map(|label| crate::complete::CompletionItem {

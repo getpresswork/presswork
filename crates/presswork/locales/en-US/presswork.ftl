@@ -233,7 +233,9 @@ colors-gray = gray colors
 
 proofreading-spelling = The word “{ $word }” is not in the dictionary for { $language }.
 proofreading-style = The house style does not permit “{ $text }”.
-proofreading-replacement = Use “{ $replacement }”.
+proofreading-replacement = Push { $shortcut } to change the text to “{ $replacement }”.
+proofreading-suggestions = Push { $shortcut } to show the corrections.
+proofreading-no-corrections = Presswork has no corrections for the text at the cursor.
 style-error-file = The house style file { $file } is not valid. { $problem }
 style-error-missing = Rule { $rule } in { $file } has no text and no pattern.
 style-error-both = Rule { $rule } in { $file } has a text and a pattern. Use only one of them.

@@ -11,6 +11,7 @@ use presswork_project::{HOUSE_STYLE, WORD_LIST};
 use presswork_text::Position;
 use presswork_typst::{Analysis, Misspelling, SourceRange, Spelling, StyleProblem};
 
+use crate::chrome::shortcut;
 use crate::i18n::{FluentArgs, Localizer};
 use crate::toolchain_panel::sentence;
 
@@ -33,6 +34,19 @@ pub(crate) struct Findings {
 enum Finding<'a> {
     Spelling(&'a Misspelling),
     Style(&'a StyleProblem),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Correction {
+    Replacement {
+        range: Range<usize>,
+        text: String,
+    },
+    Spelling {
+        range: Range<usize>,
+        word: String,
+        language: String,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -149,6 +163,26 @@ impl Proofreader {
         (!texts.is_empty()).then(|| texts.join("\n"))
     }
 
+    pub(crate) fn correction_at(&self, revision: u64, offset: usize) -> Option<Correction> {
+        self.found(revision)
+            .filter(|(range, _)| range.start <= offset && offset <= range.end)
+            .find_map(|(range, finding)| match finding {
+                Finding::Spelling(misspelling) => Some(Correction::Spelling {
+                    range,
+                    word: misspelling.word.clone(),
+                    language: misspelling.language.clone(),
+                }),
+                Finding::Style(problem) => Some(Correction::Replacement {
+                    range,
+                    text: problem.replacement.clone()?,
+                }),
+            })
+    }
+
+    pub(crate) fn dictionaries(&self) -> Arc<Dictionaries> {
+        Arc::clone(&self.dictionaries)
+    }
+
     fn found(&self, revision: u64) -> impl Iterator<Item = (Range<usize>, Finding<'_>)> {
         let findings = self
             .checked
@@ -182,6 +216,24 @@ impl Proofreader {
     }
 }
 
+pub(crate) async fn suggestions(
+    dictionaries: Arc<Dictionaries>,
+    word: String,
+    language: String,
+) -> Vec<String> {
+    background(move || {
+        let (language, region) = match language.split_once('-') {
+            Some((language, region)) => (language, Some(region)),
+            None => (language.as_str(), None),
+        };
+        dictionaries
+            .find(language, region)
+            .map_or_default(|dictionary| dictionary.suggest(&word))
+    })
+    .await
+    .unwrap_or_default()
+}
+
 fn findings(
     analysis: &Analysis,
     dictionaries: &Dictionaries,
@@ -201,26 +253,31 @@ fn findings(
 
 fn finding_text(localizer: &Localizer, findings: &Findings, finding: &Finding<'_>) -> String {
     let mut args = FluentArgs::new();
+    args.set("shortcut", shortcut(localizer, '.'));
     match finding {
         Finding::Spelling(misspelling) => {
             args.set("word", misspelling.word.clone());
             args.set("language", misspelling.language.clone());
-            localizer.format("proofreading-spelling", &args)
+            format!(
+                "{}\n{}",
+                localizer.format("proofreading-spelling", &args),
+                localizer.format("proofreading-suggestions", &args)
+            )
         }
         Finding::Style(problem) => {
-            let mut text = if let Some(message) = findings.house_style.message(problem.rule) {
-                message.to_owned()
-            } else {
-                args.set("text", problem.text.clone());
-                localizer.format("proofreading-style", &args)
-            };
-            if let Some(replacement) = &problem.replacement {
-                let mut args = FluentArgs::new();
-                args.set("replacement", replacement.clone());
-                text.push('\n');
-                text.push_str(&localizer.format("proofreading-replacement", &args));
+            args.set("text", problem.text.clone());
+            let message = findings.house_style.message(problem.rule).map_or_else(
+                || localizer.format("proofreading-style", &args),
+                str::to_owned,
+            );
+            match &problem.replacement {
+                Some(replacement) => {
+                    args.set("replacement", replacement.clone());
+                    let hint = localizer.format("proofreading-replacement", &args);
+                    format!("{message}\n{hint}")
+                }
+                None => message,
             }
-            text
         }
     }
 }
@@ -309,7 +366,7 @@ mod tests {
         let mut dictionaries = Dictionaries::default();
         dictionaries.insert(
             "en-US",
-            Dictionary::new(b"SET UTF-8\n", b"4\nthe\ncat\nsat\non\n").unwrap(),
+            Dictionary::new(b"SET UTF-8\n", b"5\nthe\ncat\nsat\non\nmat\n").unwrap(),
         );
         Arc::new(dictionaries)
     }
@@ -355,11 +412,57 @@ mod tests {
         assert_eq!(proofreader.marks(7), [mark(19..22, MarkKind::Spelling)]);
         assert_eq!(proofreader.marks(8), []);
         assert_eq!(
-            proofreader.tooltip(&localizer, 7, 21).as_deref(),
-            Some("The word “mta” is not in the dictionary for en.")
+            proofreader.tooltip(&localizer, 7, 21),
+            Some(format!(
+                "The word “mta” is not in the dictionary for en.\n\
+                 Push {} to show the corrections.",
+                shortcut(&localizer, '.')
+            ))
         );
         assert_eq!(proofreader.tooltip(&localizer, 7, 22), None);
         assert_eq!(proofreader.tooltip(&localizer, 8, 21), None);
+    }
+
+    #[test]
+    fn the_correction_at_the_cursor_is_a_replacement_or_a_misspelled_word() {
+        let styled = project(&[(HOUSE_STYLE, STYLE)]);
+        let mut style = proofreader(&styled, Arc::default());
+        style.check_now(&analysis(TEXT), 7);
+        let plain = project(&[]);
+        let mut spelling = proofreader(&plain, english());
+        spelling.check_now(&analysis(TEXT), 7);
+
+        let replacement = Some(Correction::Replacement {
+            range: 19..22,
+            text: "mat".to_owned(),
+        });
+        assert_eq!(style.correction_at(7, 20), replacement);
+        assert_eq!(style.correction_at(7, 22), replacement);
+        assert_eq!(style.correction_at(7, 5), None);
+        assert_eq!(style.correction_at(8, 20), None);
+        assert_eq!(
+            spelling.correction_at(7, 19),
+            Some(Correction::Spelling {
+                range: 19..22,
+                word: "mta".to_owned(),
+                language: "en".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn suggestions_come_from_the_dictionary_of_the_language() {
+        let found = |language: &str| {
+            futures::executor::block_on(suggestions(
+                english(),
+                "mta".to_owned(),
+                language.to_owned(),
+            ))
+        };
+
+        assert!(found("en").contains(&"mat".to_owned()), "{:?}", found("en"));
+        assert!(found("en-US").contains(&"mat".to_owned()));
+        assert_eq!(found("de"), Vec::<String>::new());
     }
 
     #[test]
@@ -392,8 +495,12 @@ mod tests {
             Some("Name the animal.")
         );
         assert_eq!(
-            proofreader.tooltip(&localizer, 7, 19).as_deref(),
-            Some("The house style does not permit “mta”.\nUse “mat”.")
+            proofreader.tooltip(&localizer, 7, 19),
+            Some(format!(
+                "The house style does not permit “mta”.\n\
+                 Push {} to change the text to “mat”.",
+                shortcut(&localizer, '.')
+            ))
         );
     }
 

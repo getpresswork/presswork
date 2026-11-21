@@ -260,7 +260,7 @@ const HOUSE_STYLE: &str = "[[rule]]\ntext = \"organise\"\nreplacement = \"organi
                            message = \"Use an en dash between two numbers.\"\n";
 
 fn render_house_style(app: &mut App) {
-    let words = "field notes we organise the in order to find them on pages is cut by hand";
+    let words = "field notes we organise the in order to find them on pages is cut by hand paper";
     let dic = format!(
         "{}\n{}\n",
         words.split(' ').count(),
@@ -287,6 +287,19 @@ fn render_house_style(app: &mut App) {
     let range = STYLED_NOTES.find("12-19").unwrap() + 1;
     send(app, Message::Hover(Some(Position::new(range))));
     render(app, "house-style");
+
+    send(app, Message::Hover(None));
+    let papr = STYLED_NOTES.find("papr").unwrap();
+    send(
+        app,
+        Message::Editor(EditorAction::MoveTo {
+            position: Position::new(papr + 2),
+            extend: false,
+            goal: None,
+        }),
+    );
+    app.correct_now();
+    render(app, "corrections");
 }
 
 fn render_typeset(app: &mut App) {

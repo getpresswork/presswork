@@ -43,7 +43,7 @@ use crate::live_session::{self, LiveSession};
 use crate::log_panel::{self, LogPanel};
 use crate::menu;
 use crate::outline_panel::{self, OutlinePanel};
-use crate::proofreading::{self, Proofreader};
+use crate::proofreading::{self, Correction, Proofreader};
 use crate::publish_view::{self, PublishView};
 use crate::server_dialog::{self, ServerDialog};
 use crate::task_list::{self, TaskList};
@@ -124,6 +124,11 @@ pub(crate) enum Message {
         position: Position,
         revision: u64,
         tooltip: Option<presswork_typst::Tooltip>,
+    },
+    CorrectionsFound {
+        revision: u64,
+        range: std::ops::Range<usize>,
+        suggestions: Vec<String>,
     },
     Compiled {
         generation: u64,
@@ -500,6 +505,13 @@ impl App {
         }
         if self.editor.revision() != revision {
             self.tooltip = None;
+            if self
+                .completions
+                .as_ref()
+                .is_some_and(|list| list.to.is_some())
+            {
+                self.completions = None;
+            }
             let compile = self.request_compile();
             if !typed && self.completions.is_none() {
                 return compile;
@@ -815,6 +827,11 @@ impl App {
                 revision,
                 tooltip,
             } => self.tooltip_found(position, revision, tooltip),
+            Message::CorrectionsFound {
+                revision,
+                range,
+                suggestions,
+            } => self.corrections_found(revision, range, suggestions),
             Message::Definition(position) => return self.find_definition(position),
             Message::DefinitionFound {
                 revision,
@@ -878,6 +895,7 @@ impl App {
     fn complete(&mut self, event: CompletionEvent) -> Task<Message> {
         match event {
             CompletionEvent::Request => return self.request_completions(true),
+            CompletionEvent::Correct => return self.request_corrections(),
             CompletionEvent::Next => {
                 if let Some(list) = &mut self.completions {
                     list.next();
@@ -897,6 +915,74 @@ impl App {
             CompletionEvent::Close => self.completions = None,
         }
         Task::none()
+    }
+
+    fn request_corrections(&mut self) -> Task<Message> {
+        let revision = self.editor.revision();
+        match self
+            .proofreader
+            .correction_at(revision, self.cursor().offset())
+        {
+            Some(Correction::Replacement { range, text }) => {
+                self.corrections_found(revision, range, vec![text]);
+                Task::none()
+            }
+            Some(Correction::Spelling {
+                range,
+                word,
+                language,
+            }) => Task::perform(
+                proofreading::suggestions(self.proofreader.dictionaries(), word, language),
+                move |suggestions| Message::CorrectionsFound {
+                    revision,
+                    range,
+                    suggestions,
+                },
+            ),
+            None => {
+                self.show_no_corrections();
+                Task::none()
+            }
+        }
+    }
+
+    fn corrections_found(
+        &mut self,
+        revision: u64,
+        range: std::ops::Range<usize>,
+        suggestions: Vec<String>,
+    ) {
+        if revision != self.editor.revision() {
+            return;
+        }
+        if suggestions.is_empty() {
+            self.show_no_corrections();
+            return;
+        }
+        let items = suggestions
+            .into_iter()
+            .map(|text| CompletionItem {
+                label: text.clone(),
+                detail: None,
+                select: text.len()..text.len(),
+                text,
+            })
+            .collect();
+        self.completions = Some(CompletionList {
+            from: Position::new(range.start),
+            to: Some(Position::new(range.end)),
+            items,
+            selected: 0,
+        });
+        self.explicit_completion = false;
+    }
+
+    fn show_no_corrections(&mut self) {
+        self.tooltip = Some(presswork_editor::Tooltip {
+            position: self.cursor(),
+            text: self.localizer.text("proofreading-no-corrections"),
+            code: false,
+        });
     }
 
     fn apply_completion(&mut self, index: usize) -> Task<Message> {
@@ -966,6 +1052,7 @@ impl App {
             .collect();
         (!items.is_empty()).then(|| CompletionList {
             from: Position::new(from),
+            to: None,
             items,
             selected: 0,
         })
@@ -1409,6 +1496,28 @@ impl App {
     }
 
     #[cfg(test)]
+    pub(crate) fn correct_now(&mut self) {
+        let revision = self.editor.revision();
+        if let Some(Correction::Spelling {
+            range,
+            word,
+            language,
+        }) = self
+            .proofreader
+            .correction_at(revision, self.cursor().offset())
+        {
+            let suggestions = futures::executor::block_on(proofreading::suggestions(
+                self.proofreader.dictionaries(),
+                word,
+                language,
+            ));
+            self.corrections_found(revision, range, suggestions);
+        } else {
+            let _ = self.request_corrections();
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn proofread_now(&mut self) {
         self.read_project_files();
         if let (Some(analysis), Some(revision)) =
@@ -1484,6 +1593,7 @@ impl App {
             Message::Editor(action) => return self.edit(action),
             message @ (Message::Hover(_)
             | Message::TooltipFound { .. }
+            | Message::CorrectionsFound { .. }
             | Message::Definition(_)
             | Message::DefinitionFound { .. }
             | Message::Complete(_)
@@ -2887,7 +2997,11 @@ mod tests {
             app.tooltip,
             Some(presswork_editor::Tooltip {
                 position: Position::new(20),
-                text: "The word “mta” is not in the dictionary for en.".to_owned(),
+                text: format!(
+                    "The word “mta” is not in the dictionary for en.\n\
+                     Push {} to show the corrections.",
+                    crate::chrome::shortcut(&app.localizer, '.')
+                ),
                 code: false,
             })
         );
@@ -2905,16 +3019,90 @@ mod tests {
 
     #[test]
     fn house_style_problems_of_the_project_have_marks() {
-        let folder = styled_book("[[rule]]\ntext = \"mta\"\nreplacement = \"mat\"\n");
-        let mut app = app();
-        open(&mut app, &folder);
-        app.compile_now();
-
-        app.proofread_now();
+        let (app, _folder) = proofread_style_book();
 
         assert_eq!(
             marks_of(&app, MarkKind::Style),
             [Position::new(19)..Position::new(22)]
+        );
+    }
+
+    fn proofread_style_book() -> (App, tempfile::TempDir) {
+        let folder = styled_book("[[rule]]\ntext = \"mta\"\nreplacement = \"mat\"\n");
+        let mut app = app();
+        open(&mut app, &folder);
+        app.compile_now();
+        app.proofread_now();
+        (app, folder)
+    }
+
+    #[test]
+    fn command_period_on_a_style_problem_offers_its_replacement() {
+        let (mut app, _folder) = proofread_style_book();
+        send(&mut app, move_to(20));
+
+        send(&mut app, Message::Complete(CompletionEvent::Correct));
+        assert_eq!(labels(&app), ["mat"]);
+        send(&mut app, Message::Complete(CompletionEvent::Accept));
+
+        assert_eq!(
+            app.editor.document().buffer().to_string(),
+            "The cat sat on the mat."
+        );
+    }
+
+    #[test]
+    fn typing_closes_the_corrections() {
+        let (mut app, _folder) = proofread_style_book();
+        send(&mut app, move_to(22));
+        send(&mut app, Message::Complete(CompletionEvent::Correct));
+        assert_eq!(labels(&app), ["mat"]);
+
+        send(&mut app, insert("x"));
+
+        assert_eq!(labels(&app), Vec::<String>::new());
+    }
+
+    #[test]
+    fn suggestions_for_a_misspelled_word_replace_the_whole_word() {
+        let mut app = compiled_app(STYLE_BOOK);
+        send(&mut app, english_dictionary());
+        app.proofread_now();
+        send(&mut app, move_to(20));
+
+        let task = app.update(Message::Complete(CompletionEvent::Correct));
+        assert!(task.units() > 0);
+        let revision = app.editor.revision();
+        send(
+            &mut app,
+            Message::CorrectionsFound {
+                revision,
+                range: 19..22,
+                suggestions: vec!["mat".to_owned(), "met".to_owned()],
+            },
+        );
+        assert_eq!(labels(&app), ["mat", "met"]);
+        send(&mut app, Message::Complete(CompletionEvent::Accept));
+
+        assert_eq!(
+            app.editor.document().buffer().to_string(),
+            "The cat sat on the mat."
+        );
+    }
+
+    #[test]
+    fn command_period_without_a_problem_says_that_there_are_no_corrections() {
+        let mut app = compiled_app("The cat sat on the mat.");
+        send(&mut app, english_dictionary());
+        app.proofread_now();
+        send(&mut app, move_to(5));
+
+        send(&mut app, Message::Complete(CompletionEvent::Correct));
+
+        assert_eq!(app.completions, None);
+        assert_eq!(
+            app.tooltip.as_ref().map(|tooltip| tooltip.text.as_str()),
+            Some("Presswork has no corrections for the text at the cursor.")
         );
     }
 

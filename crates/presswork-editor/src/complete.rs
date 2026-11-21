@@ -23,6 +23,7 @@ pub struct CompletionItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletionList {
     pub from: Position,
+    pub to: Option<Position>,
     pub items: Vec<CompletionItem>,
     pub selected: usize,
 }
@@ -30,6 +31,7 @@ pub struct CompletionList {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionEvent {
     Request,
+    Correct,
     Next,
     Previous,
     Accept,
@@ -54,7 +56,7 @@ impl CompletionList {
     pub fn apply(&self, index: usize, head: Position) -> Option<Action> {
         let item = self.items.get(index)?;
         Some(Action::Replace {
-            range: self.from..head,
+            range: self.from..self.to.unwrap_or(head),
             text: item.text.clone(),
             select: item.select.clone(),
         })
@@ -74,6 +76,9 @@ pub(crate) fn completion_key(
 ) -> Option<CompletionEvent> {
     match key {
         Key::Named(Named::Space) if modifiers.control() => Some(CompletionEvent::Request),
+        Key::Character(character) if character.as_str() == "." && modifiers.command() => {
+            Some(CompletionEvent::Correct)
+        }
         _ if !open => None,
         Key::Named(Named::ArrowDown) => Some(CompletionEvent::Next),
         Key::Named(Named::ArrowUp) => Some(CompletionEvent::Previous),
@@ -118,6 +123,7 @@ mod tests {
     fn list(count: usize) -> CompletionList {
         CompletionList {
             from: Position::new(1),
+            to: None,
             items: (0..count)
                 .map(|index| item(&format!("item{index}")))
                 .collect(),
@@ -141,6 +147,7 @@ mod tests {
     fn apply_replaces_the_typed_text_with_the_item() {
         let list = CompletionList {
             from: Position::new(1),
+            to: None,
             items: vec![CompletionItem {
                 label: "text".to_owned(),
                 detail: None,
@@ -159,6 +166,36 @@ mod tests {
             })
         );
         assert_eq!(list.apply(1, Position::new(3)), None);
+    }
+
+    #[test]
+    fn a_list_with_an_end_replaces_its_whole_range() {
+        let mut list = list(1);
+        list.to = Some(Position::new(5));
+
+        assert_eq!(
+            list.apply(0, Position::new(3)),
+            Some(Action::Replace {
+                range: Position::new(1)..Position::new(5),
+                text: "item0".to_owned(),
+                select: 5..5,
+            })
+        );
+    }
+
+    #[test]
+    fn command_period_asks_for_corrections() {
+        let period = Key::Character(".".into());
+
+        assert_eq!(
+            completion_key(&period, Modifiers::COMMAND, false),
+            Some(CompletionEvent::Correct)
+        );
+        assert_eq!(
+            completion_key(&period, Modifiers::COMMAND, true),
+            Some(CompletionEvent::Correct)
+        );
+        assert_eq!(completion_key(&period, Modifiers::empty(), false), None);
     }
 
     #[test]
