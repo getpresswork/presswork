@@ -91,7 +91,7 @@ pub(crate) struct App {
     tooltip: Option<presswork_editor::Tooltip>,
     completions: Option<presswork_editor::CompletionList>,
     explicit_completion: bool,
-    word_to_add: Option<(String, Vec<WordTarget>)>,
+    commands: Vec<ListCommand>,
     edit_mode: EditMode,
     project: Option<Project>,
     saved: u64,
@@ -118,6 +118,13 @@ enum WordTarget {
 enum EditMode {
     Change,
     Suggest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ListCommand {
+    AddWord(String, WordTarget),
+    Accept(std::ops::Range<Position>),
+    Reject(std::ops::Range<Position>),
 }
 
 #[derive(Debug, Clone)]
@@ -227,7 +234,7 @@ impl App {
             tooltip: None,
             completions: None,
             explicit_completion: false,
-            word_to_add: None,
+            commands: Vec::new(),
             edit_mode: EditMode::Change,
             project: None,
             notice: None,
@@ -1101,7 +1108,53 @@ impl App {
         })
     }
 
+    fn suggestion_choices(&mut self) -> bool {
+        let suggestions = self.editor.document().suggestions();
+        let Some(group) = presswork_text::group_at(suggestions, self.cursor()) else {
+            return false;
+        };
+        let others = suggestions.iter().any(|suggestion| {
+            suggestion.range.end <= group.start || group.end <= suggestion.range.start
+        });
+        let everything = Position::default()..Position::new(self.editor.document().buffer().len());
+        let mut choices = vec![
+            ("suggestion-accept", ListCommand::Accept(group.clone())),
+            ("suggestion-reject", ListCommand::Reject(group.clone())),
+        ];
+        if others {
+            choices.push((
+                "suggestion-accept-all",
+                ListCommand::Accept(everything.clone()),
+            ));
+            choices.push(("suggestion-reject-all", ListCommand::Reject(everything)));
+        }
+        let items = choices
+            .iter()
+            .map(|(id, command)| CompletionItem {
+                label: self.localizer.text(id),
+                detail: Some(self.localizer.text(match command {
+                    ListCommand::Reject(_) => "suggestion-reject-detail",
+                    _ => "suggestion-accept-detail",
+                })),
+                text: String::new(),
+                select: 0..0,
+            })
+            .collect();
+        self.commands = choices.into_iter().map(|(_, command)| command).collect();
+        self.completions = Some(CompletionList {
+            from: group.start,
+            to: Some(group.end),
+            items,
+            selected: 0,
+        });
+        self.explicit_completion = false;
+        true
+    }
+
     fn request_corrections(&mut self) -> Task<Message> {
+        if self.suggestion_choices() {
+            return Task::none();
+        }
         let revision = self.editor.revision();
         match self.correction_here(revision) {
             Some(Correction::Replacement { range, text }) => {
@@ -1181,9 +1234,12 @@ impl App {
             self.show_no_corrections();
             return;
         }
-        self.word_to_add = word
-            .filter(|_| !targets.is_empty())
-            .map(|word| (word, targets));
+        self.commands = word.map_or_else(Vec::new, |word| {
+            targets
+                .into_iter()
+                .map(|target| ListCommand::AddWord(word.clone(), target))
+                .collect()
+        });
         self.completions = Some(CompletionList {
             from: Position::new(range.start),
             to: Some(Position::new(range.end)),
@@ -1229,14 +1285,19 @@ impl App {
         let Some(list) = self.completions.take() else {
             return Task::none();
         };
-        if let Some((word, targets)) = self.word_to_add.take()
-            && list.to.is_some()
-            && let Some(&target) = index
-                .checked_sub(list.items.len().saturating_sub(targets.len()))
-                .and_then(|at| targets.get(at))
+        let mut commands = std::mem::take(&mut self.commands);
+        if list.to.is_some()
+            && let Some(at) = index.checked_sub(list.items.len().saturating_sub(commands.len()))
+            && at < commands.len()
         {
-            self.add_to_word_list(&word, target);
-            return Task::none();
+            return match commands.swap_remove(at) {
+                ListCommand::AddWord(word, target) => {
+                    self.add_to_word_list(&word, target);
+                    Task::none()
+                }
+                ListCommand::Accept(range) => self.edit(presswork_editor::Action::Accept(range)),
+                ListCommand::Reject(range) => self.edit(presswork_editor::Action::Reject(range)),
+            };
         }
         match list.apply(index, self.cursor()) {
             Some(action) => self.edit(action),
@@ -4382,6 +4443,85 @@ mod tests {
 
         assert!(app.editor.suggesting().is_none());
         assert!(simulator(app.view()).find("Suggest").is_err());
+    }
+
+    fn insertion(range: std::ops::Range<usize>) -> presswork_text::Suggestion {
+        presswork_text::Suggestion {
+            kind: presswork_text::SuggestionKind::Insertion,
+            ..deletion(range)
+        }
+    }
+
+    fn replaced_app() -> App {
+        let mut app = app();
+        app.editor = Editor::with_suggestions(
+            "The catdog sat. A big hat.",
+            vec![deletion(4..7), insertion(7..10), deletion(18..22)],
+        );
+        send(&mut app, move_to(5));
+        app
+    }
+
+    #[test]
+    fn control_and_period_in_a_suggestion_offers_to_accept_or_reject_it() {
+        let mut app = replaced_app();
+
+        send(&mut app, Message::Complete(CompletionEvent::Correct));
+
+        assert_eq!(
+            labels(&app),
+            [
+                "Accept the suggestion",
+                "Reject the suggestion",
+                "Accept all suggestions",
+                "Reject all suggestions"
+            ]
+        );
+    }
+
+    #[test]
+    fn accepting_a_suggested_replacement_keeps_the_new_text() {
+        let mut app = replaced_app();
+        send(&mut app, Message::Complete(CompletionEvent::Correct));
+
+        send(&mut app, Message::Complete(CompletionEvent::Choose(0)));
+
+        assert_eq!(
+            app.editor.document().buffer().to_string(),
+            "The dog sat. A big hat."
+        );
+        assert_eq!(
+            suggestion_kinds(&app),
+            [presswork_text::SuggestionKind::Deletion]
+        );
+    }
+
+    #[test]
+    fn rejecting_all_suggestions_keeps_the_old_text() {
+        let mut app = replaced_app();
+        send(&mut app, Message::Complete(CompletionEvent::Correct));
+
+        send(&mut app, Message::Complete(CompletionEvent::Choose(3)));
+
+        assert_eq!(
+            app.editor.document().buffer().to_string(),
+            "The cat sat. A big hat."
+        );
+        assert_eq!(suggestion_kinds(&app), []);
+    }
+
+    #[test]
+    fn the_only_suggestion_has_no_choices_for_all_suggestions() {
+        let mut app = app();
+        app.editor = Editor::with_suggestions("A big hat.", vec![deletion(2..6)]);
+        send(&mut app, move_to(3));
+
+        send(&mut app, Message::Complete(CompletionEvent::Correct));
+
+        assert_eq!(
+            labels(&app),
+            ["Accept the suggestion", "Reject the suggestion"]
+        );
     }
 
     #[test]

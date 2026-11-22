@@ -142,6 +142,12 @@ suggestions-moved = The suggestions of { $file } do not agree with the file, bec
 suggestions-read-error = Presswork cannot read the suggestions of { $file }. { $error }
 suggest-toggle = Suggest
 suggest-toggle-tip = Record your changes as suggestions ({ $shortcut })
+suggestion-accept = Accept the suggestion
+suggestion-reject = Reject the suggestion
+suggestion-accept-all = Accept all suggestions
+suggestion-reject-all = Reject all suggestions
+suggestion-accept-detail = Presswork keeps the inserted text and removes the deleted text.
+suggestion-reject-detail = Presswork removes the inserted text and keeps the deleted text.
 status-position = Line { $line }, column { $column }
 status-compiled = Compiled in { $milliseconds } ms
 
