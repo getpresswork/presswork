@@ -136,6 +136,8 @@ project-error-main-outside = The main file must be in the project folder.
 project-error-main-missing = The main file { $file } does not exist.
 project-error-read = Presswork cannot read { $file }.
 save-error = Presswork cannot save { $file }.
+suggestions-moved = The suggestions of { $file } do not agree with the file, because the file changed outside Presswork. Presswork moved them to { $path }.
+suggestions-read-error = Presswork cannot read the suggestions of { $file }. { $error }
 status-position = Line { $line }, column { $column }
 status-compiled = Compiled in { $milliseconds } ms
 

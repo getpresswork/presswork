@@ -20,6 +20,7 @@ mod publish_view;
 #[cfg(test)]
 mod screens;
 mod server_dialog;
+mod sidecar;
 mod task_list;
 #[cfg(test)]
 mod testing;

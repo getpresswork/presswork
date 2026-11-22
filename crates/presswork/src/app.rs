@@ -47,6 +47,7 @@ use crate::problems::problem_sentence;
 use crate::proofreading::{self, Correction, Proofreader};
 use crate::publish_view::{self, PublishView};
 use crate::server_dialog::{self, ServerDialog};
+use crate::sidecar;
 use crate::task_list::{self, TaskList};
 use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
 use crate::typeset_view;
@@ -375,10 +376,11 @@ impl App {
                 }
                 self.tasks = None;
                 self.library = None;
-                self.editor = Editor::new(&opened.text);
-                self.saved = self.editor.revision();
                 let root = opened.project.root().to_path_buf();
                 let main = opened.project.manifest().main.clone();
+                let (editor, suggestions_notice) = self.restored_editor(&root, &main, &opened.text);
+                self.editor = editor;
+                self.saved = self.editor.revision();
                 self.proofreader.close_project();
                 let style_error = self.proofreader.read_project(&root);
                 self.project = Some(opened.project);
@@ -386,8 +388,9 @@ impl App {
                 self.compiler.open(&root, &main, backend);
                 self.clear_pages();
                 self.publish.clear();
-                self.notice = style_error
-                    .map(|error| proofreading::style_error_text(&self.localizer, &error));
+                self.notice = suggestions_notice.or_else(|| {
+                    style_error.map(|error| proofreading::style_error_text(&self.localizer, &error))
+                });
                 self.workspace = Workspace::Write;
                 self.request_compile()
             }
@@ -395,6 +398,33 @@ impl App {
                 tracing::warn!(%error, "The folder did not open as a project");
                 self.notice = Some(files::error_text(&self.localizer, &error));
                 Task::none()
+            }
+        }
+    }
+
+    fn restored_editor(&self, root: &Path, main: &Path, text: &str) -> (Editor, Option<String>) {
+        let mut args = FluentArgs::new();
+        args.set("file", main.display().to_string());
+        match sidecar::load(root, main, text) {
+            Ok(sidecar::Loaded::Restored { text, suggestions }) => {
+                (Editor::with_suggestions(&text, suggestions), None)
+            }
+            Ok(sidecar::Loaded::Nothing) => (Editor::new(text), None),
+            Ok(sidecar::Loaded::Moved(path)) => {
+                tracing::warn!(path = %path.display(), "The suggestions did not agree with the file");
+                args.set("path", path.display().to_string());
+                (
+                    Editor::new(text),
+                    Some(self.localizer.format("suggestions-moved", &args)),
+                )
+            }
+            Err(error) => {
+                tracing::warn!(%error, "The suggestions were not read");
+                args.set("error", error.to_string());
+                (
+                    Editor::new(text),
+                    Some(self.localizer.format("suggestions-read-error", &args)),
+                )
             }
         }
     }
@@ -1391,7 +1421,12 @@ impl App {
             return;
         };
         let path = project.main();
-        match fs::write(&path, self.editor.document().buffer().to_string()) {
+        let text = self.editor.document().buffer().to_string();
+        let suggestions = self.editor.document().suggestions();
+        let written = fs::write(&path, sidecar::file_text(&text, suggestions)).and_then(|()| {
+            sidecar::save(project.root(), &project.manifest().main, &text, suggestions)
+        });
+        match written {
             Ok(()) => {
                 tracing::info!(path = %path.display(), "File saved");
                 self.saved = self.editor.revision();
@@ -3964,6 +3999,63 @@ mod tests {
         let saved = fs::read_to_string(folder.path().join("main.typ")).unwrap();
         assert_eq!(saved, "x= Book");
         assert!(simulator(app.view()).find("Not saved").is_err());
+    }
+
+    const SIDECAR: &str = ".presswork/suggestions/main.typ.json";
+
+    fn suggested_book() -> (App, tempfile::TempDir) {
+        let folder = book();
+        let mut app = app();
+        open(&mut app, &folder);
+        app.editor.set_suggesting(Some("Ann".to_owned()));
+        send(&mut app, insert("x"));
+        (app, folder)
+    }
+
+    #[test]
+    fn save_keeps_open_suggestions_out_of_the_file() {
+        let (mut suggested, folder) = suggested_book();
+
+        send(&mut suggested, Message::Save);
+
+        assert_eq!(
+            fs::read_to_string(folder.path().join("main.typ")).unwrap(),
+            "= Book"
+        );
+        assert!(folder.path().join(SIDECAR).is_file());
+    }
+
+    #[test]
+    fn opening_a_project_brings_back_its_suggestions() {
+        let (mut suggested, folder) = suggested_book();
+        send(&mut suggested, Message::Save);
+        let mut reopened = app();
+
+        open(&mut reopened, &folder);
+
+        assert_eq!(reopened.editor.document().buffer().to_string(), "x= Book");
+        assert_eq!(reopened.editor.document().suggestions().len(), 1);
+    }
+
+    #[test]
+    fn suggestions_for_a_changed_file_move_away_with_a_notice() {
+        let (mut suggested, folder) = suggested_book();
+        send(&mut suggested, Message::Save);
+        fs::write(folder.path().join("main.typ"), "= Other").unwrap();
+        let mut reopened = app();
+
+        open(&mut reopened, &folder);
+
+        assert_eq!(reopened.editor.document().buffer().to_string(), "= Other");
+        assert_eq!(reopened.editor.document().suggestions(), []);
+        assert!(
+            reopened
+                .notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("main.typ.json.old")),
+            "{:?}",
+            reopened.notice
+        );
     }
 
     #[test]

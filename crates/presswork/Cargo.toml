@@ -34,6 +34,8 @@ iced = { workspace = true, features = ["tokio"] }
 jiff.workspace = true
 png.workspace = true
 rfd.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "time"] }
 tracing.workspace = true
 uuid.workspace = true

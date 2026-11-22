@@ -40,6 +40,14 @@ impl Editor {
         }
     }
 
+    #[must_use]
+    pub fn with_suggestions(text: &str, suggestions: Vec<Suggestion>) -> Self {
+        Self {
+            document: Document::with_suggestions(text, suggestions),
+            ..Self::new(text)
+        }
+    }
+
     pub fn set_suggesting(&mut self, author: Option<String>) {
         self.suggesting = author;
     }

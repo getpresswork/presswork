@@ -29,6 +29,14 @@ impl Document {
     }
 
     #[must_use]
+    pub fn with_suggestions(text: &str, suggestions: Vec<Suggestion>) -> Self {
+        Self {
+            suggestions,
+            ..Self::new(text)
+        }
+    }
+
+    #[must_use]
     pub fn suggestions(&self) -> &[Suggestion] {
         &self.suggestions
     }
