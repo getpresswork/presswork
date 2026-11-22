@@ -16,6 +16,18 @@ The file on disk contains the text without the open suggestions. The preview can
 
 Other functions also make suggestions: the concordance, the house style corrections, and AI assistance. Thus a person always approves a change that a program proposes.
 
+In milestone 2, suggestion mode does these things (D198, D199):
+
+- To start or stop suggestion mode, click **Suggest** in the status bar or push Ctrl+Shift+E. On macOS, push Shift+Cmd+E. While suggestion mode is on, the button stays pressed. Suggestion mode stays on when you open a different project.
+- Inserted text has a green background and a green line below it. Deleted text stays in the editor with a red background and a red line through it.
+- If you type over a selection, the selection becomes a deletion, and the new text becomes an insertion after it. If you delete inserted text, the text goes away immediately, also when a different person suggested it.
+- Each suggestion records its author and its time. When you are signed in to a server, the author is the name of your account. Without a sign-in, the author is the user name of the computer. Put the mouse pointer on a suggestion to see its author and its time.
+- To accept or reject a suggestion, push Ctrl+. in it. A deletion and an insertion side by side from the same author are one suggestion. If the document has more suggestions, the list also shows "Accept all suggestions" and "Reject all suggestions". To accept an insertion keeps the text. To accept a deletion removes the text. Undo brings back the suggestion.
+- The file on disk contains the text without the open suggestions: the deleted text is in the file, and the inserted text is not. Thus the export profiles and `presswork-cli` use the text without the suggestions.
+- Presswork keeps the open suggestions of a file in the folder `.presswork/suggestions` of the project, for example in `.presswork/suggestions/main.typ.json`. When you open the project again, the suggestions come back. If the file changed outside Presswork, the suggestions do not agree with the file. Then Presswork moves them to a file that ends with `.json.old` and tells you in the notice bar.
+- The preview shows the text as it is after you accept all suggestions. Errors, problem marks, and clicks on the pages go to the correct place in the editor.
+- A document from the server does not have suggestion mode yet. Suggestions in the Loro document come later.
+
 ## Spelling
 
 - Presswork checks the spelling of the text parts of Typst files. It does not check code, math, or raw text.
@@ -73,7 +85,7 @@ In milestone 2, the house style does these things (D189):
 - The editor shows each problem with a dotted line in the warning color. The tooltip gives the message. Ctrl+. shows the replacement, and Enter puts it into the text.
 - The editor reads the file again before each check. If the file is not valid, the notice bar tells the problem. Until the file is correct, the editor uses no rules.
 - `presswork-cli check` lists the problems, and they make the check fail. A file that is not valid is an error.
-- Rules from the termbase, rules for each language, and corrections in suggestion mode come later.
+- Rules from the termbase, rules for each language, and house style corrections as suggestions come later.
 
 ## Termbase
 

@@ -152,6 +152,8 @@ In milestone 1, the status bar shows these items:
 
 In milestone 2, the status bar of the Write workspace also shows the **Outline** button. It opens or closes the outline panel at the left of the editor. Refer to [Editor and preview](editor.md#outline).
 
+The **Suggest** button starts or stops suggestion mode. While suggestion mode is on, the button stays pressed. A server document does not show the button. Refer to [Editorial tools](editorial.md#suggestion-mode).
+
 The Toolchains panel, the log panel, and the chat panel open at the bottom of the window. Only one of them is open at a time.
 
 ## Projects

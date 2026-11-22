@@ -1530,3 +1530,29 @@ Do not change what an accepted decision says. You can correct its language. To c
   - `presswork-cli check` does not use the personal dictionary, thus CI and all computers of the team give the same result.
 - **Reason:** A writer often uses names and terms that are correct for that person but that the team does not want in the project. One file in the user folder is simple to keep, to copy, and to edit.
 - **Other options:** A personal dictionary for each language. Personal words on the server for each account. A command to open the file. The personal dictionary also in `presswork-cli check`, with an option to switch it off.
+
+## D198. Suggestion mode for local projects
+
+- **Status:** Accepted, 2026-11-21. **Origin:** Project owner.
+- **Decision:**
+  - The open suggestions of a file go into a separate file in the project folder: `.presswork/suggestions/<file>.json`. The Typst file contains the text without the open suggestions.
+  - The preview compiles the text with the suggestions: with the insertions and without the deletions. A position map takes errors, marks, and clicks back to the editor text.
+  - The author of a suggestion is the name of the account when the user is signed in to a server. Else it is the user name of the computer.
+- **Reason:** A Typst file without suggestion marks stays valid for Typst, for `presswork-cli`, and for other tools. The preview shows the result that the reviewer proposes. The account name agrees with the names in the chat.
+- **Other options:** Suggestions as Typst comments or functions in the file. Suggestions only in memory until the file closes. A preview without the suggestions, or a switch between the two. An author name in the settings.
+
+## D199. Details of suggestion mode
+
+- **Status:** Accepted, 2026-11-21. **Origin:** Default.
+- **Decision:**
+  - A suggestion is an insertion or a deletion, with a range in the editor text, an author, and a time in seconds since 1970. An insertion has a green background and an underline. A deletion has a red background and a line through it.
+  - Typing over a selection gives a deletion of the selection and an insertion after it. A deletion of inserted text removes that text, also from the suggestion of a different author. A deletion of text that is already deleted does nothing. Next to each other, suggestions of the same kind and author join into one suggestion.
+  - After an insertion, the cursor goes after the new text. After Backspace, the cursor goes to the start of the deleted text. After Delete or a deletion of a selection, the cursor goes to the end of the deleted text.
+  - Ctrl+. in a suggestion offers to accept or reject it. A deletion and an insertion next to each other from the same author are one suggestion. "Accept all suggestions" and "Reject all suggestions" are in the list when the document has more suggestions. Each accept or reject is a separate undo step. In a suggestion, the suggestion items come before the spelling corrections.
+  - The Suggest button in the status bar and Ctrl+Shift+E (Shift+Cmd+E on macOS) start and stop suggestion mode. The mode stays on for the next project. It is not on for server documents, and the button is not there.
+  - The author is the account name from the sign-in answer (`user_name` in `POST /api/v1/sessions`), else the variable `USERNAME`, `USER`, or `LOGNAME`, else no name. A tooltip shows "an unknown author" for a suggestion without a name.
+  - The file `.presswork/suggestions/<file>.json` has a version, the full editor text, and the suggestions with byte offsets. Presswork writes it on each save and removes it when there are no suggestions. When the project opens, Presswork uses the file only if its text without the insertions agrees with the Typst file. Else it moves the file to `<file>.json.old` and tells the user.
+  - Exports use the text of the file, thus they agree with `presswork-cli build`.
+  - The tooltip on a suggestion gives its kind, its author, and its local time, for example "Insertion from Ann · 21 November 2025, 04:40".
+- **Reason:** These rules agree with the suggestion modes of common word processors. A text without the open suggestions on disk keeps the project safe in all other tools.
+- **Other options:** A separate key for each accept and reject command. A panel with a list of all suggestions. Suggestions in the Loro document for server documents now. A preview switch with and without the suggestions. Exports with the suggestions.

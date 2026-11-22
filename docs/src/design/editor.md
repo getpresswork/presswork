@@ -65,7 +65,8 @@ Until the project model is ready, the Write workspace shows a scratch document. 
 | Ctrl+A, Ctrl+C, Ctrl+X, and Ctrl+V | Select all, copy, cut, and paste. |
 | Ctrl+Z, and Ctrl+Y or Ctrl+Shift+Z | Undo and redo. |
 | Ctrl+Space | Show the completions at the cursor. |
-| Ctrl+. | Show the corrections for the spelling or house style problem at the cursor. |
+| Ctrl+. | Show the corrections for the spelling or house style problem at the cursor. In a suggestion, accept or reject the suggestion. |
+| Ctrl+Shift+E | Start or stop suggestion mode. |
 | F12 | Go to the definition of the item at the cursor. |
 | Ctrl+F | Open the find bar. |
 | Ctrl+H | Open the find bar with the replace row. |
@@ -76,7 +77,7 @@ Until the project model is ready, the Write workspace shows a scratch document. 
 | Escape | With many cursors, keep only the primary cursor. |
 | Ctrl+Shift+[ and Ctrl+Shift+] | Fold or unfold the part of the text at the cursor. |
 
-On macOS, Cmd replaces Ctrl in shortcuts, and Alt replaces Ctrl for word movement and word deletion. Cmd+Left and Cmd+Right move to the start or the end of the line. Ctrl+Space stays Ctrl+Space, because Cmd+Space opens Spotlight. Cmd+Option+F opens the replace row, because Cmd+H hides the application. Cmd+Option+Up and Cmd+Option+Down add cursors. Cmd+Option+[ and Cmd+Option+] fold and unfold.
+On macOS, Cmd replaces Ctrl in shortcuts, and Alt replaces Ctrl for word movement and word deletion. Cmd+Left and Cmd+Right move to the start or the end of the line. Ctrl+Space stays Ctrl+Space, because Cmd+Space opens Spotlight. Cmd+Option+F opens the replace row, because Cmd+H hides the application. Cmd+Option+Up and Cmd+Option+Down add cursors. Cmd+Option+[ and Cmd+Option+] fold and unfold. Shift+Cmd+E starts or stops suggestion mode.
 
 Click to move the cursor. Double-click to select a word, and triple-click to select a line. Drag to select text. Shift+click extends the selection. Ctrl+click a name to go to its definition. On macOS, use Cmd+click. Alt+click adds a cursor. On macOS, use Option+click.
 
@@ -84,7 +85,7 @@ Click to move the cursor. Double-click to select a word, and triple-click to sel
 
 If the mouse pointer stays on the text for half a second, the editor shows a tooltip for the item below the pointer. The tooltip comes from the embedded engine (D169). For example, it gives a short description of a function, or a length in other units. Code in a tooltip has the monospace font. The tooltip goes above the line, or below the line if there is no space above. If you move the pointer, push a key, or click, the tooltip closes.
 
-On a word with a dotted line, the tooltip tells the spelling or house style problem and the shortcut for the corrections (D189).
+On a word with a dotted line, the tooltip tells the spelling or house style problem and the shortcut for the corrections (D189). On a suggestion, the tooltip tells the type of the suggestion, its author, and its time (D199).
 
 ### Completion
 
@@ -109,6 +110,8 @@ Push Ctrl+. on a word with a dotted line to show the corrections in the completi
 - For a house style problem, the list shows the replacement of the rule.
 - Enter or Tab replaces all of the marked text with the selected item. If you type or move the cursor, the list closes.
 - If there are no corrections, a tooltip tells you.
+
+In a suggestion, Ctrl+. shows "Accept the suggestion" and "Reject the suggestion" (D199). If the document has more suggestions, the list also shows "Accept all suggestions" and "Reject all suggestions". These items come before the spelling corrections. Refer to [Editorial tools](editorial.md#suggestion-mode).
 
 ### Go to definition
 
