@@ -276,6 +276,50 @@ fn render_screens() {
     render_typeset(&mut app);
     render_problem_marks(&mut app);
     render_house_style(&mut app);
+    render_suggestions(&mut app);
+}
+
+const SUGGESTED: &str = "#set text(font: \"Libertinus Serif\")\n= Field notes\n\n\
+                         The paper for the first proof comes from the mill. \
+                         We cut each sheet by hand and fold it twice.\n";
+
+fn render_suggestions(app: &mut App) {
+    let book = folder(&[
+        ("presswork.toml", "[project]\nname = \"Field Notes\"\n"),
+        ("main.typ", SUGGESTED),
+    ]);
+    send(app, Message::SelectWorkspace(Workspace::Write));
+    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    app.suggest_as("Ann Lee");
+    let first = SUGGESTED.find("first").unwrap();
+    select(app, first, first + "first".len());
+    send(
+        app,
+        Message::Editor(EditorAction::Insert("second".to_owned())),
+    );
+    let twice = SUGGESTED.find(" and fold it twice").unwrap() + "second".len();
+    select(app, twice, twice + " and fold it twice".len());
+    send(
+        app,
+        Message::Editor(EditorAction::Delete(presswork_editor::Deletion::Backward)),
+    );
+    let mill = SUGGESTED.find("mill").unwrap() + "second".len() + "mill".len();
+    select(app, mill, mill);
+    send(
+        app,
+        Message::Editor(EditorAction::Insert(" at Arches".to_owned())),
+    );
+    app.compile_now();
+    send(app, Message::Hover(Some(Position::new(first + 2))));
+    render(app, "suggestions");
+
+    send(app, Message::Hover(None));
+    select(app, first + 1, first + 1);
+    send(
+        app,
+        Message::Complete(presswork_editor::CompletionEvent::Correct),
+    );
+    render(app, "suggestion-choices");
 }
 
 const STYLED_NOTES: &str = "#set text(font: \"Libertinus Serif\")\n= Field notes\n\n\

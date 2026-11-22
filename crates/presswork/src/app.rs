@@ -1901,6 +1901,12 @@ impl App {
     }
 
     #[cfg(test)]
+    pub(crate) fn suggest_as(&mut self, author: &str) {
+        self.edit_mode = EditMode::Suggest;
+        self.editor.set_suggesting(Some(author.to_owned()));
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_personal_list(&mut self, path: PathBuf) {
         self.proofreader.set_personal_list(Some(path));
     }
