@@ -1377,6 +1377,14 @@ impl App {
         let Some(position) = position else {
             return Task::none();
         };
+        if let Some(text) = self.suggestion_tip(position) {
+            self.tooltip = Some(presswork_editor::Tooltip {
+                position,
+                text,
+                code: false,
+            });
+            return Task::none();
+        }
         if let Some(text) = self.proofreader.tooltip(
             &self.localizer,
             self.editor.revision(),
@@ -1402,6 +1410,31 @@ impl App {
                 tooltip,
             },
         )
+    }
+
+    fn suggestion_tip(&self, position: Position) -> Option<String> {
+        let suggestion = self
+            .editor
+            .document()
+            .suggestions()
+            .iter()
+            .find(|suggestion| suggestion.range.contains(&position))?;
+        let mut args = FluentArgs::new();
+        let author = if suggestion.author.is_empty() {
+            self.localizer.text("suggestion-unknown-author")
+        } else {
+            suggestion.author.clone()
+        };
+        args.set("author", author);
+        args.set(
+            "time",
+            suggestion_time(suggestion.time, &jiff::tz::TimeZone::system()),
+        );
+        let id = match suggestion.kind {
+            presswork_text::SuggestionKind::Insertion => "suggestion-insertion-tip",
+            presswork_text::SuggestionKind::Deletion => "suggestion-deletion-tip",
+        };
+        Some(self.localizer.format(id, &args))
     }
 
     fn assist_analysis(&self) -> Option<Analysis> {
@@ -2661,6 +2694,17 @@ fn export_profiles(project: &Project) -> (Vec<ExportProfile>, bool) {
 #[cfg(test)]
 pub(crate) fn send(app: &mut App, message: Message) {
     let _ = app.update(message);
+}
+
+fn suggestion_time(time: i64, zone: &jiff::tz::TimeZone) -> String {
+    jiff::Timestamp::from_second(time).map_or_else(
+        |_| String::new(),
+        |time| {
+            time.to_zoned_datetime(zone.clone())
+                .strftime("%-d %B %Y, %H:%M")
+                .to_string()
+        },
+    )
 }
 
 fn author_name(account: Option<&str>, variable: impl Fn(&str) -> Option<String>) -> String {
@@ -4508,6 +4552,27 @@ mod tests {
             "The cat sat. A big hat."
         );
         assert_eq!(suggestion_kinds(&app), []);
+    }
+
+    #[test]
+    fn a_suggestion_under_the_mouse_shows_its_author_and_time() {
+        let mut app = replaced_app();
+
+        send(&mut app, Message::Hover(Some(Position::new(8))));
+
+        let text = app
+            .tooltip
+            .as_ref()
+            .map_or_default(|tooltip| tooltip.text.clone());
+        assert!(text.starts_with("Insertion from Ann · "), "{text}");
+    }
+
+    #[test]
+    fn the_time_of_a_suggestion_has_the_date_and_the_hour() {
+        assert_eq!(
+            suggestion_time(1_763_700_000, &jiff::tz::TimeZone::UTC),
+            "21 November 2025, 04:40"
+        );
     }
 
     #[test]

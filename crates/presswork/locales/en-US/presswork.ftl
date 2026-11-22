@@ -148,6 +148,9 @@ suggestion-accept-all = Accept all suggestions
 suggestion-reject-all = Reject all suggestions
 suggestion-accept-detail = Presswork keeps the inserted text and removes the deleted text.
 suggestion-reject-detail = Presswork removes the inserted text and keeps the deleted text.
+suggestion-insertion-tip = Insertion from { $author } · { $time }
+suggestion-deletion-tip = Deletion from { $author } · { $time }
+suggestion-unknown-author = an unknown author
 status-position = Line { $line }, column { $column }
 status-compiled = Compiled in { $milliseconds } ms
 
