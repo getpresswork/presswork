@@ -92,6 +92,7 @@ pub(crate) struct App {
     completions: Option<presswork_editor::CompletionList>,
     explicit_completion: bool,
     word_to_add: Option<(String, Vec<WordTarget>)>,
+    edit_mode: EditMode,
     project: Option<Project>,
     saved: u64,
     notice: Option<String>,
@@ -111,6 +112,12 @@ pub(crate) struct App {
 enum WordTarget {
     Project,
     Personal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditMode {
+    Change,
+    Suggest,
 }
 
 #[derive(Debug, Clone)]
@@ -164,6 +171,7 @@ pub(crate) enum Message {
     OpenFolder,
     FolderPicked(Option<PathBuf>),
     Save,
+    ToggleSuggesting,
     Key(keyboard::Event),
     DismissNotice,
     ToggleMenu,
@@ -220,6 +228,7 @@ impl App {
             completions: None,
             explicit_completion: false,
             word_to_add: None,
+            edit_mode: EditMode::Change,
             project: None,
             notice: None,
             main_window: window::Id::unique(),
@@ -425,6 +434,7 @@ impl App {
                 let main = opened.project.manifest().main.clone();
                 let (editor, suggestions_notice) = self.restored_editor(&root, &main, &opened.text);
                 self.editor = editor;
+                self.apply_suggesting();
                 self.saved = self.editor.revision();
                 self.proofreader.close_project();
                 let style_error = self.proofreader.read_project(&root);
@@ -499,6 +509,33 @@ impl App {
         self.notice = None;
         self.workspace = Workspace::Write;
         Task::batch([self.request_compile(), self.load_library()])
+    }
+
+    fn server_document_open(&self) -> bool {
+        self.live.as_ref().and_then(LiveSession::document).is_some()
+    }
+
+    fn toggle_suggesting(&mut self) {
+        if self.server_document_open() {
+            return;
+        }
+        self.edit_mode = match self.edit_mode {
+            EditMode::Change => EditMode::Suggest,
+            EditMode::Suggest => EditMode::Change,
+        };
+        self.apply_suggesting();
+    }
+
+    fn apply_suggesting(&mut self) {
+        let suggesting = self.edit_mode == EditMode::Suggest && !self.server_document_open();
+        let author = suggesting.then(|| {
+            let account = self
+                .live
+                .as_ref()
+                .map(|live| live.connection().user_name.as_str());
+            author_name(account, |name| std::env::var(name).ok())
+        });
+        self.editor.set_suggesting(author);
     }
 
     fn clear_pages(&mut self) {
@@ -672,6 +709,7 @@ impl App {
             return Task::none();
         }
         match key.to_latin(physical_key) {
+            Some('e') if modifiers.shift() => self.toggle_suggesting(),
             Some('s') => self.save(),
             Some('o') => return self.open_folder(),
             Some('q') => return self.quit(),
@@ -1867,6 +1905,7 @@ impl App {
             }
             Message::Editor(_) if self.quitting => {}
             Message::Editor(action) => return self.edit(action),
+            Message::ToggleSuggesting => self.toggle_suggesting(),
             message @ (Message::Hover(_)
             | Message::TooltipFound { .. }
             | Message::CorrectionsFound { .. }
@@ -2373,6 +2412,25 @@ impl App {
         .into()
     }
 
+    fn suggest_button(&self) -> Element<'_, Message> {
+        let content = row![
+            icon(Icon::FilePen).size(size::ICON_SMALL),
+            text(self.localizer.text("suggest-toggle")).size(font_size::SMALL)
+        ]
+        .spacing(gap::XS)
+        .align_y(Vertical::Center);
+        let mut args = FluentArgs::new();
+        args.set("shortcut", chrome::shift_shortcut(&self.localizer, 'E'));
+        chrome::tip(
+            button(content)
+                .padding([gap::XXS, gap::S])
+                .style(style::tab(self.edit_mode == EditMode::Suggest))
+                .on_press(Message::ToggleSuggesting),
+            self.localizer.format("suggest-toggle-tip", &args),
+            tooltip::Position::Top,
+        )
+    }
+
     fn status_bar(&self) -> Element<'_, Message> {
         let (errors, warnings) = self.logs.counts();
         let mut indicators = row![].spacing(gap::XS).align_y(Vertical::Center);
@@ -2392,6 +2450,9 @@ impl App {
                     .toggle_button(&self.localizer)
                     .map(Message::Outline),
             );
+            if !self.server_document_open() {
+                indicators = indicators.push(self.suggest_button());
+            }
         }
         if self.live.as_ref().and_then(LiveSession::chat).is_some() {
             indicators = indicators.push(self.chat_button());
@@ -2539,6 +2600,21 @@ fn export_profiles(project: &Project) -> (Vec<ExportProfile>, bool) {
 #[cfg(test)]
 pub(crate) fn send(app: &mut App, message: Message) {
     let _ = app.update(message);
+}
+
+fn author_name(account: Option<&str>, variable: impl Fn(&str) -> Option<String>) -> String {
+    let named = |name: &str| {
+        let name = name.trim();
+        (!name.is_empty()).then(|| name.to_owned())
+    };
+    account
+        .and_then(named)
+        .or_else(|| {
+            ["USERNAME", "USER", "LOGNAME"]
+                .into_iter()
+                .find_map(|key| variable(key).as_deref().and_then(named))
+        })
+        .unwrap_or_default()
 }
 
 fn problem_mark(problem: &Problem, text: String, severity: Severity) -> Option<ProblemMark> {
@@ -4207,6 +4283,105 @@ mod tests {
         let (_, text, _) = suggested.start_export(0).unwrap();
 
         assert_eq!(text, "= Book");
+    }
+
+    fn suggestion_key() -> Message {
+        let pressed = keyboard::Key::Character("e".into());
+        Message::Key(keyboard::Event::KeyPressed {
+            key: pressed.clone(),
+            modified_key: keyboard::Key::Character("E".into()),
+            physical_key: keyboard::key::Physical::Code(keyboard::key::Code::KeyE),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    fn suggestion_kinds(app: &App) -> Vec<presswork_text::SuggestionKind> {
+        app.editor
+            .document()
+            .suggestions()
+            .iter()
+            .map(|suggestion| suggestion.kind)
+            .collect()
+    }
+
+    #[test]
+    fn the_suggest_button_records_the_edits_as_suggestions() {
+        let folder = book();
+        let mut app = app();
+        open(&mut app, &folder);
+
+        let mut ui = simulator(app.view());
+        ui.click("Suggest")
+            .expect("the status bar has the suggest button");
+        for message in ui.into_messages() {
+            send(&mut app, message);
+        }
+        send(&mut app, insert("x"));
+
+        assert_eq!(
+            suggestion_kinds(&app),
+            [presswork_text::SuggestionKind::Insertion]
+        );
+    }
+
+    #[test]
+    fn control_shift_and_e_turns_suggestion_mode_on_and_off() {
+        let mut app = app();
+
+        send(&mut app, suggestion_key());
+        assert!(app.editor.suggesting().is_some());
+
+        send(&mut app, suggestion_key());
+        assert!(app.editor.suggesting().is_none());
+    }
+
+    #[test]
+    fn suggestion_mode_stays_on_for_the_next_project() {
+        let folder = book();
+        let mut app = app();
+        send(&mut app, suggestion_key());
+
+        open(&mut app, &folder);
+
+        assert!(app.editor.suggesting().is_some());
+    }
+
+    #[test]
+    fn a_suggestion_has_the_name_of_the_account() {
+        let folder = book();
+        let mut app = app();
+        signed_in(&mut app);
+        send(&mut app, Message::Server(server_dialog::Message::Close));
+        open(&mut app, &folder);
+
+        send(&mut app, suggestion_key());
+
+        assert_eq!(app.editor.suggesting(), Some("Ann"));
+    }
+
+    #[test]
+    fn the_author_is_the_account_else_the_user_of_the_computer() {
+        let user = |name: &str| (name == "USER").then(|| "ann".to_owned());
+        let nobody = |_: &str| None;
+
+        assert_eq!(author_name(Some("Ann Lee"), user), "Ann Lee");
+        assert_eq!(author_name(Some(" "), user), "ann");
+        assert_eq!(author_name(None, user), "ann");
+        assert_eq!(author_name(None, nobody), "");
+    }
+
+    #[test]
+    fn a_server_document_has_no_suggestion_mode() {
+        let mut app = app();
+        let _receiver = open_server_document(&mut app);
+
+        send(&mut app, suggestion_key());
+
+        assert!(app.editor.suggesting().is_none());
+        assert!(simulator(app.view()).find("Suggest").is_err());
     }
 
     #[test]

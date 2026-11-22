@@ -13,6 +13,8 @@ menu-logs = Logs
 menu-quit = Quit
 shortcut = Ctrl+{ $key }
 shortcut-mac = Cmd+{ $key }
+shortcut-shift = Ctrl+Shift+{ $key }
+shortcut-shift-mac = Shift+Cmd+{ $key }
 
 server-title = Connect to a server
 server-address = Server address
@@ -138,6 +140,8 @@ project-error-read = Presswork cannot read { $file }.
 save-error = Presswork cannot save { $file }.
 suggestions-moved = The suggestions of { $file } do not agree with the file, because the file changed outside Presswork. Presswork moved them to { $path }.
 suggestions-read-error = Presswork cannot read the suggestions of { $file }. { $error }
+suggest-toggle = Suggest
+suggest-toggle-tip = Record your changes as suggestions ({ $shortcut })
 status-position = Line { $line }, column { $column }
 status-compiled = Compiled in { $milliseconds } ms
 

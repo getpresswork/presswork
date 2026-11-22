@@ -170,12 +170,20 @@ pub(crate) fn bar<'a>(
 }
 
 pub(crate) fn shortcut(localizer: &Localizer, key: char) -> String {
+    key_text(localizer, key, "shortcut-mac", "shortcut")
+}
+
+pub(crate) fn shift_shortcut(localizer: &Localizer, key: char) -> String {
+    key_text(localizer, key, "shortcut-shift-mac", "shortcut-shift")
+}
+
+fn key_text(localizer: &Localizer, key: char, mac: &str, other: &str) -> String {
     let mut args = FluentArgs::new();
     args.set("key", key.to_string());
     let id = if cfg!(target_os = "macos") {
-        "shortcut-mac"
+        mac
     } else {
-        "shortcut"
+        other
     };
     localizer.format(id, &args)
 }
@@ -568,6 +576,17 @@ mod tests {
         };
 
         assert_eq!(shortcut(&Localizer::english(), 'O'), expected);
+    }
+
+    #[test]
+    fn shift_shortcuts_use_the_modifier_of_the_system() {
+        let expected = if cfg!(target_os = "macos") {
+            "Shift+Cmd+E"
+        } else {
+            "Ctrl+Shift+E"
+        };
+
+        assert_eq!(shift_shortcut(&Localizer::english(), 'E'), expected);
     }
 
     #[test]
