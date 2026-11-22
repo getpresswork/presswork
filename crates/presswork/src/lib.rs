@@ -21,6 +21,7 @@ mod publish_view;
 mod screens;
 mod server_dialog;
 mod sidecar;
+mod source_map;
 mod task_list;
 #[cfg(test)]
 mod testing;

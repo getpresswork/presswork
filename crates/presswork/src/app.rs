@@ -48,6 +48,7 @@ use crate::proofreading::{self, Correction, Proofreader};
 use crate::publish_view::{self, PublishView};
 use crate::server_dialog::{self, ServerDialog};
 use crate::sidecar;
+use crate::source_map::SourceMap;
 use crate::task_list::{self, TaskList};
 use crate::toolchain_panel::{self, Choice, ToolchainPanel, sentence, toolchain_directory};
 use crate::typeset_view;
@@ -82,6 +83,8 @@ pub(crate) struct App {
     publish: PublishView,
     quality: Vec<Problem>,
     shown_problem: Option<usize>,
+    compiled_map: SourceMap,
+    pages_map: SourceMap,
     proofreader: Proofreader,
     modifiers: keyboard::Modifiers,
     hovered: Option<Position>,
@@ -145,6 +148,7 @@ pub(crate) enum Message {
         generation: u64,
         revision: u64,
         output: Arc<Output>,
+        map: SourceMap,
     },
     CompileFailed {
         generation: u64,
@@ -207,6 +211,8 @@ impl App {
             publish: PublishView::default(),
             quality: Vec::new(),
             shown_problem: None,
+            compiled_map: SourceMap::default(),
+            pages_map: SourceMap::default(),
             proofreader: Proofreader::default(),
             modifiers: keyboard::Modifiers::default(),
             hovered: None,
@@ -309,9 +315,46 @@ impl App {
         }
     }
 
+    fn suggestion_map(&self, kind: presswork_text::SuggestionKind) -> SourceMap {
+        SourceMap::removing(
+            self.editor
+                .document()
+                .suggestions()
+                .iter()
+                .filter(|suggestion| suggestion.kind == kind)
+                .map(|suggestion| suggestion.range.start.offset()..suggestion.range.end.offset()),
+        )
+    }
+
+    fn preview_map(&self) -> SourceMap {
+        self.suggestion_map(presswork_text::SuggestionKind::Deletion)
+    }
+
+    fn file_map(&self) -> SourceMap {
+        self.suggestion_map(presswork_text::SuggestionKind::Insertion)
+    }
+
+    fn compile_text(&self) -> (String, SourceMap) {
+        let map = self.preview_map();
+        (map.text(&self.editor.document().buffer().to_string()), map)
+    }
+
+    fn mapped_mark(map: &SourceMap, mark: &Mark) -> Mark {
+        let range = map.range_to_editor(mark.range.start.offset()..mark.range.end.offset());
+        Mark {
+            range: Position::new(range.start)..Position::new(range.end),
+            kind: mark.kind,
+        }
+    }
+
     pub(crate) fn marks(&self) -> Vec<Mark> {
         let mut marks = self.diagnostic_marks();
-        marks.extend(self.proofreader.marks(self.editor.revision()));
+        marks.extend(
+            self.proofreader
+                .marks(self.editor.revision())
+                .into_iter()
+                .map(|mark| Self::mapped_mark(&self.pages_map, &mark)),
+        );
         if self.find.is_open() {
             marks.extend(self.find.matches().iter().map(|found| Mark {
                 range: Position::new(found.start)..Position::new(found.end),
@@ -332,7 +375,9 @@ impl App {
             .diagnostics
             .iter()
             .filter_map(|diagnostic| {
-                let range = diagnostic.main_range()?;
+                let range = self
+                    .compiled_map
+                    .range_to_editor(diagnostic.main_range()?.clone());
                 Some(Mark {
                     range: Position::new(range.start)..Position::new(range.end),
                     kind: match diagnostic.severity {
@@ -355,7 +400,7 @@ impl App {
                     .find(|diagnostic| diagnostic.severity == Severity::Error)
             })
             .and_then(Diagnostic::main_range)
-            .map(|range| range.start)
+            .map(|range| self.compiled_map.to_editor(range.start, true))
         else {
             return;
         };
@@ -464,6 +509,8 @@ impl App {
         self.outline.set_headings(Vec::new());
         self.quality.clear();
         self.shown_problem = None;
+        self.compiled_map = SourceMap::default();
+        self.pages_map = SourceMap::default();
     }
 
     fn load_library(&self) -> Task<Message> {
@@ -807,7 +854,10 @@ impl App {
             .and_then(|project| export_profiles(project).0.into_iter().nth(index))?;
         let run = self.publish.start(index)?;
         tracing::info!(profile = %profile.name, "Export started");
-        Some((run, self.editor.document().buffer().to_string(), profile))
+        let text = self
+            .file_map()
+            .text(&self.editor.document().buffer().to_string());
+        Some((run, text, profile))
     }
 
     fn show_export_problem(&mut self, index: usize, problem: usize) -> Task<Message> {
@@ -815,7 +865,8 @@ impl App {
             .publish
             .problem(index, problem)
             .and_then(|problem| problem.source.clone());
-        self.show_source(source)
+        let map = self.file_map();
+        self.show_source(source, &map)
     }
 
     fn show_layout_problem(&mut self, index: usize) -> Task<Message> {
@@ -841,15 +892,17 @@ impl App {
             .quality
             .get(index)
             .and_then(|problem| problem.source.clone());
-        self.show_source(source)
+        let map = self.pages_map.clone();
+        self.show_source(source, &map)
     }
 
-    fn show_source(&mut self, source: Option<SourceRange>) -> Task<Message> {
+    fn show_source(&mut self, source: Option<SourceRange>, map: &SourceMap) -> Task<Message> {
         let Some(source) = source else {
             return Task::none();
         };
         match source {
             SourceRange::Main(range) => {
+                let range = map.range_to_editor(range);
                 let workspace = self.select_workspace(Workspace::Write);
                 let select = self.select_range(range.start, range.end);
                 Task::batch([workspace, select, operation::focus(EDITOR)])
@@ -877,7 +930,7 @@ impl App {
         };
         match heading.source {
             Some(SourceRange::Main(range)) => {
-                self.move_cursor(range.start);
+                self.move_cursor(self.pages_map.to_editor(range.start, true));
                 Task::batch([operation::focus(EDITOR), preview])
             }
             Some(SourceRange::File(path, _)) => {
@@ -923,10 +976,10 @@ impl App {
         let Some(analysis) = self.assist_analysis() else {
             return Task::none();
         };
-        let text = self.editor.document().buffer().to_string();
+        let (text, map) = self.compile_text();
         let revision = self.editor.revision();
         Task::perform(
-            assist::definition(analysis, text, position.offset()),
+            assist::definition(analysis, text, map.to_compiled(position.offset())),
             move |definition| Message::DefinitionFound {
                 revision,
                 definition,
@@ -944,6 +997,7 @@ impl App {
         }
         match definition {
             Some(presswork_typst::Definition::Main(range)) => {
+                let range = self.preview_map().range_to_editor(range);
                 self.select_range(range.start, range.end)
             }
             Some(presswork_typst::Definition::File(path, _)) => {
@@ -987,12 +1041,31 @@ impl App {
         Task::none()
     }
 
+    fn correction_here(&self, revision: u64) -> Option<Correction> {
+        let map = &self.pages_map;
+        let correction = self
+            .proofreader
+            .correction_at(revision, map.to_compiled(self.cursor().offset()))?;
+        Some(match correction {
+            Correction::Replacement { range, text } => Correction::Replacement {
+                range: map.range_to_editor(range),
+                text,
+            },
+            Correction::Spelling {
+                range,
+                word,
+                language,
+            } => Correction::Spelling {
+                range: map.range_to_editor(range),
+                word,
+                language,
+            },
+        })
+    }
+
     fn request_corrections(&mut self) -> Task<Message> {
         let revision = self.editor.revision();
-        match self
-            .proofreader
-            .correction_at(revision, self.cursor().offset())
-        {
+        match self.correction_here(revision) {
             Some(Correction::Replacement { range, text }) => {
                 self.corrections_found(revision, range, vec![text], None);
                 Task::none()
@@ -1137,11 +1210,11 @@ impl App {
         let Some(analysis) = self.assist_analysis() else {
             return Task::none();
         };
-        let text = self.editor.document().buffer().to_string();
+        let (text, map) = self.compile_text();
         let revision = self.editor.revision();
         let offset = self.cursor().offset();
         Task::perform(
-            assist::completions(analysis, text, offset, explicit),
+            assist::completions(analysis, text, map.to_compiled(offset), explicit),
             move |completions| Message::CompletionsFound {
                 revision,
                 offset,
@@ -1167,7 +1240,10 @@ impl App {
 
     fn completion_list(&self, completions: presswork_typst::Completions) -> Option<CompletionList> {
         let cursor = self.cursor().offset();
-        let from = completions.from.min(cursor);
+        let from = self
+            .preview_map()
+            .to_editor(completions.from, true)
+            .min(cursor);
         let typed = self
             .editor
             .document()
@@ -1202,10 +1278,11 @@ impl App {
         let Some(position) = position else {
             return Task::none();
         };
-        if let Some(text) =
-            self.proofreader
-                .tooltip(&self.localizer, self.editor.revision(), position.offset())
-        {
+        if let Some(text) = self.proofreader.tooltip(
+            &self.localizer,
+            self.editor.revision(),
+            self.pages_map.to_compiled(position.offset()),
+        ) {
             self.tooltip = Some(presswork_editor::Tooltip {
                 position,
                 text,
@@ -1216,10 +1293,10 @@ impl App {
         let Some(analysis) = self.assist_analysis() else {
             return Task::none();
         };
-        let text = self.editor.document().buffer().to_string();
+        let (text, map) = self.compile_text();
         let revision = self.editor.revision();
         Task::perform(
-            assist::tooltip(analysis, text, position.offset()),
+            assist::tooltip(analysis, text, map.to_compiled(position.offset())),
             move |tooltip| Message::TooltipFound {
                 position,
                 revision,
@@ -1257,7 +1334,7 @@ impl App {
     }
 
     fn follow_cursor(&mut self) -> Task<Message> {
-        let offset = self.cursor().offset();
+        let offset = self.pages_map.to_compiled(self.cursor().offset());
         let point = self
             .pages_analysis
             .as_ref()
@@ -1281,7 +1358,7 @@ impl App {
         };
         match jump {
             Some(Jump::Main(offset)) => {
-                self.move_cursor(offset);
+                self.move_cursor(self.pages_map.to_editor(offset, true));
                 Task::batch([operation::focus(EDITOR), self.follow_cursor()])
             }
             Some(Jump::File(path, _)) => {
@@ -1523,22 +1600,23 @@ impl App {
     }
 
     fn start_compile(&self) -> Task<Message> {
-        let text = self.editor.document().buffer().to_string();
+        let (text, map) = self.compile_text();
         let generation = self.compiler.generation();
         let revision = self.editor.revision();
         Task::perform(self.compiler.job(text), move |result| {
-            compiled(generation, revision, result)
+            compiled(generation, revision, result, map)
         })
     }
 
     #[cfg(test)]
     pub(crate) fn compile_now(&mut self) {
-        let text = self.editor.document().buffer().to_string();
+        let (text, map) = self.compile_text();
         let result = self.compiler.run_now(&text);
         let _ = self.update(compiled(
             self.compiler.generation(),
             self.editor.revision(),
             result,
+            map,
         ));
     }
 
@@ -1547,11 +1625,13 @@ impl App {
         generation: u64,
         revision: u64,
         output: Arc<Output>,
+        map: SourceMap,
     ) -> Task<Message> {
         if generation != self.compiler.generation() {
             return Task::none();
         }
         self.compiled_revision = Some(revision);
+        self.compiled_map = map;
         tracing::debug!(
             duration_ms = output.duration.as_millis(),
             diagnostics = output.diagnostics.len(),
@@ -1561,6 +1641,7 @@ impl App {
         self.preview.set_problem(self.problem(&output));
         if output.pages.is_some() {
             self.pages_analysis.clone_from(&output.analysis);
+            self.pages_map.clone_from(&self.compiled_map);
             self.outline.set_headings(
                 self.pages_analysis
                     .as_ref()
@@ -1698,9 +1779,7 @@ impl App {
             range,
             word,
             language,
-        }) = self
-            .proofreader
-            .correction_at(revision, self.cursor().offset())
+        }) = self.correction_here(revision)
         {
             let suggestions = futures::executor::block_on(proofreading::suggestions(
                 self.proofreader.dictionaries(),
@@ -1747,11 +1826,12 @@ impl App {
         let Some(range) = error.main_range() else {
             return Some(self.localizer.format("preview-error-without-line", &args));
         };
+        let start = self.compiled_map.to_editor(range.start, true);
         let line = self
             .editor
             .document()
             .buffer()
-            .line_of(Position::new(range.start));
+            .line_of(Position::new(start));
         args.set("line", line + 1);
         Some(self.localizer.format("preview-error", &args))
     }
@@ -1803,7 +1883,8 @@ impl App {
                 generation,
                 revision,
                 output,
-            } => return self.show_output(generation, revision, output),
+                map,
+            } => return self.show_output(generation, revision, output, map),
             Message::CompileFailed {
                 generation,
                 revision,
@@ -1811,7 +1892,7 @@ impl App {
             } => {
                 tracing::warn!(%error, "The Typst program did not compile");
                 let output = Arc::new(self.failed_output(&error));
-                return self.show_output(generation, revision, output);
+                return self.show_output(generation, revision, output, SourceMap::default());
             }
             Message::Preview(action) => return self.preview_action(action),
             Message::Outline(message) => return self.outline_message(message),
@@ -2146,7 +2227,11 @@ impl App {
                 panes = panes
                     .push(
                         self.outline
-                            .view(&self.localizer, self.cursor().offset(), note)
+                            .view(
+                                &self.localizer,
+                                self.pages_map.to_compiled(self.cursor().offset()),
+                                note,
+                            )
                             .map(Message::Outline),
                     )
                     .push(rule::vertical(1).style(style::hairline));
@@ -2358,12 +2443,18 @@ impl App {
     }
 }
 
-fn compiled(generation: u64, revision: u64, result: Result<Output, String>) -> Message {
+fn compiled(
+    generation: u64,
+    revision: u64,
+    result: Result<Output, String>,
+    map: SourceMap,
+) -> Message {
     match result {
         Ok(output) => Message::Compiled {
             generation,
             revision,
             output: Arc::new(output),
+            map,
         },
         Err(error) => Message::CompileFailed {
             generation,
@@ -2527,6 +2618,7 @@ mod tests {
             generation: 0,
             revision: 0,
             output: Arc::new(output),
+            map: SourceMap::default(),
         }
     }
 
@@ -2705,6 +2797,7 @@ mod tests {
                 generation,
                 revision,
                 output: Arc::new(output),
+                map: SourceMap::default(),
             },
         );
 
@@ -4056,6 +4149,64 @@ mod tests {
             "{:?}",
             reopened.notice
         );
+    }
+
+    fn deletion(range: std::ops::Range<usize>) -> presswork_text::Suggestion {
+        presswork_text::Suggestion {
+            kind: presswork_text::SuggestionKind::Deletion,
+            range: Position::new(range.start)..Position::new(range.end),
+            author: "Ann".to_owned(),
+            time: 0,
+        }
+    }
+
+    #[test]
+    fn the_preview_compiles_the_text_without_suggested_deletions() {
+        let mut app = app();
+        app.editor = Editor::with_suggestions("= Old\n= New", vec![deletion(0..6)]);
+
+        app.compile_now();
+
+        assert_eq!(
+            app.outline.heading(0).map(|heading| heading.title.as_str()),
+            Some("New")
+        );
+        assert!(app.outline.heading(1).is_none());
+        send(
+            &mut app,
+            Message::Outline(outline_panel::Message::Select(0)),
+        );
+        assert_eq!(app.cursor().offset(), 6);
+    }
+
+    #[test]
+    fn an_error_after_a_suggested_deletion_marks_its_place_in_the_editor() {
+        let mut app = app();
+        app.editor = Editor::with_suggestions("Gone #nothing", vec![deletion(0..5)]);
+
+        app.compile_now();
+
+        let errors: Vec<Mark> = app
+            .marks()
+            .into_iter()
+            .filter(|mark| mark.kind == MarkKind::Error)
+            .collect();
+        assert_eq!(
+            errors,
+            [Mark {
+                range: Position::new(6)..Position::new(13),
+                kind: MarkKind::Error,
+            }]
+        );
+    }
+
+    #[test]
+    fn an_export_uses_the_text_of_the_file() {
+        let (mut suggested, _folder) = suggested_book();
+
+        let (_, text, _) = suggested.start_export(0).unwrap();
+
+        assert_eq!(text, "= Book");
     }
 
     #[test]
