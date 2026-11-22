@@ -301,6 +301,7 @@ mod tests {
                                 last_used_at: Timestamp::UNIX_EPOCH,
                                 current: true,
                             },
+                            user_name: "Ann".to_owned(),
                         }),
                     ))
                 }),
@@ -706,6 +707,7 @@ mod tests {
 
         assert_eq!(signed.token, "pws_ann");
         assert_eq!(signed.session.device, "Laptop");
+        assert_eq!(signed.user_name, "Ann");
     }
 
     #[tokio::test]

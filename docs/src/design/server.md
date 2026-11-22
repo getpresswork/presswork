@@ -48,7 +48,7 @@ The API has these operations for accounts:
 
 | Operation | Use | Authentication |
 | --- | --- | --- |
-| `POST /api/v1/sessions` | Sign in, and get a session for this device. | None |
+| `POST /api/v1/sessions` | Sign in, and get a session for this device and the name of the user. | None |
 | `GET /api/v1/sessions` | List the sessions of the user. | Session or access token |
 | `DELETE /api/v1/sessions/{id}` | End a session. | Session or access token |
 | `POST /api/v1/access-tokens` | Make a personal access token. | Session |

@@ -292,7 +292,7 @@ impl LibraryView {
     }
 
     pub(crate) fn load(&self, connection: &Connection) -> Task<Message> {
-        let Connection { api, token } = connection.clone();
+        let Connection { api, token, .. } = connection.clone();
         let organization = self.organization;
         Task::perform(
             async move { api.works(&token, organization).await.map_err(problem) },
@@ -434,7 +434,7 @@ impl LibraryView {
         };
         form.sending = true;
         self.trouble = None;
-        let Connection { api, token } = connection.clone();
+        let Connection { api, token, .. } = connection.clone();
         let edition = form.edition;
         let corrections = form.corrections.clone();
         Task::perform(
@@ -512,7 +512,7 @@ impl LibraryView {
             return Task::none();
         }
         self.trouble = None;
-        let Connection { api, token } = connection.clone();
+        let Connection { api, token, .. } = connection.clone();
         let organization = self.organization;
         Task::perform(
             async move {
@@ -534,7 +534,7 @@ impl LibraryView {
         if draft.edition.is_some() {
             return self.send_file(connection);
         }
-        let Connection { api, token } = connection.clone();
+        let Connection { api, token, .. } = connection.clone();
         let task = match draft.target {
             Target::Work => {
                 let Some(new) = draft.new_work() else {
@@ -574,7 +574,7 @@ impl LibraryView {
         };
         draft.sending = true;
         self.trouble = None;
-        let Connection { api, token } = connection.clone();
+        let Connection { api, token, .. } = connection.clone();
         let bytes = Arc::clone(&draft.file.bytes);
         Task::perform(
             async move {
@@ -588,7 +588,7 @@ impl LibraryView {
 
     fn make_standard(&mut self, edition: Uuid, connection: &Connection) -> Task<Message> {
         self.trouble = None;
-        let Connection { api, token } = connection.clone();
+        let Connection { api, token, .. } = connection.clone();
         Task::perform(
             async move { api.set_standard(&token, edition).await.map_err(problem) },
             Message::Changed,
@@ -1072,6 +1072,7 @@ mod tests {
         Connection {
             api: Api::new("https://press.example.com").unwrap(),
             token: "pws_ann".to_owned(),
+            user_name: "Ann".to_owned(),
         }
     }
 

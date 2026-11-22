@@ -38,6 +38,8 @@ pub struct Session {
 pub struct SignedIn {
     pub token: String,
     pub session: Session,
+    #[serde(default)]
+    pub user_name: String,
 }
 
 impl fmt::Debug for SignedIn {
@@ -46,6 +48,7 @@ impl fmt::Debug for SignedIn {
             .debug_struct("SignedIn")
             .field("token", &"[removed]")
             .field("session", &self.session)
+            .field("user_name", &self.user_name)
             .finish()
     }
 }
@@ -115,9 +118,26 @@ mod tests {
                 last_used_at: Timestamp::UNIX_EPOCH,
                 current: true,
             },
+            user_name: "Ann".to_owned(),
         };
 
         assert!(!format!("{signed_in:?}").contains("pws_secret"));
+    }
+
+    #[test]
+    fn a_new_session_gives_the_name_of_the_user() {
+        let session = r#"{ "id": "00000000-0000-0000-0000-000000000000", "device": "Laptop",
+            "created_at": "2026-11-15T10:00:00Z", "last_used_at": "2026-11-15T10:00:00Z",
+            "current": true }"#;
+        let named =
+            format!(r#"{{ "token": "pws_secret", "user_name": "Ann", "session": {session} }}"#);
+        let unnamed = format!(r#"{{ "token": "pws_secret", "session": {session} }}"#);
+
+        let named: SignedIn = serde_json::from_str(&named).unwrap();
+        let unnamed: SignedIn = serde_json::from_str(&unnamed).unwrap();
+
+        assert_eq!(named.user_name, "Ann");
+        assert_eq!(unnamed.user_name, "");
     }
 
     #[test]

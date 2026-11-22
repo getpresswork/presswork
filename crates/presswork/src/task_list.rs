@@ -61,7 +61,7 @@ impl TaskList {
     }
 
     pub(crate) fn load(&self, connection: &Connection) -> Task<Message> {
-        let Connection { api, token } = connection.clone();
+        let Connection { api, token, .. } = connection.clone();
         let project = self.project;
         Task::perform(
             async move { api.tasks(&token, project).await.map_err(problem) },
@@ -111,7 +111,7 @@ impl TaskList {
             ..TaskChange::default()
         };
         self.problem = None;
-        let Connection { api, token } = connection.clone();
+        let Connection { api, token, .. } = connection.clone();
         Task::perform(
             async move { api.update_task(&token, id, &change).await.map_err(problem) },
             Message::Changed,
@@ -134,7 +134,7 @@ impl TaskList {
             return Task::none();
         }
         self.problem = None;
-        let Connection { api, token } = connection.clone();
+        let Connection { api, token, .. } = connection.clone();
         let project = self.project;
         let new = NewTask {
             title,
@@ -252,6 +252,7 @@ mod tests {
         Connection {
             api: Api::new("https://press.example.com").unwrap(),
             token: "pws_ann".to_owned(),
+            user_name: "Ann".to_owned(),
         }
     }
 

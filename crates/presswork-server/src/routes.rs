@@ -788,7 +788,14 @@ async fn sign_in(
     attempt.succeeded();
     let (token, session) = sessions::start(&state.database, user.id, &request.device).await?;
     tracing::info!(user = %user.id, session = %session.id, "Signed in");
-    Ok((StatusCode::CREATED, Json(SignedIn { token, session })))
+    Ok((
+        StatusCode::CREATED,
+        Json(SignedIn {
+            token,
+            session,
+            user_name: user.name,
+        }),
+    ))
 }
 
 #[utoipa::path(
@@ -1110,6 +1117,7 @@ mod tests {
         assert!(body["token"].as_str().unwrap().starts_with("pws_"));
         assert_eq!(body["session"]["device"], "Laptop");
         assert_eq!(body["session"]["current"], true);
+        assert_eq!(body["user_name"], "Ann");
     }
 
     #[tokio::test]

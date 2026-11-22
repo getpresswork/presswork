@@ -40,6 +40,7 @@ pub(crate) const TEXT_IDS: [&str; 18] = [
 pub(crate) struct Connection {
     pub(crate) api: Api,
     pub(crate) token: String,
+    pub(crate) user_name: String,
 }
 
 impl fmt::Debug for Connection {
@@ -48,6 +49,7 @@ impl fmt::Debug for Connection {
             .debug_struct("Connection")
             .field("server", &self.api.server())
             .field("token", &"[removed]")
+            .field("user_name", &self.user_name)
             .finish()
     }
 }
@@ -213,6 +215,7 @@ impl ServerDialog {
                 Ok(Connection {
                     api,
                     token: signed.token,
+                    user_name: signed.user_name,
                 })
             },
             Message::SignedIn,
@@ -235,7 +238,7 @@ impl ServerDialog {
             return Task::none();
         };
         self.problem = None;
-        let Connection { api, token } = browse.connection.clone();
+        let Connection { api, token, .. } = browse.connection.clone();
         Task::perform(
             async move {
                 api.create_document(&token, project, MAIN_FILE)
@@ -433,7 +436,7 @@ fn action<'a>(
 }
 
 async fn shelves(connection: Connection) -> Result<Vec<Shelf>, Problem> {
-    let Connection { api, token } = connection;
+    let Connection { api, token, .. } = connection;
     let mut shelves = Vec::new();
     for membership in api.organizations(&token).await.map_err(problem)? {
         let projects = api
@@ -632,6 +635,7 @@ mod tests {
         Connection {
             api: Api::new("https://press.example.com").unwrap(),
             token: "pws_ann".to_owned(),
+            user_name: "Ann".to_owned(),
         }
     }
 

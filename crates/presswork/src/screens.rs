@@ -659,6 +659,7 @@ fn render_server(app: &mut App) {
     let connection = Connection {
         api: Api::new("https://press.example.com").unwrap(),
         token: "pws_ann".to_owned(),
+        user_name: "Ann".to_owned(),
     };
     send(
         app,

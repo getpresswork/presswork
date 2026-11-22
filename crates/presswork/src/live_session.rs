@@ -365,6 +365,7 @@ mod tests {
         Connection {
             api: Api::new("https://press.example.com").unwrap(),
             token: "pws_ann".to_owned(),
+            user_name: "Ann".to_owned(),
         }
     }
 

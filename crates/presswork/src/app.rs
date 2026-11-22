@@ -4964,6 +4964,7 @@ mod tests {
         let connection = server_dialog::Connection {
             api: presswork_client::Api::new("https://press.example.com").unwrap(),
             token: "pws_ann".to_owned(),
+            user_name: "Ann".to_owned(),
         };
         send(
             app,
