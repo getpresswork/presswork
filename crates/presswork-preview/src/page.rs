@@ -308,8 +308,7 @@ mod tests {
         ))
         .width(40)
         .height(40);
-        let area =
-            page_area(page, |point| point).mark(Some((Point::new(20.0, 20.0), Instant::now())));
+        let area = page_area(page, |point| point).mark(Some(lasting_mark()));
         let mut ui = simulator(area);
         let folder = tempfile::tempdir().unwrap();
 
@@ -317,6 +316,10 @@ mod tests {
         snapshot.matches_image(folder.path().join("mark")).unwrap();
 
         assert_ne!(pixel(folder.path(), 40, 40), [255, 255, 255, 255]);
+    }
+
+    fn lasting_mark() -> (Point, Instant) {
+        (Point::new(20.0, 20.0), Instant::now() + MARK_TIME * 100)
     }
 
     fn marked_center(rgba: [u8; 4]) -> [u8; 4] {
@@ -327,8 +330,7 @@ mod tests {
         ))
         .width(40)
         .height(40);
-        let area =
-            page_area(page, |point| point).mark(Some((Point::new(20.0, 20.0), Instant::now())));
+        let area = page_area(page, |point| point).mark(Some(lasting_mark()));
         let mut ui = simulator(area);
         let folder = tempfile::tempdir().unwrap();
         let theme = presswork_ui::theme::light();
