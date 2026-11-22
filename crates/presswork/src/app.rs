@@ -1524,6 +1524,7 @@ impl App {
             && self.server_dialog.is_open()
         {
             self.live = Some(LiveSession::new(connection.clone()));
+            self.apply_suggesting();
         }
         let opened = match &message {
             server_dialog::Message::Open(document) => Some(document.clone()),
@@ -4463,6 +4464,18 @@ mod tests {
         open(&mut app, &folder);
 
         send(&mut app, suggestion_key());
+
+        assert_eq!(app.editor.suggesting(), Some("Ann"));
+    }
+
+    #[test]
+    fn a_sign_in_gives_the_next_suggestions_the_name_of_the_account() {
+        let folder = book();
+        let mut app = app();
+        open(&mut app, &folder);
+        send(&mut app, suggestion_key());
+
+        signed_in(&mut app);
 
         assert_eq!(app.editor.suggesting(), Some("Ann"));
     }
