@@ -1,0 +1,431 @@
+# Changelog
+## 0.1.0 (2026-11-23)
+
+### New functions
+- **app:** open main window with workspace bar
+- **app:** add research and translate workspaces
+- **log:** add log entries, levels, and areas
+- **log:** keep recent log entries in a store with watchers
+- **log:** filter log entries by level and text
+- **log:** capture tracing events and remove secret values
+- **log:** format log entries as json lines
+- **log:** write log entries to rotated json files
+- **log:** set up logging with level changes at run time
+- **app:** start logging when the application starts
+- **ui:** add font size tokens
+- **app:** add a log panel with live entries
+- **ui:** add editorial color tokens with contrast checks
+- **ui:** add light and dark themes from the tokens
+- **ui:** bundle inter, jetbrains mono, and lucide fonts
+- **ui:** add type scale, icons, and style functions
+- **app:** apply the themes, the fonts, and the system mode
+- **logs:** restyle the log panel with columns and level badges
+- **app:** restyle the top bar, the main area, and the status bar
+- **app:** show the error and warning counts in the status bar
+- **text:** add the text buffer with lines and positions
+- **text:** add change sets that apply edits and map positions
+- **text:** invert, compose, and map change sets
+- **text:** add selections that map through changes
+- **text:** add the undo history, transactions, and the document
+- **ui:** bundle the bold and italic JetBrains Mono faces
+- **ui:** add editor and syntax colors with contrast checks
+- **text:** find the line of a position and the line bounds
+- **text:** give the index of the primary selection range
+- **editor:** add editor commands on the text model
+- **editor:** add Typst syntax colors with incremental parsing
+- **editor:** add the editor widget with wrapping and scrolling
+- **app:** show the editor in the Write workspace
+- **typst:** add the embedded Typst engine with overlays and renders
+- **typst:** add compile jobs and a scheduler for one job at a time
+- **ui:** add a paper style with a rule and a soft shadow
+- **preview:** add the page preview with zoom and a problem banner
+- **typst:** accept a world without a date
+- **app:** compile the scratch text and show its pages beside the editor
+- **project:** add the project manifest and the project file list
+- **typst:** read project files, with overlays for open documents
+- **app:** open project folders and save the main file
+- **ui:** add a notice button style with a hover tint
+- **preview:** let a click on the problem banner show the problem
+- **editor:** underline marked ranges such as diagnostics
+- **app:** underline diagnostics and move to the first error
+- **toolchain:** choose the Typst engine for a project pin
+- **toolchain:** find the Typst release file of each platform
+- **toolchain:** read the list of Typst releases from GitHub
+- **toolchain:** calculate file digests and read known digests
+- **toolchain:** install Typst versions from verified archives
+- **toolchain:** download and install Typst releases from GitHub
+- **project:** write the Typst pin into the manifest
+- **typst:** tell the version of the embedded Typst engine
+- **app:** select and install Typst versions from the status bar
+- **toolchain:** add the digests of Typst 0.11.0 to 0.13.1
+- **typst:** compile with a managed Typst program
+- **app:** preview pinned projects with the pinned Typst program
+- **typst:** stop Typst programs that run too long or are not needed
+- **preview:** add a button that moves the preview to its own window
+- **app:** open the preview in its own window
+- **server:** read the server configuration
+- **server:** add the live check and the OpenAPI description
+- **server:** connect to PostgreSQL and report when it is ready
+- **server:** keep users with Argon2id password hashes
+- **server:** sign in and keep a session for each device
+- **server:** add invite links and password reset links
+- **server:** accept invites and reset passwords through the API
+- **server:** add commands for organizations, invites, and resets
+- **domain:** check the permissions of the two roles
+- **api:** add the types for projects and tasks
+- **server:** keep projects and tasks in PostgreSQL
+- **server:** add the routes for projects and tasks
+- **ui:** add the tokens and styles of the window frame
+- **app:** draw the top bar and the window buttons
+- **app:** add the Presswork menu to the top bar
+- **app:** give the detached preview its own top bar
+- **app:** ask before changes that are not saved are lost
+- **app:** show only the tab icons in a narrow window
+- **sync:** add the Loro text document
+- **api:** add the messages of the live protocol
+- **domain:** let members edit the documents of projects
+- **server:** keep documents and their updates in PostgreSQL
+- **server:** add the routes for documents
+- **sync:** load stored updates and merge updates without a diff
+- **client:** add the live connection to the server
+- **server:** add the live WebSocket for document sync
+- **text:** give the changes of undo and redo to the caller
+- **editor:** give the changes of each action and apply remote changes
+- **client:** add the HTTP client for sign-in, projects, and documents
+- **app:** connect to a server and edit a document live
+- **server:** add the chat of organizations to the live WebSocket
+- **app:** add the chat panel for the organization of the document
+- **client:** list, make, and change the tasks of a project
+- **app:** show and complete the tasks of the server project
+- **app:** show the tasks in progress
+- **domain:** add the permissions for the library
+- **api:** add the types of the library
+- **ocr:** read the text layer of the pages of a PDF file
+- **search:** index and search the pages of library files
+- **library:** check and propose citation keys
+- **server:** keep library works and files, and search their pages
+- **client:** list, add, upload, and search library works
+- **library:** write the Hayagriva bibliography of the works
+- **app:** add, find, and cite library works in the Research workspace
+- **ocr:** count the pages of a PDF file
+- read uploaded library files in background jobs
+- **api:** add page ranges for printed page numbers
+- **library:** compute the printed page numbers of a file
+- **ocr:** read the page labels of a PDF file
+- add editions with one standard edition to the library
+- add page maps with printed page numbers
+- **server:** limit failed sign-ins per email and client address
+- **server:** add personal access tokens
+- **ocr:** add the OCRmyPDF and ocrs engines behind one trait
+- **server:** run OCR on library pages without a text layer
+- **app:** add the pilcrow icon and the application ID
+- **typst:** add jumps between source positions and page points
+- **preview:** report clicks on pages and mark page points
+- **editor:** give the editor view an ID for the keyboard focus
+- **app:** jump between the source and the pages
+- **typst:** give tooltips and completions at a source position
+- **editor:** report hovered text and show a tooltip
+- **app:** show Typst tooltips in the editor
+- **editor:** replace a range and select a part of the new text
+- **editor:** show a completion list with keys and clicks
+- **app:** complete Typst code in the editor
+- **typst:** find the definition of an item at a source position
+- **editor:** ask for the definition with F12 and Ctrl+click
+- **app:** go to the definition of a Typst item
+- **typst:** give the headings and the labels of the document
+- **app:** give the kind and the page of a label in completions
+- **ui:** add a style for the items of a list
+- **app:** show the outline of the document beside the editor
+- **text:** find the matches of a query
+- **editor:** show the matches of a search
+- **editor:** replace many ranges in one undo step
+- **app:** find and replace text in the editor
+- **editor:** edit the text with many cursors
+- **editor:** add cursors with keys and Alt+click
+- **editor:** hide the folded lines of the text
+- **editor:** fold headings and blocks with the gutter and keys
+- **preview:** show facing pages as spreads
+- **preview:** show page thumbnails beside the pages
+- **typst:** render the bleed of the pages on request
+- **preview:** show the bleed and the trim line as guides
+- **typst:** export pages to PDF, PNG, and SVG
+- **project:** read export profiles from the manifest
+- **typst:** find images with low resolution or without alt text
+- **typst:** compile a document without page images for exports
+- **project:** give the file name pattern of an export profile
+- **app:** export the document from the Publish workspace
+- **project:** give the export profiles and the output rule of a project
+- **typst:** write the files of an export profile into the project
+- **typst:** give diagnostics the file of their source
+- **cli:** build and check projects from the command line
+- **project:** give export profiles a page size and a color rule
+- **typst:** check fonts, glyphs, page sizes, and colors
+- **project:** write export profiles as JSON
+- **typst:** write a build report with each export
+- **typst:** find widows, orphans, stacked hyphens, and loose lines
+- **app:** list the layout problems in the Typeset workspace
+- **cli:** list the layout problems in check
+- **language:** check the spelling of words with Hunspell dictionaries
+- **language:** skip dictionary lines that do not parse
+- **toolchain:** install LibreOffice dictionaries with checked digests
+- **typst:** find misspelled words with the language of the layout
+- **editor:** draw spelling marks as dotted lines
+- **language:** add a project word list for spelling
+- **app:** mark misspelled words in the editor
+- **app:** download dictionaries in the Toolchains panel
+- **cli:** check the spelling in check
+- **language:** find text that the house style rules do not permit
+- **typst:** find house style problems in the prose of the document
+- **app:** mark house style problems and show their messages
+- **app:** show corrections for spelling and house style with Ctrl+.
+- **cli:** check the house style in check
+- **app:** add a misspelled word to the word list with Ctrl+.
+- **typst:** give each problem its area on the page
+- **preview:** mark problems on the pages
+- **app:** show QA and preflight problems on the preview pages
+- **app:** show the preview beside the QA list in the Typeset workspace
+- **preview:** keep the place on the pages when the view changes
+- **app:** keep the preview place when the workspace or window changes
+- **project:** read the baseline grid from the manifest
+- **typst:** check that body lines are on the baseline grid
+- **preview:** show the baseline grid with the guides
+- **app:** give the baseline grid of the project to the preview
+- **typst:** take the limits of the QA report from the manifest
+- **app:** add a misspelled word to the personal dictionary
+- **text:** keep suggestions in the document and its history
+- **editor:** record edits as suggestions in suggestion mode
+- **editor:** draw, accept and reject suggestions
+- **app:** keep open suggestions in a sidecar file
+- **app:** compile the preview with the suggestions
+- **api:** give the name of the user with a new session
+- **app:** turn suggestion mode on and off
+- **app:** accept and reject suggestions with Ctrl+.
+- **app:** show the author and time of a suggestion
+
+
+### Corrections
+- **ci:** read commit subjects before the release check
+- **ci:** move the nightly tag through the API
+- **ci:** create release tags through the API
+- **text:** return an error when compose splits a character
+- **app:** show at least one millisecond for a compilation
+- **preview:** keep zoomed pages at full size and scroll both ways
+- **ui:** use the JetBrains Mono faces without ligatures
+- **ui:** make a disabled primary button look quiet
+- **sync:** give no update when the version has all the changes
+- **app:** keep the chat when a local project opens
+- **app:** center the content of the top bar vertically
+- **server:** stop on SIGTERM as on Ctrl+C
+- **ocr:** stop the child processes of OCRmyPDF at the time limit
+- **preview:** draw the page mark above the page image
+- **preview:** let the marked text show through the mark
+- **typst:** keep the separators of the profile in the report path
+- **editor:** show the text of tooltips and completion details
+- **project:** keep the exact value of a length
+- **project:** give a length in points without a rounding error
+- **app:** give the account name to suggestions after a sign-in
+
+
+### Code structure
+- **text:** walk the runs of a change set in one place
+- **app:** use the shared export of profiles
+- **typst:** share the preflight of all export profiles
+- **preview:** use the Typst severity for problem marks
+
+
+### Documentation
+- add documentation book and STE style guide
+- **contributing:** add workflow guide
+- **contributing:** add code style
+- **design:** add product overview
+- **design:** add architecture
+- **design:** add typst engine design
+- **design:** add toolchain design
+- **design:** add editor and preview design
+- **design:** add collaboration model
+- **design:** add server design
+- **design:** add domain model
+- **design:** add interface design
+- **design:** add security design
+- **design:** add quality strategy
+- **design:** add delivery design
+- **design:** add roadmap
+- **design:** add decision log
+- add readme
+- add contribution guide
+- add security policy
+- correct STE word use
+- **contributing:** add library, chat, and release terms to dictionary
+- use ticket, issue, edition, and work with one meaning each
+- **design:** add connections between all parts
+- **design:** add team library with editions and OCR
+- **design:** add task views, planning, and tracking
+- **design:** add editorial tools
+- **design:** add production, assets, and clearances
+- **design:** add chat, inbox, portal, and submissions
+- **design:** add cli, plugins, and opt-in ai assistance
+- **design:** add windows, research, and translate to interface
+- **design:** add two-factor sign-in and encrypted projects
+- **design:** add product quality limits and rules
+- **design:** split the domain into area crates
+- **design:** add new areas to domain model
+- **design:** add release train, nightly builds, and updater
+- **design:** plan milestones for the full scope
+- **design:** record decisions 27 to 51
+- correct STE word use in new chapters
+- update readme for the full scope
+- **design:** describe tags from the release train
+- **design:** add ai assistance, gateway, and mcp design
+- **design:** add typesetting tools and pdf lift
+- **design:** add structure board, content blocks, and variants
+- **design:** add contacts and contracts
+- **design:** add logs, build reports, and support bundles
+- **design:** add server operations
+- **design:** add proof collation and editorial checks
+- **design:** add similarity check and citation styles
+- **design:** add print plans, jats, and orcid
+- **design:** add email bridge, watermarks, and phone portal
+- **design:** add follow mode, history slider, and co-publishing
+- **design:** add two-way calendar sync
+- **design:** add vim mode and support for all scripts
+- **design:** add home dashboard and os integration
+- **design:** add sessions and devices
+- write digital signature for cryptographic signatures
+- **design:** put marketing outputs out of scope
+- **design:** add contacts, mcp, and lift crates
+- **design:** add contacts, blocks, and variants to domain model
+- **design:** plan milestones for ai, operations, and new tools
+- **design:** record decisions 52 to 76
+- **contributing:** add terms for new functions
+- update readme for new functions
+- correct STE word use in new sections
+- **design:** add log crate and log file details
+- **design:** add the visual design and decisions D77 to D80
+- **design:** add design review renders and log counts
+- **design:** add the design system to milestone 1
+- **design:** let milestones set the minor version (D81)
+- **design:** record the text model decisions D82 to D84
+- **design:** describe the editor widget and decisions D85 to D88
+- **security:** record the quick-xml advisory exceptions
+- **design:** describe the preview, engine limits, and D89 to D90
+- **design:** describe projects, the manifest, and D91 to D92
+- **design:** record the review and the toolchain decisions
+- **design:** describe the toolchain manager of milestone 1
+- **design:** use one Typst version for the preview and the exports
+- **design:** record the server decisions of milestone 1
+- **design:** describe the server settings and the test database
+- **design:** record the crate decisions for server accounts
+- **design:** describe accounts, sessions, and links of the server
+- **design:** record the task permissions and the due dates
+- **design:** describe the projects and tasks of the server
+- **design:** record the decisions for the top bar
+- **design:** describe the top bar and the Presswork menu
+- **design:** record the decisions for live sync
+- **design:** describe documents and the live sync protocol
+- **design:** record the decisions for co-editing in the desktop
+- **design:** describe server documents in the desktop
+- **design:** record the decisions for the chat
+- **design:** describe the chat of milestone 1
+- **design:** record the decision for tasks in the desktop
+- **design:** describe the tasks in the desktop
+- **design:** record the library slice of milestone 1
+- **design:** describe the library in the Research workspace
+- **design:** record the decisions for upload jobs
+- **design:** record the library depth and hardening decisions
+- **design:** describe the editions of library works
+- **design:** describe the page maps of editions
+- **design:** describe the sign-in limits
+- **design:** describe personal access tokens
+- **design:** describe OCR on the server
+- **design:** describe the installers and the application icon
+- tell how to install Presswork from the releases
+- **design:** describe the server deployment and its decisions
+- tell how to install the server
+- **design:** record the process group of each OCR run
+- **design:** describe the check of the systemd installation
+- **design:** tell the build system of the Linux packages
+- **design:** record the Dependabot rules of the server images
+- **design:** describe the OCR check of the server packages
+- **design:** describe the jumps between source and pages
+- **design:** describe tooltips and completion
+- **design:** describe go to definition
+- **design:** describe the outline and the labels
+- **design:** describe find and replace
+- **design:** describe many cursors
+- **design:** describe folding
+- **design:** describe spreads and thumbnails
+- **design:** describe the guides of the preview
+- **design:** keep the text area guide for later
+- **design:** describe export profiles and preflight
+- **design:** describe the command-line tool
+- **design:** describe the full preflight and build reports
+- **design:** describe the typesetting QA report
+- **design:** describe the spell checker and the dictionaries
+- **design:** describe the house style and the corrections
+- **design:** describe how to add a word to the word list
+- **design:** describe the problem marks in the preview
+- **design:** describe the preview in the Typeset workspace
+- **design:** describe how the preview keeps its place
+- **design:** describe the baseline grid check
+- **design:** describe the limits of the QA report in the manifest
+- **design:** describe the personal dictionary
+- **design:** describe suggestion mode
+
+
+### Tests
+- **app:** add design review renders of the main screens
+- **ui:** check the contrast of badge text in each tone
+- **ui:** read the font names with skrifa, not ttf-parser
+- **app:** render each screen in the mode of its theme
+- **app:** render the error state of the Write workspace
+- **app:** render more states for design reviews
+- **app:** render the Toolchains panel for design reviews
+- **toolchain:** check the real list of Typst releases on request
+- **toolchain:** install a real Typst release on request
+- **app:** render a project whose Typst version is missing
+- **app:** render the color problems of the Publish workspace
+- **app:** render the Typeset workspace
+- **app:** render suggestion mode
+- **preview:** make the mark tests safe on a slow computer
+
+
+### Build and CI
+- add workflow for format, lints, tests, and docs
+- add pages workflow for documentation
+- add dependabot configuration
+- add release workflow
+- limit unmaintained crate checks to direct dependencies
+- move platform builds into a reusable workflow
+- add nightly build workflow
+- add two-week release train
+- add a tested script that calculates the next version
+- bump only the patch version before 1.0
+- optimize dependencies in dev builds for fast tests
+- add a workflow that calculates digests of older Typst releases
+- mark the digest scripts as executable
+- run the database tests on PostgreSQL
+- **deps:** update jiff to 1.0
+- run the OCR tests with the real engines
+- make MSI, DMG, DEB, RPM, and AppImage installers
+- build the Linux packages on Ubuntu 24.04
+- **server:** add the Dockerfile, Compose file, and systemd unit
+- check and publish the server archive and image
+- install the server archive with systemd in the build workflow
+- ignore new Ubuntu releases and PostgreSQL major versions
+- check OCR of a scanned page in the server image and service
+- draw the interface tests with the tiny-skia renderer
+- update taiki-e/install-action to 2.90.6 (#8)
+- **deps:** update 7 crates of the cargo group (#9)
+- **deps:** update url to 2.5.9 for RUSTSEC-2026-0592
+
+
+### Other changes
+- set up cargo workspace
+- add git hooks for fmt, clippy, and commit messages
+- add apache 2.0 license
+- add cargo-deny configuration
+- add git-cliff configuration
+- add issue templates
+- add pull request template
+- add version bump rules to git-cliff configuration
+
