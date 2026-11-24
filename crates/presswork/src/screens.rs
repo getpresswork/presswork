@@ -19,7 +19,7 @@ use presswork_editor::{Action as EditorAction, Motion};
 use presswork_language::{Dictionaries, Dictionary};
 use presswork_preview::Action as PreviewAction;
 use presswork_sync::TextDocument;
-use presswork_text::{ChangeSet, Edit, Position};
+use presswork_text::{ChangeSet, Edit, Position, Suggestion, SuggestionKind};
 use presswork_toolchain::{Digest, Platform, Release, ReleaseFile, Version};
 use uuid::Uuid;
 
@@ -277,6 +277,66 @@ fn render_screens() {
     render_problem_marks(&mut app);
     render_house_style(&mut app);
     render_suggestions(&mut app);
+    render_server_suggestions(&mut app);
+}
+
+const LIVE_SUGGESTED: &str = "#set text(font: \"Libertinus Serif\")\n= Paper\n\n\
+                              The press prints fourtwelve sheets in an hour. \
+                              Each proof goes to the author.\n";
+
+fn render_server_suggestions(app: &mut App) {
+    let id = Uuid::from_u128(202);
+    let document = Document {
+        id,
+        project_id: Uuid::from_u128(2),
+        path: "chapters/paper.typ".to_owned(),
+    };
+    send(app, Message::Server(ServerMessage::Open(document)));
+    let (sender, _receiver) = futures::channel::mpsc::unbounded();
+    send(app, Message::Live(LiveEvent::Ready(sender)));
+    send(app, Message::Live(LiveEvent::Connected));
+    let by_bob = |kind, start: usize, end: usize| Suggestion {
+        kind,
+        range: Position::new(start)..Position::new(end),
+        author: "Bob".to_owned(),
+        time: 1_795_340_000,
+    };
+    let four = LIVE_SUGGESTED.find("four").unwrap();
+    let marks = [
+        by_bob(SuggestionKind::Deletion, four, four + "four".len()),
+        by_bob(
+            SuggestionKind::Insertion,
+            four + "four".len(),
+            four + "fourtwelve".len(),
+        ),
+    ];
+    let mut server = TextDocument::new();
+    server
+        .apply(
+            &ChangeSet::new(0, [Edit::insert(Position::new(0), LIVE_SUGGESTED)]).unwrap(),
+            Some(&marks),
+        )
+        .unwrap();
+    send(
+        app,
+        Message::Live(LiveEvent::Received(LiveMessage::Subscribed {
+            document: id,
+            version: server.version(),
+            data: server
+                .updates_since(&TextDocument::new().version())
+                .unwrap(),
+        })),
+    );
+    let author = LIVE_SUGGESTED.find("the author").unwrap() + "the author".len();
+    select(app, author, author);
+    send(
+        app,
+        Message::Editor(EditorAction::Insert(" and the editor".to_owned())),
+    );
+    app.compile_now();
+    send(app, Message::Hover(Some(Position::new(four + 1))));
+    render(app, "server-suggestions");
+    send(app, Message::Hover(None));
 }
 
 const SUGGESTED: &str = "#set text(font: \"Libertinus Serif\")\n= Field notes\n\n\
