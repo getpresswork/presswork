@@ -204,6 +204,8 @@ fn io_error(path: &Path, source: std::io::Error) -> ToolchainError {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
+
     use sha2::{Digest as _, Sha256};
 
     use super::*;
@@ -215,11 +217,18 @@ mod tests {
         ("xx/README.txt", b"The license."),
     ];
 
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().fold(String::new(), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
+    }
+
     fn file(path: &str, bytes: &[u8]) -> SourceFile {
         SourceFile {
             path: path.to_owned(),
             size: bytes.len() as u64,
-            digest: Digest::from_hex(&format!("{:x}", Sha256::digest(bytes))).unwrap(),
+            digest: Digest::from_hex(&hex(&Sha256::digest(bytes))).unwrap(),
         }
     }
 

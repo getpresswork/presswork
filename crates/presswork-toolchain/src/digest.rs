@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{self, Write as _};
+use std::io::{ErrorKind, Read as _};
 use std::path::Path;
 
 use semver::Version;
@@ -16,7 +17,15 @@ impl Digest {
     pub fn of_file(path: &Path) -> std::io::Result<Self> {
         let mut file = std::fs::File::open(path)?;
         let mut hasher = Sha256::new();
-        std::io::copy(&mut file, &mut hasher)?;
+        let mut buffer = vec![0; 64 * 1024];
+        loop {
+            match file.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => hasher.update(&buffer[..read]),
+                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                Err(error) => return Err(error),
+            }
+        }
         Ok(Self(hasher.finalize().into()))
     }
 

@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -140,11 +141,20 @@ pub(crate) fn report(inputs: &Inputs<'_>) -> serde_json::Result<Vec<u8>> {
             .map(|(path, bytes)| File {
                 path,
                 bytes: bytes.len(),
-                sha256: format!("{:x}", Sha256::digest(bytes)),
+                sha256: hex(&Sha256::digest(bytes)),
             })
             .collect(),
     };
     serde_json::to_vec_pretty(&report)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
 }
 
 pub(crate) fn report_path(profile: &ExportProfile, main: &Path) -> PathBuf {

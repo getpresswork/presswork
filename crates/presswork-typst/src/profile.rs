@@ -111,6 +111,7 @@ fn settings(profile: &ExportProfile, date: Option<Datetime>) -> ExportSettings {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write as _;
     use std::sync::{Arc, Mutex};
 
     use serde_json::Value;
@@ -180,7 +181,12 @@ mod tests {
         assert_eq!(report["files"][1]["bytes"], second.len());
         assert_eq!(
             report["files"][1]["sha256"],
-            format!("{:x}", Sha256::digest(&second))
+            Sha256::digest(&second)
+                .iter()
+                .fold(String::new(), |mut hex, byte| {
+                    let _ = write!(hex, "{byte:02x}");
+                    hex
+                })
         );
     }
 
