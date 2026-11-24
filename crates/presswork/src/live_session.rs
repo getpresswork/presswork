@@ -7,8 +7,8 @@ use iced::futures::Stream;
 use presswork_api::Document;
 use presswork_api::live::{ChatMessage, ClientMessage, ServerMessage};
 use presswork_client::Live;
-use presswork_sync::{SyncError, TextDocument};
-use presswork_text::ChangeSet;
+use presswork_sync::{Remote, SyncError, TextDocument};
+use presswork_text::{ChangeSet, Suggestion};
 use uuid::Uuid;
 
 use crate::server_dialog::Connection;
@@ -153,18 +153,22 @@ impl LiveSession {
         true
     }
 
-    pub(crate) fn local(&mut self, changes: &ChangeSet) -> Result<(), SyncError> {
+    pub(crate) fn local(
+        &mut self,
+        changes: &ChangeSet,
+        suggestions: &[Suggestion],
+    ) -> Result<(), SyncError> {
         let Some(live) = &mut self.document else {
             return Ok(());
         };
-        let data = live.text.apply(changes, None)?;
+        let data = live.text.apply(changes, Some(suggestions))?;
         if self.connected && live.subscribed {
             self.send_updates(data);
         }
         Ok(())
     }
 
-    pub(crate) fn event(&mut self, event: Event) -> Result<Option<ChangeSet>, SyncError> {
+    pub(crate) fn event(&mut self, event: Event) -> Result<Option<Remote>, SyncError> {
         match event {
             Event::Ready(outbox) => self.outbox = Some(outbox),
             Event::Connected => {
@@ -198,7 +202,7 @@ impl LiveSession {
         )
     }
 
-    fn receive(&mut self, message: ServerMessage) -> Result<Option<ChangeSet>, SyncError> {
+    fn receive(&mut self, message: ServerMessage) -> Result<Option<Remote>, SyncError> {
         match message {
             ServerMessage::Subscribed {
                 document,
@@ -208,14 +212,14 @@ impl LiveSession {
                 let Some(live) = self.live_document(document) else {
                     return Ok(None);
                 };
-                let changes = live.text.import(&data)?.changes;
+                let remote = live.text.import(&data)?;
                 let missing = live.text.updates_since(&version)?;
                 live.subscribed = true;
                 self.send_updates(missing);
-                Ok(Some(changes))
+                Ok(Some(remote))
             }
             ServerMessage::Updates { document, data } => match self.live_document(document) {
-                Some(live) => Ok(Some(live.text.import(&data)?.changes)),
+                Some(live) => Ok(Some(live.text.import(&data)?)),
                 None => Ok(None),
             },
             ServerMessage::Joined {
@@ -352,11 +356,20 @@ mod tests {
     use presswork_api::live::{ChatMessage, ClientMessage, ServerMessage};
     use presswork_client::Api;
     use presswork_sync::TextDocument;
-    use presswork_text::{Buffer, ChangeSet, Edit, Position};
+    use presswork_text::{Buffer, ChangeSet, Edit, Position, SuggestionKind};
     use uuid::Uuid;
 
     use super::*;
     use crate::server_dialog::Connection;
+
+    fn deletion(range: std::ops::Range<usize>) -> Suggestion {
+        Suggestion {
+            kind: SuggestionKind::Deletion,
+            range: Position::new(range.start)..Position::new(range.end),
+            author: "Ann".to_owned(),
+            time: 0,
+        }
+    }
 
     const MAIN: Uuid = Uuid::from_u128(0x0193_0000_0000_7000_8000_0000_0000_0004);
     const PRESS: Uuid = Uuid::from_u128(0x0193_0000_0000_7000_8000_0000_0000_0001);
@@ -403,7 +416,7 @@ mod tests {
         messages
     }
 
-    fn subscribed(session: &mut LiveSession, server: &TextDocument) -> Option<ChangeSet> {
+    fn subscribed(session: &mut LiveSession, server: &TextDocument) -> Option<Remote> {
         let data = server
             .updates_since(&TextDocument::new().version())
             .unwrap();
@@ -487,7 +500,9 @@ mod tests {
         session.open_document(document());
         session.event(Event::Connected).unwrap();
 
-        let changes = subscribed(&mut session, &server_text("Proof")).unwrap();
+        let changes = subscribed(&mut session, &server_text("Proof"))
+            .unwrap()
+            .changes;
 
         assert_eq!(applied("", &changes), "Proof");
         assert_eq!(session.state(), Some(State::Live));
@@ -502,12 +517,53 @@ mod tests {
         subscribed(&mut session, &server);
         sent(&mut receiver);
 
-        session.local(&insert(5, 5, "s")).unwrap();
+        session.local(&insert(5, 5, "s"), &[]).unwrap();
 
         let data = updates(&sent(&mut receiver));
         assert_eq!(data.len(), 1);
         server.merge(&data[0]).unwrap();
         assert_eq!(server.text(), "Proofs");
+    }
+
+    #[test]
+    fn local_suggestions_go_to_the_server_as_marks() {
+        let (mut session, mut receiver) = session();
+        let mut server = server_text("Proof");
+        session.open_document(document());
+        session.event(Event::Connected).unwrap();
+        subscribed(&mut session, &server);
+        sent(&mut receiver);
+
+        session
+            .local(&ChangeSet::empty(5), &[deletion(1..3)])
+            .unwrap();
+
+        let data = updates(&sent(&mut receiver));
+        assert_eq!(data.len(), 1);
+        server.merge(&data[0]).unwrap();
+        assert_eq!(server.suggestions(), [deletion(1..3)]);
+    }
+
+    #[test]
+    fn remote_updates_give_the_suggestions_of_the_server() {
+        let (mut session, _receiver) = session();
+        let mut server = server_text("Proof");
+        session.open_document(document());
+        session.event(Event::Connected).unwrap();
+        subscribed(&mut session, &server);
+        let data = server
+            .apply(&ChangeSet::empty(5), Some(&[deletion(1..3)]))
+            .unwrap();
+
+        let remote = session
+            .event(Event::Received(ServerMessage::Updates {
+                document: MAIN,
+                data,
+            }))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(remote.suggestions, [deletion(1..3)]);
     }
 
     #[test]
@@ -520,7 +576,7 @@ mod tests {
         session.event(Event::Disconnected).unwrap();
         sent(&mut receiver);
 
-        session.local(&insert(5, 5, "s")).unwrap();
+        session.local(&insert(5, 5, "s"), &[]).unwrap();
         assert_eq!(sent(&mut receiver), []);
         assert_eq!(session.state(), Some(State::Offline));
         session.event(Event::Connected).unwrap();
@@ -547,7 +603,8 @@ mod tests {
                 data,
             }))
             .unwrap()
-            .unwrap();
+            .unwrap()
+            .changes;
 
         assert_eq!(applied("Proof", &changes), "The Proof");
     }

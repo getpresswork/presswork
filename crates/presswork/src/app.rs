@@ -1592,7 +1592,7 @@ impl App {
 
     fn share(&mut self, changes: &ChangeSet) {
         if let Some(live) = &mut self.live
-            && let Err(error) = live.local(changes)
+            && let Err(error) = live.local(changes, self.editor.document().suggestions())
         {
             tracing::warn!(%error, "A local change did not go into the live document");
         }
@@ -1614,13 +1614,19 @@ impl App {
             return Task::none();
         };
         match live.event(event) {
-            Ok(Some(changes)) if !changes.is_empty() => {
-                if let Err(error) = self.editor.apply_remote(&changes, None) {
+            Ok(Some(remote)) => {
+                let revision = self.editor.revision();
+                if let Err(error) = self
+                    .editor
+                    .apply_remote(&remote.changes, Some(remote.suggestions))
+                {
                     tracing::error!(%error, "A remote change does not agree with the editor");
                 }
-                return self.request_compile();
+                if self.editor.revision() != revision {
+                    return self.request_compile();
+                }
             }
-            Ok(_) => {}
+            Ok(None) => {}
             Err(error) => tracing::warn!(%error, "A live change was not applied"),
         }
         Task::none()
@@ -5494,6 +5500,49 @@ mod tests {
             app.editor.document().selection().primary().head,
             Position::new(9)
         );
+    }
+
+    #[test]
+    fn a_remote_suggestion_shows_in_a_server_document() {
+        let mut app = app();
+        let _receiver = open_server_document(&mut app);
+        let mut server = server_with("The press stopped.");
+        subscribed(&mut app, &server);
+
+        let data = server
+            .apply(&ChangeSet::empty(18), Some(&[deletion(4..10)]))
+            .unwrap();
+        send(
+            &mut app,
+            Message::Live(live_session::Event::Received(ServerMessage::Updates {
+                document: SERVER_DOCUMENT,
+                data,
+            })),
+        );
+
+        assert_eq!(app.editor.document().suggestions(), [deletion(4..10)]);
+    }
+
+    #[test]
+    fn a_local_edit_keeps_the_suggestions_of_the_server() {
+        let mut app = app();
+        let mut receiver = open_server_document(&mut app);
+        let mut server = server_with("The press stopped.");
+        server
+            .apply(&ChangeSet::empty(18), Some(&[deletion(4..10)]))
+            .unwrap();
+        subscribed(&mut app, &server);
+        drained(&mut receiver);
+
+        send(&mut app, insert("Late: "));
+
+        let sent = drained(&mut receiver);
+        let [ClientMessage::Updates { data, .. }] = sent.as_slice() else {
+            panic!("the edit did not go to the server: {sent:?}");
+        };
+        server.merge(data).unwrap();
+        assert_eq!(server.text(), "Late: The press stopped.");
+        assert_eq!(server.suggestions(), [deletion(10..16)]);
     }
 
     const PRESS_ORGANIZATION: uuid::Uuid = uuid::Uuid::from_u128(1);
