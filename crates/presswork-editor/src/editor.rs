@@ -105,7 +105,7 @@ impl Editor {
         if changes.is_empty() {
             return Ok(());
         }
-        self.document.apply_remote(changes)?;
+        self.document.apply_remote(changes, None)?;
         self.revision += 1;
         self.map_folds(changes);
         self.reveal();

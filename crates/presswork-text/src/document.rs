@@ -84,8 +84,9 @@ impl Document {
         let earlier = std::mem::replace(&mut self.suggestions, suggestions.unwrap_or(mapped));
         let before = std::mem::replace(&mut self.selection, selection);
         if !changes.is_empty() || suggested {
+            let replaced = self.suggestions.clone();
             self.history
-                .record(inverse, &changes, before, earlier, at)?;
+                .record(inverse, &changes, before, earlier, replaced, at)?;
         } else if self.selection != before {
             self.history.break_group();
         }
@@ -110,12 +111,22 @@ impl Document {
         self.restore(transaction)
     }
 
-    pub fn apply_remote(&mut self, changes: &ChangeSet) -> Result<(), TextError> {
+    pub fn apply_remote(
+        &mut self,
+        changes: &ChangeSet,
+        suggestions: Option<Vec<Suggestion>>,
+    ) -> Result<(), TextError> {
         self.buffer.check(changes)?;
         self.history.rebase(changes)?;
         self.buffer.apply(changes)?;
         self.selection = self.selection.map(changes);
-        self.suggestions = map_all(&self.suggestions, changes);
+        self.suggestions = match suggestions {
+            Some(suggestions) => suggestions
+                .into_iter()
+                .filter(|suggestion| self.buffer.check_range(&suggestion.range).is_ok())
+                .collect(),
+            None => map_all(&self.suggestions, changes),
+        };
         Ok(())
     }
 
@@ -313,7 +324,10 @@ mod tests {
         type_at(&mut document, 5, "!", Instant::now());
 
         document
-            .apply_remote(&ChangeSet::new(6, [Edit::insert(at(0), "Hi ")]).unwrap())
+            .apply_remote(
+                &ChangeSet::new(6, [Edit::insert(at(0), "Hi ")]).unwrap(),
+                None,
+            )
             .unwrap();
 
         assert_eq!(text_of(&document), "Hi Typst!");
@@ -325,7 +339,10 @@ mod tests {
         let mut document = Document::new("abc");
         type_at(&mut document, 3, "X", Instant::now());
         document
-            .apply_remote(&ChangeSet::new(4, [Edit::insert(at(0), "R")]).unwrap())
+            .apply_remote(
+                &ChangeSet::new(4, [Edit::insert(at(0), "R")]).unwrap(),
+                None,
+            )
             .unwrap();
 
         document.undo().unwrap();
@@ -342,7 +359,10 @@ mod tests {
         type_at(&mut document, 3, "X", start);
         type_at(&mut document, 0, "Y", start + Duration::from_secs(1));
         document
-            .apply_remote(&ChangeSet::new(5, [Edit::delete(at(4)..at(5))]).unwrap())
+            .apply_remote(
+                &ChangeSet::new(5, [Edit::delete(at(4)..at(5))]).unwrap(),
+                None,
+            )
             .unwrap();
 
         assert!(document.undo().unwrap().is_some());
@@ -438,12 +458,94 @@ mod tests {
         suggest(&mut document, vec![deletion(1..2)]);
 
         document
-            .apply_remote(&ChangeSet::new(3, [Edit::insert(at(0), "R")]).unwrap())
+            .apply_remote(
+                &ChangeSet::new(3, [Edit::insert(at(0), "R")]).unwrap(),
+                None,
+            )
             .unwrap();
 
         assert_eq!(document.suggestions(), [deletion(2..3)]);
         assert!(document.undo().unwrap().is_some());
         assert_eq!(document.suggestions(), []);
+    }
+
+    fn by_bob(suggestion: Suggestion) -> Suggestion {
+        Suggestion {
+            author: "Bob".to_owned(),
+            ..suggestion
+        }
+    }
+
+    #[test]
+    fn remote_suggestions_replace_the_suggestions() {
+        let mut document = Document::with_suggestions("abcdef", vec![insertion(0..2)]);
+
+        document
+            .apply_remote(&ChangeSet::empty(6), Some(vec![by_bob(deletion(3..5))]))
+            .unwrap();
+
+        assert_eq!(document.suggestions(), [by_bob(deletion(3..5))]);
+    }
+
+    #[test]
+    fn a_remote_suggestion_outside_the_text_goes_away() {
+        let mut document = Document::new("abc");
+        let remote = vec![by_bob(deletion(1..2)), by_bob(deletion(2..9))];
+
+        document
+            .apply_remote(&ChangeSet::empty(3), Some(remote))
+            .unwrap();
+
+        assert_eq!(document.suggestions(), [by_bob(deletion(1..2))]);
+    }
+
+    #[test]
+    fn undo_keeps_a_later_suggestion_of_another_person() {
+        let mut document = Document::with_suggestions("abcdef", vec![insertion(0..2)]);
+        suggest(&mut document, vec![]);
+        document
+            .apply_remote(&ChangeSet::empty(6), Some(vec![by_bob(deletion(3..5))]))
+            .unwrap();
+
+        document.undo().unwrap();
+
+        assert_eq!(
+            document.suggestions(),
+            [insertion(0..2), by_bob(deletion(3..5))]
+        );
+    }
+
+    #[test]
+    fn redo_keeps_a_later_suggestion_of_another_person() {
+        let mut document = Document::with_suggestions("abcdef", vec![insertion(0..2)]);
+        suggest(&mut document, vec![]);
+        document.undo().unwrap();
+        let remote = vec![insertion(0..2), by_bob(deletion(3..5))];
+        document
+            .apply_remote(&ChangeSet::empty(6), Some(remote))
+            .unwrap();
+
+        document.redo().unwrap();
+
+        assert_eq!(document.suggestions(), [by_bob(deletion(3..5))]);
+    }
+
+    #[test]
+    fn undo_of_a_suggested_insertion_keeps_a_later_suggestion_of_another_person() {
+        let mut document = Document::new("abc");
+        let typed = edit(&document, vec![Edit::insert(at(3), "XY")])
+            .with_selection(Selection::cursor(at(5)))
+            .with_suggestions(vec![insertion(3..5)]);
+        document.apply(typed, Instant::now()).unwrap();
+        let remote = ChangeSet::new(5, [Edit::insert(at(0), "R")]).unwrap();
+        document
+            .apply_remote(&remote, Some(vec![by_bob(deletion(1..2)), insertion(4..6)]))
+            .unwrap();
+
+        document.undo().unwrap();
+
+        assert_eq!(text_of(&document), "Rabc");
+        assert_eq!(document.suggestions(), [by_bob(deletion(1..2))]);
     }
 
     fn apply_local(document: &mut Document, raw: RawEdits, time: Instant) {
@@ -484,7 +586,7 @@ mod tests {
             let remote = edits_for(&text_of(&document), remote);
             let inserted: Vec<String> = remote.iter().map(|edit| edit.text.clone()).collect();
             document
-                .apply_remote(&ChangeSet::new(document.buffer().len(), remote).unwrap())
+                .apply_remote(&ChangeSet::new(document.buffer().len(), remote).unwrap(), None)
                 .unwrap();
             let before_undo = text_of(&document);
 

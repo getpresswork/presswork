@@ -16,6 +16,7 @@ struct Entry {
     changes: ChangeSet,
     selection: Selection,
     suggestions: Vec<Suggestion>,
+    replaced: Vec<Suggestion>,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +66,7 @@ impl History {
         changes: &ChangeSet,
         selection: Selection,
         suggestions: Vec<Suggestion>,
+        replaced: Vec<Suggestion>,
         at: Instant,
     ) -> Result<(), TextError> {
         let joins = self.last.as_ref().is_some_and(|last| {
@@ -76,11 +78,15 @@ impl History {
                 })
         });
         match self.undo.last_mut() {
-            Some(entry) if joins => entry.changes = inverse.compose(&entry.changes)?,
+            Some(entry) if joins => {
+                entry.changes = inverse.compose(&entry.changes)?;
+                entry.replaced = replaced;
+            }
             _ => self.undo.push(Entry {
                 changes: inverse,
                 selection,
                 suggestions,
+                replaced,
             }),
         }
         self.redo.clear();
@@ -160,16 +166,43 @@ fn step(
             return Err(error);
         }
     };
+    let restored = restored(&entry, suggestions);
     to.push(Entry {
         changes: reverse,
         selection: selection.clone(),
         suggestions: suggestions.to_vec(),
+        replaced: restored.clone(),
     });
     Ok(Some(
         Transaction::new(entry.changes)
             .with_selection(entry.selection)
-            .with_suggestions(entry.suggestions),
+            .with_suggestions(restored),
     ))
+}
+
+fn restored(entry: &Entry, current: &[Suggestion]) -> Vec<Suggestion> {
+    let left = map_all(&entry.replaced, &entry.changes);
+    let added: Vec<&Suggestion> = entry
+        .replaced
+        .iter()
+        .filter(|suggestion| {
+            suggestion
+                .map(&entry.changes)
+                .is_none_or(|mapped| !entry.suggestions.contains(&mapped))
+        })
+        .collect();
+    let mut result: Vec<Suggestion> = current
+        .iter()
+        .filter(|suggestion| !added.contains(suggestion))
+        .filter_map(|suggestion| suggestion.map(&entry.changes))
+        .collect();
+    for suggestion in &entry.suggestions {
+        if !left.contains(suggestion) && !result.contains(suggestion) {
+            result.push(suggestion.clone());
+        }
+    }
+    result.sort_by_key(|suggestion| (suggestion.range.start, suggestion.range.end));
+    result
 }
 
 fn rebase(stack: &[Entry], remote: &ChangeSet) -> Result<Vec<Entry>, TextError> {
@@ -177,6 +210,7 @@ fn rebase(stack: &[Entry], remote: &ChangeSet) -> Result<Vec<Entry>, TextError> 
     let mut rebased = Vec::with_capacity(stack.len());
     for entry in stack.iter().rev() {
         let changes = entry.changes.map(&mapping, false)?;
+        let replaced = map_all(&entry.replaced, &mapping);
         mapping = mapping.map(&entry.changes, true)?;
         let suggestions_only = entry.changes.is_empty();
         rebased.push((
@@ -185,6 +219,7 @@ fn rebase(stack: &[Entry], remote: &ChangeSet) -> Result<Vec<Entry>, TextError> 
                 changes,
                 selection: entry.selection.map(&mapping),
                 suggestions: map_all(&entry.suggestions, &mapping),
+                replaced,
             },
         ));
     }
