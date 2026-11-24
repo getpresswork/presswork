@@ -1543,7 +1543,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D199. Details of suggestion mode
 
-- **Status:** Accepted, 2026-11-21. **Origin:** Default.
+- **Status:** Accepted, 2026-11-21. Partially replaced by D200. **Origin:** Default.
 - **Decision:**
   - A suggestion is an insertion or a deletion, with a range in the editor text, an author, and a time in seconds since 1970. An insertion has a green background and an underline. A deletion has a red background and a line through it.
   - Typing over a selection gives a deletion of the selection and an insertion after it. A deletion of inserted text removes that text, also from the suggestion of a different author. A deletion of text that is already deleted does nothing. Next to each other, suggestions of the same kind and author join into one suggestion.
@@ -1556,3 +1556,18 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The tooltip on a suggestion gives its kind, its author, and its local time, for example "Insertion from Ann · 21 November 2025, 04:40".
 - **Reason:** These rules agree with the suggestion modes of common word processors. A text without the open suggestions on disk keeps the project safe in all other tools.
 - **Other options:** A separate key for each accept and reject command. A panel with a list of all suggestions. Suggestions in the Loro document for server documents now. A preview switch with and without the suggestions. Exports with the suggestions.
+
+## D200. Suggestions in server documents
+
+- **Status:** Accepted, 2026-11-24. **Origin:** Default.
+- **Decision:**
+  - In a server document, each suggestion is a mark on its text in the Loro document. The key of the mark is `suggestion`. The value is a map with `kind` (`insertion` or `deletion`), `author`, and `time` (seconds since 1970).
+  - A mark does not expand. Text that a person types at the start or at the end of a suggestion is not part of the suggestion. Text that a person types in a suggestion is part of it. This agrees with the editor (D199).
+  - One character has a maximum of one suggestion. If two persons mark the same text at the same time, Loro keeps one of the two marks on that text.
+  - The editor gives its suggestions with each change. The client compares them with the marks in the Loro document and writes only the differences, in the same update as the text. Thus the marks agree with the editor, also when Loro moves a mark in a different way, for example after a replacement at the edge of a suggestion. Two suggestions side by side with the same kind, author, and time are one mark.
+  - The server keeps the marks in the updates of the document, but it does not read them.
+  - Undo and redo change only the suggestions that their step changed. A suggestion that a different person made after that step stays.
+  - The client does not use a suggestion from the server that has a range outside the text.
+  - Presswork 0.1.0 does not know the marks. It shows the inserted text and the deleted text of a suggestion as text without suggestions.
+- **Reason:** Loro moves the marks with the text in all clients, thus the server needs no change. One key for all suggestions gives a maximum of one suggestion for each character, as in the editor. An undo that changes only the suggestions of its step does not remove the work of other persons.
+- **Other options:** A Loro list of suggestions with cursors. A mark key for each kind or for each author. Suggestions only in the client that made them. Clients that do not know the marks cannot open a server document.

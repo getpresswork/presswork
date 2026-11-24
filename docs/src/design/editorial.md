@@ -16,9 +16,9 @@ The file on disk contains the text without the open suggestions. The preview can
 
 Other functions also make suggestions: the concordance, the house style corrections, and AI assistance. Thus a person always approves a change that a program proposes.
 
-In milestone 2, suggestion mode does these things (D198, D199):
+In milestone 2, suggestion mode does these things (D198, D199, D200):
 
-- To start or stop suggestion mode, click **Suggest** in the status bar or push Ctrl+Shift+E. On macOS, push Shift+Cmd+E. While suggestion mode is on, the button stays pressed. Suggestion mode stays on when you open a different project.
+- To start or stop suggestion mode, click **Suggest** in the status bar or push Ctrl+Shift+E. On macOS, push Shift+Cmd+E. While suggestion mode is on, the button stays pressed. Suggestion mode stays on when you open a different project or a document from the server.
 - Inserted text has a green background and a green line below it. Deleted text stays in the editor with a red background and a red line through it.
 - If you type over a selection, the selection becomes a deletion, and the new text becomes an insertion after it. If you delete inserted text, the text goes away immediately, also when a different person suggested it.
 - Each suggestion records its author and its time. When you are signed in to a server, the author is the name of your account. Without a sign-in, the author is the user name of the computer. Put the mouse pointer on a suggestion to see its author and its time.
@@ -26,7 +26,8 @@ In milestone 2, suggestion mode does these things (D198, D199):
 - The file on disk contains the text without the open suggestions: the deleted text is in the file, and the inserted text is not. Thus the export profiles and `presswork-cli` use the text without the suggestions.
 - Presswork keeps the open suggestions of a file in the folder `.presswork/suggestions` of the project, for example in `.presswork/suggestions/main.typ.json`. When you open the project again, the suggestions come back. If the file changed outside Presswork, the suggestions do not agree with the file. Then Presswork moves them to a file that ends with `.json.old` and tells you in the notice bar.
 - The preview shows the text as it is after you accept all suggestions. Errors, problem marks, and clicks on the pages go to the correct place in the editor.
-- A document from the server does not have suggestion mode yet. Suggestions in the Loro document come later.
+- In a document from the server, the suggestions are marks in the Loro document. All persons who have the document open see a suggestion immediately, and each of them can accept or reject it. Presswork 0.1.0 does not know these marks: it shows the inserted text and the deleted text as text without suggestions.
+- Undo and redo change only the suggestions that their step changed. Thus a suggestion that a different person made after your step stays.
 
 ## Spelling
 
