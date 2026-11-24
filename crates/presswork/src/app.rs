@@ -508,6 +508,7 @@ impl App {
             live.join_chat(organization, name);
         }
         self.editor = Editor::new("");
+        self.apply_suggesting();
         self.saved = self.editor.revision();
         self.project = None;
         self.proofreader.close_project();
@@ -518,14 +519,7 @@ impl App {
         Task::batch([self.request_compile(), self.load_library()])
     }
 
-    fn server_document_open(&self) -> bool {
-        self.live.as_ref().and_then(LiveSession::document).is_some()
-    }
-
     fn toggle_suggesting(&mut self) {
-        if self.server_document_open() {
-            return;
-        }
         self.edit_mode = match self.edit_mode {
             EditMode::Change => EditMode::Suggest,
             EditMode::Suggest => EditMode::Change,
@@ -534,7 +528,7 @@ impl App {
     }
 
     fn apply_suggesting(&mut self) {
-        let suggesting = self.edit_mode == EditMode::Suggest && !self.server_document_open();
+        let suggesting = self.edit_mode == EditMode::Suggest;
         let author = suggesting.then(|| {
             let account = self
                 .live
@@ -2557,9 +2551,7 @@ impl App {
                     .toggle_button(&self.localizer)
                     .map(Message::Outline),
             );
-            if !self.server_document_open() {
-                indicators = indicators.push(self.suggest_button());
-            }
+            indicators = indicators.push(self.suggest_button());
         }
         if self.live.as_ref().and_then(LiveSession::chat).is_some() {
             indicators = indicators.push(self.chat_button());
@@ -4504,14 +4496,56 @@ mod tests {
     }
 
     #[test]
-    fn a_server_document_has_no_suggestion_mode() {
+    fn a_server_document_has_suggestion_mode() {
         let mut app = app();
         let _receiver = open_server_document(&mut app);
 
         send(&mut app, suggestion_key());
 
-        assert!(app.editor.suggesting().is_none());
-        assert!(simulator(app.view()).find("Suggest").is_err());
+        assert_eq!(app.editor.suggesting(), Some("Ann"));
+        assert!(simulator(app.view()).find("Suggest").is_ok());
+    }
+
+    #[test]
+    fn suggestion_mode_stays_on_for_a_server_document() {
+        let mut app = app();
+        send(&mut app, suggestion_key());
+
+        let _receiver = open_server_document(&mut app);
+
+        assert_eq!(app.editor.suggesting(), Some("Ann"));
+    }
+
+    #[test]
+    fn a_suggestion_in_a_server_document_goes_to_the_server() {
+        let mut app = app();
+        let mut receiver = open_server_document(&mut app);
+        let mut server = server_with("The press stopped.");
+        subscribed(&mut app, &server);
+        send(&mut app, suggestion_key());
+        drained(&mut receiver);
+
+        send(&mut app, insert("Late: "));
+
+        for message in drained(&mut receiver) {
+            if let ClientMessage::Updates { data, .. } = message {
+                server.merge(&data).unwrap();
+            }
+        }
+        let marks: Vec<_> = server
+            .suggestions()
+            .into_iter()
+            .map(|mark| (mark.kind, mark.range, mark.author))
+            .collect();
+        assert_eq!(server.text(), "Late: The press stopped.");
+        assert_eq!(
+            marks,
+            [(
+                presswork_text::SuggestionKind::Insertion,
+                Position::new(0)..Position::new(6),
+                "Ann".to_owned()
+            )]
+        );
     }
 
     fn insertion(range: std::ops::Range<usize>) -> presswork_text::Suggestion {
