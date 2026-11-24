@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc fb68be4fca21f3acea52a855446cfbebd9b5577a7e728f4ffb162812472e6e04 # shrinks to ann_edits = [], bob_edits = [(0.0, 0, "")]
+cc ce2f3c142b56de509292eea7993725283efd9b0e332a1c777990e57cb41c5ee7 # shrinks to bob_edits = [(Index(8513881880173639208), 1, "✓")]

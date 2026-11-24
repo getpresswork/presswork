@@ -157,7 +157,7 @@ impl LiveSession {
         let Some(live) = &mut self.document else {
             return Ok(());
         };
-        let data = live.text.apply(changes)?;
+        let data = live.text.apply(changes, None)?;
         if self.connected && live.subscribed {
             self.send_updates(data);
         }
@@ -208,14 +208,14 @@ impl LiveSession {
                 let Some(live) = self.live_document(document) else {
                     return Ok(None);
                 };
-                let changes = live.text.import(&data)?;
+                let changes = live.text.import(&data)?.changes;
                 let missing = live.text.updates_since(&version)?;
                 live.subscribed = true;
                 self.send_updates(missing);
                 Ok(Some(changes))
             }
             ServerMessage::Updates { document, data } => match self.live_document(document) {
-                Some(live) => Ok(Some(live.text.import(&data)?)),
+                Some(live) => Ok(Some(live.text.import(&data)?.changes)),
                 None => Ok(None),
             },
             ServerMessage::Joined {
@@ -387,7 +387,10 @@ mod tests {
     fn server_text(text: &str) -> TextDocument {
         let mut server = TextDocument::new();
         server
-            .apply(&ChangeSet::new(0, [Edit::insert(Position::new(0), text)]).unwrap())
+            .apply(
+                &ChangeSet::new(0, [Edit::insert(Position::new(0), text)]).unwrap(),
+                None,
+            )
             .unwrap();
         server
     }
@@ -536,7 +539,7 @@ mod tests {
         session.open_document(document());
         session.event(Event::Connected).unwrap();
         subscribed(&mut session, &server);
-        let data = server.apply(&insert(5, 0, "The ")).unwrap();
+        let data = server.apply(&insert(5, 0, "The "), None).unwrap();
 
         let changes = session
             .event(Event::Received(ServerMessage::Updates {

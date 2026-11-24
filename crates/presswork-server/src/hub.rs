@@ -231,7 +231,10 @@ mod tests {
         let mut document = TextDocument::new();
         vec![
             document
-                .apply(&ChangeSet::new(0, [Edit::insert(Position::new(0), text)]).unwrap())
+                .apply(
+                    &ChangeSet::new(0, [Edit::insert(Position::new(0), text)]).unwrap(),
+                    None,
+                )
                 .unwrap(),
         ]
     }
@@ -255,7 +258,10 @@ mod tests {
         let mut document = TextDocument::load(data).unwrap();
         let end = document.text().len();
         document
-            .apply(&ChangeSet::new(end, [Edit::insert(Position::new(end), text)]).unwrap())
+            .apply(
+                &ChangeSet::new(end, [Edit::insert(Position::new(end), text)]).unwrap(),
+                None,
+            )
             .unwrap()
     }
 

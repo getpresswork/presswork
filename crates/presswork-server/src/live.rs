@@ -428,7 +428,10 @@ mod tests {
             let length = self.text.text().len();
             let data = self
                 .text
-                .apply(&ChangeSet::new(length, [Edit::insert(Position::new(at), words)]).unwrap())
+                .apply(
+                    &ChangeSet::new(length, [Edit::insert(Position::new(at), words)]).unwrap(),
+                    None,
+                )
                 .unwrap();
             self.live
                 .send(&ClientMessage::Updates {

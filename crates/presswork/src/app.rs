@@ -5390,7 +5390,10 @@ mod tests {
     fn server_with(text: &str) -> TextDocument {
         let mut server = TextDocument::new();
         server
-            .apply(&ChangeSet::new(0, [Edit::insert(Position::new(0), text)]).unwrap())
+            .apply(
+                &ChangeSet::new(0, [Edit::insert(Position::new(0), text)]).unwrap(),
+                None,
+            )
             .unwrap();
         server
     }
@@ -5473,7 +5476,10 @@ mod tests {
         );
 
         let data = server
-            .apply(&ChangeSet::new(5, [Edit::insert(Position::new(0), "The ")]).unwrap())
+            .apply(
+                &ChangeSet::new(5, [Edit::insert(Position::new(0), "The ")]).unwrap(),
+                None,
+            )
             .unwrap();
         send(
             &mut app,

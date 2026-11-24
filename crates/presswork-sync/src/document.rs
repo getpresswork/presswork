@@ -1,11 +1,22 @@
+use std::collections::HashMap;
+use std::ops::Range;
+
+use loro::cursor::PosType;
 use loro::event::Diff;
 use loro::{
-    ContainerTrait, ExportMode, LoroDoc, LoroEncodeError, LoroError, LoroText, TextDelta,
-    VersionVector,
+    ContainerTrait, ExpandType, ExportMode, LoroDoc, LoroEncodeError, LoroError, LoroText,
+    LoroValue, StyleConfig, StyleConfigMap, TextDelta, VersionVector,
 };
-use presswork_text::{ChangeSet, Edit, Position, TextError};
+use presswork_text::{ChangeSet, Edit, Position, Suggestion, SuggestionKind, TextError};
 
 const TEXT: &str = "text";
+const SUGGESTION: &str = "suggestion";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Remote {
+    pub changes: ChangeSet,
+    pub suggestions: Vec<Suggestion>,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum SyncError {
@@ -30,6 +41,14 @@ impl TextDocument {
     #[must_use]
     pub fn new() -> Self {
         let doc = LoroDoc::new();
+        let mut styles = StyleConfigMap::new();
+        styles.insert(
+            SUGGESTION.into(),
+            StyleConfig {
+                expand: ExpandType::None,
+            },
+        );
+        doc.config_text_style(styles);
         let text = doc.get_text(TEXT);
         Self { doc, text }
     }
@@ -68,10 +87,31 @@ impl TextDocument {
         self.doc.oplog_vv().encode()
     }
 
-    pub fn apply(&mut self, changes: &ChangeSet) -> Result<Vec<u8>, SyncError> {
-        if changes.is_empty() {
-            return Ok(Vec::new());
+    #[must_use]
+    pub fn suggestions(&self) -> Vec<Suggestion> {
+        let mut suggestions = Vec::new();
+        let mut start = 0;
+        for item in self.text.to_delta() {
+            if let TextDelta::Insert { insert, attributes } = item {
+                let end = start + insert.len();
+                if let Some(suggestion) = attributes
+                    .as_ref()
+                    .and_then(|attributes| attributes.get(SUGGESTION))
+                    .and_then(|value| marked(value, start..end))
+                {
+                    suggestions.push(suggestion);
+                }
+                start = end;
+            }
         }
+        suggestions
+    }
+
+    pub fn apply(
+        &mut self,
+        changes: &ChangeSet,
+        suggestions: Option<&[Suggestion]>,
+    ) -> Result<Vec<u8>, SyncError> {
         let before = self.doc.oplog_vv();
         let edits: Vec<Edit> = changes.edits().collect();
         for edit in edits.iter().rev() {
@@ -88,11 +128,51 @@ impl TextDocument {
                     .map_err(SyncError::Edit)?;
             }
         }
+        if let Some(wanted) = suggestions {
+            self.mark(&self.suggestions(), &joined(wanted))?;
+        }
         self.doc.commit();
         self.export_since(&before)
     }
 
-    pub fn import(&mut self, update: &[u8]) -> Result<ChangeSet, SyncError> {
+    pub fn import(&mut self, update: &[u8]) -> Result<Remote, SyncError> {
+        let changes = self.import_changes(update)?;
+        Ok(Remote {
+            changes,
+            suggestions: self.suggestions(),
+        })
+    }
+
+    fn mark(&self, current: &[Suggestion], wanted: &[Suggestion]) -> Result<(), SyncError> {
+        for old in current.iter().filter(|old| !wanted.contains(old)) {
+            let range = self.unicode(old.range.start)?..self.unicode(old.range.end)?;
+            self.text
+                .unmark(range, SUGGESTION)
+                .map_err(SyncError::Edit)?;
+        }
+        for new in wanted.iter().filter(|new| !current.contains(new)) {
+            let range = new.range.start.offset()..new.range.end.offset();
+            self.text
+                .mark_utf8(range, SUGGESTION, mark_value(new))
+                .map_err(SyncError::Edit)?;
+        }
+        Ok(())
+    }
+
+    fn unicode(&self, position: Position) -> Result<usize, SyncError> {
+        let offset = position.offset();
+        self.text
+            .convert_pos(offset, PosType::Bytes, PosType::Unicode)
+            .ok_or_else(|| {
+                SyncError::Text(TextError::InvalidRange {
+                    start: offset,
+                    end: offset,
+                    len: self.text.len_utf8(),
+                })
+            })
+    }
+
+    fn import_changes(&mut self, update: &[u8]) -> Result<ChangeSet, SyncError> {
         let old = self.text();
         if update.is_empty() {
             return Ok(ChangeSet::empty(old.len()));
@@ -136,6 +216,54 @@ impl Default for TextDocument {
     }
 }
 
+fn joined(suggestions: &[Suggestion]) -> Vec<Suggestion> {
+    let mut joined: Vec<Suggestion> = Vec::with_capacity(suggestions.len());
+    for suggestion in suggestions
+        .iter()
+        .filter(|suggestion| suggestion.range.start < suggestion.range.end)
+    {
+        match joined.last_mut() {
+            Some(last)
+                if last.range.end == suggestion.range.start
+                    && last.kind == suggestion.kind
+                    && last.author == suggestion.author
+                    && last.time == suggestion.time =>
+            {
+                last.range.end = suggestion.range.end;
+            }
+            _ => joined.push(suggestion.clone()),
+        }
+    }
+    joined
+}
+
+fn mark_value(suggestion: &Suggestion) -> LoroValue {
+    let kind = match suggestion.kind {
+        SuggestionKind::Insertion => "insertion",
+        SuggestionKind::Deletion => "deletion",
+    };
+    LoroValue::from(HashMap::from([
+        ("kind", LoroValue::from(kind)),
+        ("author", LoroValue::from(suggestion.author.as_str())),
+        ("time", LoroValue::from(suggestion.time)),
+    ]))
+}
+
+fn marked(value: &LoroValue, range: Range<usize>) -> Option<Suggestion> {
+    let map = value.as_map()?;
+    let kind = match map.get("kind")?.as_string()?.as_str() {
+        "insertion" => SuggestionKind::Insertion,
+        "deletion" => SuggestionKind::Deletion,
+        _ => return None,
+    };
+    Some(Suggestion {
+        kind,
+        range: Position::new(range.start)..Position::new(range.end),
+        author: map.get("author")?.as_string()?.to_string(),
+        time: *map.get("time")?.as_i64()?,
+    })
+}
+
 fn changes(old: &str, delta: &[TextDelta]) -> Result<ChangeSet, SyncError> {
     let mut rest = old.chars();
     let mut byte = 0;
@@ -175,7 +303,9 @@ fn changes(old: &str, delta: &[TextDelta]) -> Result<ChangeSet, SyncError> {
 
 #[cfg(test)]
 mod tests {
-    use presswork_text::{Buffer, ChangeSet, Edit, Position};
+    use std::ops::Range;
+
+    use presswork_text::{Buffer, ChangeSet, Edit, Position, SuggestionKind};
     use proptest::prelude::*;
     use proptest::sample::Index;
 
@@ -196,22 +326,41 @@ mod tests {
     struct Person {
         document: TextDocument,
         buffer: Buffer,
+        suggestions: Vec<Suggestion>,
     }
 
     impl Person {
         fn new(document: TextDocument) -> Self {
             let buffer = Buffer::from(document.text().as_str());
-            Self { document, buffer }
+            let suggestions = document.suggestions();
+            Self {
+                document,
+                buffer,
+                suggestions,
+            }
         }
 
         fn edit(&mut self, changes: &ChangeSet) -> Vec<u8> {
+            let moved = self
+                .suggestions
+                .iter()
+                .filter_map(|suggestion| suggestion.map(changes))
+                .collect();
+            self.suggest(changes, moved)
+        }
+
+        fn suggest(&mut self, changes: &ChangeSet, suggestions: Vec<Suggestion>) -> Vec<u8> {
             self.buffer.apply(changes).unwrap();
-            self.document.apply(changes).unwrap()
+            self.suggestions = suggestions;
+            self.document
+                .apply(changes, Some(&self.suggestions))
+                .unwrap()
         }
 
         fn receive(&mut self, update: &[u8]) {
-            let changes = self.document.import(update).unwrap();
-            self.buffer.apply(&changes).unwrap();
+            let remote = self.document.import(update).unwrap();
+            self.buffer.apply(&remote.changes).unwrap();
+            self.suggestions = remote.suggestions;
         }
 
         fn text(&self) -> String {
@@ -228,7 +377,10 @@ mod tests {
     fn shared(text: &str) -> (Person, Person) {
         let mut first = TextDocument::new();
         let start = first
-            .apply(&ChangeSet::new(0, [Edit::insert(at(0), text)]).unwrap())
+            .apply(
+                &ChangeSet::new(0, [Edit::insert(at(0), text)]).unwrap(),
+                None,
+            )
             .unwrap();
         let mut second = TextDocument::new();
         second.import(&start).unwrap();
@@ -245,7 +397,10 @@ mod tests {
         let mut document = TextDocument::new();
 
         document
-            .apply(&ChangeSet::new(0, [Edit::insert(at(0), "Field Notes")]).unwrap())
+            .apply(
+                &ChangeSet::new(0, [Edit::insert(at(0), "Field Notes")]).unwrap(),
+                None,
+            )
             .unwrap();
 
         assert_eq!(document.text(), "Field Notes");
@@ -302,7 +457,7 @@ mod tests {
         .unwrap();
 
         let update = ann.edit(&changes);
-        let received = bob.document.import(&update).unwrap();
+        let received = bob.document.import(&update).unwrap().changes;
 
         assert_eq!(received.edits().count(), 2);
         bob.buffer.apply(&received).unwrap();
@@ -320,7 +475,7 @@ mod tests {
         bob.receive(&missing);
 
         assert_eq!(bob.text(), "abc");
-        assert!(bob.document.import(&missing).unwrap().is_empty());
+        assert!(bob.document.import(&missing).unwrap().changes.is_empty());
     }
 
     #[test]
@@ -331,6 +486,134 @@ mod tests {
         bob.receive(&update);
 
         assert_eq!(bob.text(), "Proof");
+    }
+
+    fn suggestion(kind: SuggestionKind, range: Range<usize>, author: &str) -> Suggestion {
+        Suggestion {
+            kind,
+            range: at(range.start)..at(range.end),
+            author: author.to_owned(),
+            time: 1_763_800_000,
+        }
+    }
+
+    fn insertion(range: Range<usize>) -> Suggestion {
+        suggestion(SuggestionKind::Insertion, range, "Ann")
+    }
+
+    fn deletion(range: Range<usize>) -> Suggestion {
+        suggestion(SuggestionKind::Deletion, range, "Ann")
+    }
+
+    #[test]
+    fn a_suggestion_goes_to_the_other_person_as_a_mark() {
+        let (mut ann, mut bob) = shared("The press stopped.");
+
+        let update = ann.suggest(&insert(&ann.document, 4, "old "), vec![insertion(4..8)]);
+        bob.receive(&update);
+
+        assert_eq!(bob.text(), "The old press stopped.");
+        assert_eq!(bob.suggestions, [insertion(4..8)]);
+    }
+
+    #[test]
+    fn a_mark_does_not_grow_at_its_edges() {
+        let (mut ann, mut bob) = shared("The press stopped.");
+        bob.receive(&ann.suggest(&ChangeSet::empty(18), vec![deletion(4..9)]));
+
+        let edges =
+            ChangeSet::new(18, [Edit::insert(at(4), "<"), Edit::insert(at(9), ">")]).unwrap();
+        ann.receive(&bob.edit(&edges));
+
+        assert_eq!(ann.text(), "The <press> stopped.");
+        assert_eq!(ann.suggestions, [deletion(5..10)]);
+        assert_eq!(bob.document.suggestions(), bob.suggestions);
+    }
+
+    #[test]
+    fn text_typed_in_a_suggestion_is_part_of_it() {
+        let (mut ann, mut bob) = shared("The press stopped.");
+        bob.receive(&ann.suggest(&ChangeSet::empty(18), vec![deletion(4..9)]));
+
+        ann.receive(&bob.edit(&insert(&bob.document, 6, "e")));
+
+        assert_eq!(ann.text(), "The preess stopped.");
+        assert_eq!(ann.suggestions, [deletion(4..10)]);
+        assert_eq!(bob.document.suggestions(), bob.suggestions);
+    }
+
+    #[test]
+    fn a_removed_suggestion_removes_its_mark() {
+        let text = "Größe – Maß";
+        let (mut ann, mut bob) = shared(text);
+        let start = "Größe – ".len();
+        let unchanged = ChangeSet::empty(text.len());
+        bob.receive(&ann.suggest(&unchanged, vec![deletion(start..text.len())]));
+        assert_eq!(bob.suggestions, [deletion(start..text.len())]);
+
+        bob.receive(&ann.suggest(&unchanged, vec![]));
+
+        assert_eq!(bob.suggestions, []);
+        assert_eq!(bob.text(), text);
+    }
+
+    #[test]
+    fn a_document_loads_with_its_suggestions() {
+        let (mut ann, _) = shared("Proof");
+        ann.suggest(&ChangeSet::empty(5), vec![deletion(1..3)]);
+
+        let all = ann
+            .document
+            .updates_since(&TextDocument::new().version())
+            .unwrap();
+
+        assert_eq!(
+            TextDocument::load(&all).unwrap().suggestions(),
+            [deletion(1..3)]
+        );
+    }
+
+    #[test]
+    fn concurrent_suggestions_on_the_same_text_converge() {
+        let (mut ann, mut bob) = shared("The press stopped.");
+        let unchanged = ChangeSet::empty(18);
+        let from_ann = ann.suggest(&unchanged, vec![deletion(4..12)]);
+        let by_bob = suggestion(SuggestionKind::Deletion, 8..17, "Bob");
+        let from_bob = bob.suggest(&unchanged, vec![by_bob]);
+
+        ann.receive(&from_bob);
+        bob.receive(&from_ann);
+
+        assert_ne!(ann.suggestions, []);
+        assert_eq!(ann.suggestions, bob.suggestions);
+        assert!(
+            ann.suggestions
+                .windows(2)
+                .all(|pair| pair[0].range.end <= pair[1].range.start)
+        );
+    }
+
+    #[test]
+    fn only_a_changed_list_of_suggestions_gives_an_update() {
+        let (mut ann, _) = shared("Proof");
+
+        let changed = ann.suggest(&ChangeSet::empty(5), vec![deletion(1..3)]);
+        let unchanged = ann.suggest(&ChangeSet::empty(5), vec![deletion(1..3)]);
+
+        assert_ne!(changed.len(), 0);
+        assert!(unchanged.is_empty(), "{} bytes", unchanged.len());
+    }
+
+    #[test]
+    fn equal_suggestions_side_by_side_are_one_mark() {
+        let (mut ann, _) = shared("Proof");
+        let side_by_side = vec![deletion(1..2), deletion(2..3)];
+
+        ann.suggest(&ChangeSet::empty(5), side_by_side.clone());
+        let again = ann.suggest(&ChangeSet::empty(5), side_by_side);
+
+        assert!(again.is_empty(), "{} bytes", again.len());
+        assert_eq!(ann.document.suggestions(), [deletion(1..3)]);
     }
 
     #[test]
@@ -457,6 +740,22 @@ mod tests {
             }
 
             prop_assert_eq!(ann.text(), bob.text());
+        }
+
+        #[test]
+        fn marks_move_as_the_suggestions_of_the_editor(bob_edits in edits()) {
+            let text = "Presswork – Größe und Maß";
+            let (mut ann, mut bob) = shared(text);
+            let marked = "Presswork – ".len().."Presswork – Größe".len();
+            bob.receive(&ann.suggest(&ChangeSet::empty(text.len()), vec![deletion(marked)]));
+
+            for edit in &bob_edits {
+                let changes = change(&bob.document.text(), edit);
+                ann.receive(&bob.edit(&changes));
+            }
+
+            prop_assert_eq!(bob.document.suggestions(), bob.suggestions.clone());
+            prop_assert_eq!(ann.suggestions, bob.suggestions);
         }
     }
 }

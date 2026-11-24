@@ -744,7 +744,10 @@ fn render_server(app: &mut App) {
     send(app, Message::Live(LiveEvent::Connected));
     let mut server = TextDocument::new();
     server
-        .apply(&ChangeSet::new(0, [Edit::insert(Position::new(0), BOOK)]).unwrap())
+        .apply(
+            &ChangeSet::new(0, [Edit::insert(Position::new(0), BOOK)]).unwrap(),
+            None,
+        )
         .unwrap();
     send(
         app,
