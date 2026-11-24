@@ -1615,7 +1615,7 @@ impl App {
         };
         match live.event(event) {
             Ok(Some(changes)) if !changes.is_empty() => {
-                if let Err(error) = self.editor.apply_remote(&changes) {
+                if let Err(error) = self.editor.apply_remote(&changes, None) {
                     tracing::error!(%error, "A remote change does not agree with the editor");
                 }
                 return self.request_compile();

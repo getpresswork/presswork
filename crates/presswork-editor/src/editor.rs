@@ -101,11 +101,19 @@ impl Editor {
         parts.join(boundary::line_break(buffer))
     }
 
-    pub fn apply_remote(&mut self, changes: &ChangeSet) -> Result<(), TextError> {
-        if changes.is_empty() {
+    pub fn apply_remote(
+        &mut self,
+        changes: &ChangeSet,
+        suggestions: Option<Vec<Suggestion>>,
+    ) -> Result<(), TextError> {
+        if changes.is_empty()
+            && suggestions
+                .as_deref()
+                .is_none_or(|list| list == self.document.suggestions())
+        {
             return Ok(());
         }
-        self.document.apply_remote(changes, None)?;
+        self.document.apply_remote(changes, suggestions)?;
         self.revision += 1;
         self.map_folds(changes);
         self.reveal();
@@ -837,11 +845,56 @@ mod tests {
         let revision = editor.revision();
 
         editor
-            .apply_remote(&ChangeSet::new(4, [Edit::insert(Position::new(0), "Hi ")]).unwrap())
+            .apply_remote(
+                &ChangeSet::new(4, [Edit::insert(Position::new(0), "Hi ")]).unwrap(),
+                None,
+            )
             .unwrap();
 
         assert_eq!(marked(&editor), "Hi ab|cd");
         assert!(editor.revision() > revision);
+    }
+
+    fn by_bob(kind: SuggestionKind, range: Range<usize>) -> Suggestion {
+        Suggestion {
+            kind,
+            range: Position::new(range.start)..Position::new(range.end),
+            author: "Bob".to_owned(),
+            time: 0,
+        }
+    }
+
+    #[test]
+    fn remote_suggestions_show_without_a_change_of_the_text() {
+        let mut editor = editor("ab|cd");
+        let revision = editor.revision();
+        let remote = vec![by_bob(SuggestionKind::Deletion, 1..3)];
+
+        editor
+            .apply_remote(&ChangeSet::empty(4), Some(remote))
+            .unwrap();
+
+        assert_eq!(
+            suggested(&editor),
+            [(SuggestionKind::Deletion, 1..3, "Bob")]
+        );
+        assert!(editor.revision() > revision);
+    }
+
+    #[test]
+    fn the_same_remote_suggestions_keep_the_revision() {
+        let mut editor = editor("ab|cd");
+        let remote = vec![by_bob(SuggestionKind::Deletion, 1..3)];
+        editor
+            .apply_remote(&ChangeSet::empty(4), Some(remote.clone()))
+            .unwrap();
+        let revision = editor.revision();
+
+        editor
+            .apply_remote(&ChangeSet::empty(4), Some(remote))
+            .unwrap();
+
+        assert_eq!(editor.revision(), revision);
     }
 
     #[test]
@@ -1512,7 +1565,7 @@ mod tests {
         let mut editor = folded("head|\nbody\ntail", 5..10);
         let changes = ChangeSet::new(14, [Edit::insert(Position::new(0), "ab")]).unwrap();
 
-        editor.apply_remote(&changes).unwrap();
+        editor.apply_remote(&changes, None).unwrap();
 
         assert_eq!(fold_spans(&editor), [(7, 12)]);
     }
