@@ -113,7 +113,7 @@ pub(crate) fn zip_file(folder: &Path, entries: &[(&str, &[u8])]) -> PathBuf {
     path
 }
 
-pub(crate) fn tar_xz_file(folder: &Path, entries: &[(&str, tar::EntryType, &[u8])]) -> PathBuf {
+fn tar_bytes(entries: &[(&str, tar::EntryType, &[u8])]) -> Vec<u8> {
     let mut builder = tar::Builder::new(Vec::new());
     for (name, kind, data) in entries {
         let mut header = tar::Header::new_gnu();
@@ -124,13 +124,33 @@ pub(crate) fn tar_xz_file(folder: &Path, entries: &[(&str, tar::EntryType, &[u8]
         header.set_cksum();
         builder.append(&header, *data).unwrap();
     }
+    builder.into_inner().unwrap()
+}
+
+pub(crate) fn tar_xz_file(folder: &Path, entries: &[(&str, tar::EntryType, &[u8])]) -> PathBuf {
     let path = folder.join("typst.tar.xz");
     let mut writer = lzma_rust2::XzWriter::new(
         File::create(&path).unwrap(),
         lzma_rust2::XzOptions::with_preset(1),
     )
     .unwrap();
-    writer.write_all(&builder.into_inner().unwrap()).unwrap();
+    writer.write_all(&tar_bytes(entries)).unwrap();
     writer.finish().unwrap();
+    path
+}
+
+pub(crate) fn tar_gz_bytes(entries: &[(&str, tar::EntryType, &[u8])]) -> Vec<u8> {
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    encoder.write_all(&tar_bytes(entries)).unwrap();
+    encoder.finish().unwrap()
+}
+
+pub(crate) fn tar_gz_file(
+    folder: &Path,
+    name: &str,
+    entries: &[(&str, tar::EntryType, &[u8])],
+) -> PathBuf {
+    let path = folder.join(name);
+    std::fs::write(&path, tar_gz_bytes(entries)).unwrap();
     path
 }

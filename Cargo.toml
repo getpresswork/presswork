@@ -35,6 +35,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 comemo = "0.5.1"
 directories = "6.0.0"
 encoding_rs = "0.8.44"
+flate2 = "1.1.11"
 fluent-bundle = "0.16.0"
 futures = "0.3.34"
 getrandom = "0.4.3"

@@ -69,6 +69,19 @@ impl Client {
         Ok(releases)
     }
 
+    pub async fn text(&self, url: &str) -> Result<String, ToolchainError> {
+        let response = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .map_err(|error| network(&error))?;
+        success(response)?
+            .text()
+            .await
+            .map_err(|error| network(&error))
+    }
+
     pub async fn download(
         &self,
         url: &str,

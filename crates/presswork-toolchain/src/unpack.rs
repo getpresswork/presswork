@@ -13,7 +13,15 @@ pub(crate) fn unpack(archive: &Path, destination: &Path) -> Result<(), Toolchain
     if has_suffix(&name, ".zip") {
         unpack_zip(archive, destination)
     } else if has_suffix(&name, ".tar.xz") {
-        unpack_tar_xz(archive, destination)
+        let xz = lzma_rust2::XzReader::new_mem_limit(
+            BufReader::new(open(archive)?),
+            false,
+            XZ_MEMORY_LIMIT_KB,
+        );
+        unpack_tar(xz, destination)
+    } else if has_suffix(&name, ".tar.gz") || has_suffix(&name, ".tgz") {
+        let gz = flate2::read::GzDecoder::new(BufReader::new(open(archive)?));
+        unpack_tar(gz, destination)
     } else {
         Err(ToolchainError::UnsupportedArchive(name))
     }
@@ -45,13 +53,8 @@ fn unpack_zip(archive: &Path, destination: &Path) -> Result<(), ToolchainError> 
     Ok(())
 }
 
-fn unpack_tar_xz(archive: &Path, destination: &Path) -> Result<(), ToolchainError> {
-    let xz = lzma_rust2::XzReader::new_mem_limit(
-        BufReader::new(open(archive)?),
-        false,
-        XZ_MEMORY_LIMIT_KB,
-    );
-    let mut tar = tar::Archive::new(xz);
+fn unpack_tar(data: impl Read, destination: &Path) -> Result<(), ToolchainError> {
+    let mut tar = tar::Archive::new(data);
     for entry in tar.entries().map_err(|error| broken(&error))? {
         let mut entry = entry.map_err(|error| broken(&error))?;
         let name = String::from_utf8_lossy(&entry.path_bytes()).into_owned();
@@ -144,7 +147,7 @@ fn broken(error: &dyn std::fmt::Display) -> ToolchainError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{tar_xz_file, zip_file};
+    use crate::testing::{tar_gz_file, tar_xz_file, zip_file};
 
     #[test]
     fn a_zip_file_unpacks_into_the_folder() {
@@ -168,6 +171,47 @@ mod tests {
             std::fs::read(output.join("typst-x/LICENSE")).unwrap(),
             b"Apache"
         );
+    }
+
+    #[test]
+    fn a_tar_gz_file_unpacks_into_the_folder() {
+        let folder = tempfile::tempdir().unwrap();
+        let archive = tar_gz_file(
+            folder.path(),
+            "package.tar.gz",
+            &[
+                ("typst.toml", tar::EntryType::Regular, b"[package]"),
+                ("src/", tar::EntryType::Directory, b""),
+                ("src/lib.typ", tar::EntryType::Regular, b"#let x = 1"),
+            ],
+        );
+        let output = folder.path().join("output");
+
+        unpack(&archive, &output).unwrap();
+
+        assert_eq!(
+            std::fs::read(output.join("typst.toml")).unwrap(),
+            b"[package]"
+        );
+        assert_eq!(
+            std::fs::read(output.join("src/lib.typ")).unwrap(),
+            b"#let x = 1"
+        );
+    }
+
+    #[test]
+    fn a_tar_gz_entry_that_leaves_the_folder_stops_the_unpacking() {
+        let folder = tempfile::tempdir().unwrap();
+        let archive = tar_gz_file(
+            folder.path(),
+            "package.tar.gz",
+            &[("../escape", tar::EntryType::Regular, b"hostile")],
+        );
+
+        let result = unpack(&archive, &folder.path().join("output"));
+
+        assert!(matches!(result, Err(ToolchainError::UnsafeArchiveEntry(_))));
+        assert!(!folder.path().join("escape").exists());
     }
 
     #[test]

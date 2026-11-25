@@ -8,8 +8,16 @@ pub enum ToolchainError {
     InvalidDigestList(usize),
     #[error("the list of dictionaries has an error on line {0}")]
     InvalidDictionaryList(usize),
-    #[error("the file {0} is not a .zip or a .tar.xz archive")]
+    #[error("the file {0} is not a .zip, .tar.gz, or .tar.xz archive")]
     UnsupportedArchive(String),
+    #[error("the package name {0} is not valid")]
+    InvalidPackage(String),
+    #[error("the package {0} is not in the package index")]
+    PackageNotFound(String),
+    #[error("the package {package} does not exist in this version; the latest version is {latest}")]
+    PackageVersionNotFound { package: String, latest: String },
+    #[error("the package index is not valid: {0}")]
+    InvalidPackageIndex(String),
     #[error("the archive contains an unsafe entry: {0}")]
     UnsafeArchiveEntry(String),
     #[error("the archive is damaged: {0}")]

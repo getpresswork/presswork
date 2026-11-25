@@ -13,7 +13,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+flate2.workspace = true
 lzma-rust2.workspace = true
+presswork-typst.workspace = true
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
@@ -23,6 +25,7 @@ tar.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt"] }
+tracing.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
