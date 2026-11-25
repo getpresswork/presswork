@@ -48,6 +48,11 @@ impl Analysis {
         }
     }
 
+    #[must_use]
+    pub fn shared_document(&self) -> Option<&Arc<PagedDocument>> {
+        self.document.as_ref()
+    }
+
     pub(crate) fn world_with(&self, text: &str) -> World {
         let mut world = (*self.world).clone();
         world.set_main_text(text);

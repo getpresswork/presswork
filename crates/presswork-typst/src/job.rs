@@ -14,6 +14,17 @@ pub struct Output {
     pub analysis: Option<Analysis>,
 }
 
+impl Output {
+    #[must_use]
+    pub fn has_pages(&self) -> bool {
+        self.pages.is_some()
+            || self
+                .analysis
+                .as_ref()
+                .is_some_and(|analysis| analysis.shared_document().is_some())
+    }
+}
+
 #[must_use]
 pub fn analyze(world: &Mutex<World>, text: &str) -> Output {
     let start = Instant::now();
@@ -157,6 +168,19 @@ mod tests {
 
         let page = &output.pages.unwrap()[0];
         assert_eq!((page.width, page.height), (110, 60));
+    }
+
+    #[test]
+    fn an_analysis_keeps_the_document_for_page_images() {
+        let output = analyze(&world(), "One.\n#pagebreak()\nTwo.");
+
+        let pages = output
+            .analysis
+            .as_ref()
+            .and_then(Analysis::shared_document)
+            .map(|document| document.pages().len());
+        assert_eq!(pages, Some(2));
+        assert!(output.has_pages());
     }
 
     #[test]

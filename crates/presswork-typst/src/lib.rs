@@ -33,7 +33,7 @@ pub use preflight::{Problem, ProblemKind, Rules};
 pub use profile::{Export, ProfileError};
 pub use program::{Program, ProgramError, Stop};
 pub use quality::Grid;
-pub use render::{Insets, PageImage, render_page};
+pub use render::{Insets, PageImage, PageSize, page_key, page_sizes, render_page};
 pub use scheduler::Scheduler;
 pub use spelling::{Misspelling, Spelling};
 pub use style::StyleProblem;
