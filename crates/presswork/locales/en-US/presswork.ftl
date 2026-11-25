@@ -10,6 +10,7 @@ menu-open-folder = Open folder…
 menu-connect = Connect to a server…
 menu-save = Save
 menu-typst = Typst versions
+menu-packages = Typst packages
 menu-logs = Logs
 menu-quit = Quit
 shortcut = Ctrl+{ $key }
@@ -166,6 +167,7 @@ preview-jump-other-file = The text is in the file { $file }. Open the project to
 preview-jump-needs-engine = A click on the pages goes to the text only with the built-in Typst engine. This project uses a different Typst version.
 definition-other-file = The definition is in the file { $file }. Open the project to edit it.
 definition-in-library = { $name } is part of the Typst library.
+definition-local-package = { $package } is a package on this computer. Presswork has no page for it.
 preview-window-title = Preview · { $name }
 preview-window-title-scratch = Preview
 
@@ -214,6 +216,30 @@ files-exists = A file with the name { $file } is already in the project.
 files-make-error = Presswork cannot make { $file }.
 files-rename-error = Presswork cannot rename { $file }.
 files-delete-error = Presswork cannot delete { $file }.
+
+pane-preview = Preview
+pane-docs = Docs
+pane-packages = Packages
+pane-preview-in-window = The preview is in its own window.
+
+packages-search = Search the Typst packages
+packages-loading = Presswork gets the list of packages from Typst Universe.
+packages-unavailable = The list of packages is not available.
+packages-failed = Presswork cannot get the list of packages: { $error }
+packages-retry = Try again
+packages-count = { $found } of { $total } packages
+packages-more = The list shows the first { $shown }. Type more words to find a package.
+packages-pick = Select a package to read about it.
+packages-by = By { $authors }
+packages-license = License: { $license }
+packages-compiler = Needs Typst { $version } or later
+packages-versions = Versions: { $versions }
+packages-insert = Insert import
+packages-copy = Copy import
+packages-repository = Repository
+packages-readme-loading = Presswork gets the README of the package.
+packages-readme-missing = The package has no README file.
+packages-readme-failed = Presswork cannot get the README: { $error }
 
 outline-title = Outline
 outline-toggle = Outline

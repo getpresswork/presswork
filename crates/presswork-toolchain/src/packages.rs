@@ -166,10 +166,15 @@ impl Packages {
     }
 
     #[must_use]
-    pub fn downloader(user_agent: &str) -> Option<Arc<dyn Downloader>> {
+    pub fn in_typst_cache(user_agent: &str) -> Option<Self> {
         let root = presswork_typst::package_cache()?;
         let client = Client::new(user_agent).ok()?;
-        Some(Arc::new(Self::new(client, root)))
+        Some(Self::new(client, root))
+    }
+
+    #[must_use]
+    pub fn downloader(user_agent: &str) -> Option<Arc<dyn Downloader>> {
+        Self::in_typst_cache(user_agent).map(|packages| Arc::new(packages) as Arc<dyn Downloader>)
     }
 
     #[must_use]

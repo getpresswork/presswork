@@ -24,8 +24,8 @@ use presswork_project::{ExportFormat, ExportProfile, Project, TypesetSettings};
 use presswork_text::{ChangeSet, Position, Unit};
 use presswork_toolchain::{Engine, Packages, Version, choose, parse_pin};
 use presswork_typst::{
-    Analysis, Diagnostic, Jump, LabelKind, LabelTarget, Output, PagePoint, Problem, Program,
-    Severity, SourceRange,
+    Analysis, Diagnostic, Downloader, Jump, LabelKind, LabelTarget, Output, PagePoint, Problem,
+    Program, Severity, SourceRange,
 };
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
@@ -42,10 +42,12 @@ use crate::files::OpenFile;
 use crate::find_bar::{self, FindBar};
 use crate::i18n::{FluentArgs, Localizer};
 use crate::library_view::{self, LibraryView};
+use crate::links;
 use crate::live_session::{self, LiveSession};
 use crate::log_panel::{self, LogPanel};
 use crate::menu;
 use crate::outline_panel::{self, OutlinePanel};
+use crate::packages_view::{self, PackagesView};
 use crate::problems::problem_sentence;
 use crate::proofreading::{self, Correction, Proofreader};
 use crate::publish_view::{self, PublishView};
@@ -83,6 +85,9 @@ pub(crate) struct App {
     pages_analysis: Option<Analysis>,
     outline: OutlinePanel,
     file_panel: FilePanel,
+    pane: Pane,
+    packages_view: PackagesView,
+    packages: Option<Packages>,
     file: Option<PathBuf>,
     others: BTreeMap<PathBuf, OpenFile>,
     removed_files: Vec<PathBuf>,
@@ -123,6 +128,24 @@ enum Pending {
     Project(PathBuf),
     NewProject(PathBuf),
     Server(Document),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum Pane {
+    #[default]
+    Preview,
+    Packages,
+}
+
+impl Pane {
+    const ALL: [Self; 2] = [Self::Preview, Self::Packages];
+
+    fn text_id(self) -> &'static str {
+        match self {
+            Self::Preview => "pane-preview",
+            Self::Packages => "pane-packages",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -208,6 +231,8 @@ pub(crate) enum Message {
     },
     Outline(outline_panel::Message),
     Files(file_panel::Message),
+    Pane(Pane),
+    Packages(packages_view::Message),
     Find(find_bar::Message),
     Publish(publish_view::Message),
     Typeset(typeset_view::Message),
@@ -239,8 +264,12 @@ impl App {
         let mut app = Self::with_toolchains(store, toolchain_directory());
         app.proofreader
             .set_personal_list(proofreading::personal_word_list());
-        app.compiler
-            .set_downloader(Packages::downloader(&toolchain_panel::user_agent()));
+        app.packages = Packages::in_typst_cache(&toolchain_panel::user_agent());
+        app.compiler.set_downloader(
+            app.packages
+                .clone()
+                .map(|packages| Arc::new(packages) as Arc<dyn Downloader>),
+        );
         app
     }
 
@@ -263,6 +292,9 @@ impl App {
             pages_analysis: None,
             outline: OutlinePanel::default(),
             file_panel: FilePanel::default(),
+            pane: Pane::default(),
+            packages_view: PackagesView::default(),
+            packages: None,
             file: None,
             others: BTreeMap::new(),
             removed_files: Vec::new(),
@@ -716,6 +748,59 @@ impl App {
             file_panel::Message::Cancel => self.file_panel.cancel(),
         }
         Task::none()
+    }
+
+    fn show_pane(&mut self, pane: Pane) -> Task<Message> {
+        if pane != self.pane {
+            self.preview.keep_position(Instant::now());
+        }
+        self.pane = pane;
+        let workspace = self.select_workspace(Workspace::Write);
+        let shown = match pane {
+            Pane::Preview => Task::none(),
+            Pane::Packages => Task::batch([
+                self.packages_view
+                    .open(self.packages.as_ref())
+                    .map(Message::Packages),
+                operation::focus(packages_view::SEARCH_INPUT),
+            ]),
+        };
+        Task::batch([workspace, shown])
+    }
+
+    fn packages_message(&mut self, message: packages_view::Message) -> Task<Message> {
+        let (task, request) = self.packages_view.update(message, self.packages.as_ref());
+        let done = match request {
+            None => Task::none(),
+            Some(packages_view::Request::Insert(line)) => self.insert_line(&line),
+            Some(packages_view::Request::Copy(line)) => iced::clipboard::write(line),
+            Some(packages_view::Request::Open(url)) => {
+                links::open(&url);
+                Task::none()
+            }
+        };
+        Task::batch([task.map(Message::Packages), done])
+    }
+
+    fn insert_line(&mut self, line: &str) -> Task<Message> {
+        let buffer = self.editor.document().buffer();
+        let cursor = buffer.line_column(self.cursor(), Unit::Byte);
+        let start = buffer.position(
+            presswork_text::LineColumn {
+                line: cursor.line,
+                column: 0,
+            },
+            Unit::Byte,
+        );
+        Task::batch([
+            self.edit(presswork_editor::Action::MoveTo {
+                position: start,
+                extend: false,
+                goal: None,
+            }),
+            self.edit(presswork_editor::Action::Insert(format!("{line}\n"))),
+            operation::focus(EDITOR),
+        ])
     }
 
     fn is_fixed(&self, path: &Path) -> bool {
@@ -1442,6 +1527,20 @@ impl App {
                     None => Task::none(),
                 };
                 Task::batch([select, operation::focus(EDITOR)])
+            }
+            Some(presswork_typst::Definition::Package(package)) => {
+                if package.namespace != "preview" {
+                    let mut args = FluentArgs::new();
+                    args.set("package", package.to_string());
+                    self.notice = Some(self.localizer.format("definition-local-package", &args));
+                    return Task::none();
+                }
+                let pane = self.show_pane(Pane::Packages);
+                let shown = self
+                    .packages_view
+                    .show(&package.name, self.packages.as_ref())
+                    .map(Message::Packages);
+                Task::batch([pane, shown])
             }
             Some(presswork_typst::Definition::Library(name)) => {
                 let mut args = FluentArgs::new();
@@ -2524,6 +2623,8 @@ impl App {
             Message::Checked { run, checks } => self.apply_checks(run, checks),
             Message::Outline(message) => return self.outline_message(message),
             Message::Files(message) => return self.file_message(message),
+            Message::Pane(pane) => return self.show_pane(pane),
+            Message::Packages(message) => return self.packages_message(message),
             Message::Find(message) => return self.find_message(message),
             Message::Publish(message) => return self.publish_message(message),
             Message::Typeset(typeset_view::Message::Show(index)) => {
@@ -2689,6 +2790,7 @@ impl App {
                 Task::none()
             }
             menu::Item::Typst => self.update(Message::Toolchains(toolchain_panel::Message::Toggle)),
+            menu::Item::Packages => self.show_pane(Pane::Packages),
             menu::Item::Logs => self.update(Message::Logs(log_panel::Message::Toggle)),
             menu::Item::Quit => self.quit(),
         }
@@ -2939,16 +3041,19 @@ impl App {
                     .push(side)
                     .push(rule::vertical(1).style(style::hairline));
             }
-            if self.preview_window.is_some() {
+            if self.preview_window.is_some() && self.pane == Pane::Preview {
                 return panes
                     .push(container(editor).width(Fill).height(Fill))
                     .into();
             }
-            let preview = self.preview.view(self.preview_text(), Message::Preview);
             return panes
                 .push(container(editor).width(FillPortion(1)).height(Fill))
                 .push(rule::vertical(1).style(style::hairline))
-                .push(container(preview).width(FillPortion(1)).height(Fill))
+                .push(
+                    container(self.right_pane())
+                        .width(FillPortion(1))
+                        .height(Fill),
+                )
                 .into();
         }
         let content = column![
@@ -2966,6 +3071,34 @@ impl App {
         .spacing(gap::S)
         .align_x(Horizontal::Center);
         container(content).center(Fill).style(style::page).into()
+    }
+
+    fn right_pane(&self) -> Element<'_, Message> {
+        let tabs = row(Pane::ALL.into_iter().map(|pane| {
+            button(text(self.localizer.text(pane.text_id())).size(font_size::SMALL))
+                .padding([gap::XXS, gap::S])
+                .style(style::tab(pane == self.pane))
+                .on_press(Message::Pane(pane))
+                .into()
+        }))
+        .spacing(gap::XXS);
+        let header = container(tabs)
+            .padding([gap::XXS, gap::S])
+            .width(Fill)
+            .style(style::chrome);
+        let body = match self.pane {
+            Pane::Preview if self.preview_window.is_some() => {
+                container(text(self.localizer.text("pane-preview-in-window")).style(style::muted))
+                    .center(Fill)
+                    .into()
+            }
+            Pane::Preview => self.preview.view(self.preview_text(), Message::Preview),
+            Pane::Packages => self
+                .packages_view
+                .view(&self.localizer, &self.theme())
+                .map(Message::Packages),
+        };
+        column![header, hairline(), body].into()
     }
 
     fn typeset_area(&self) -> Element<'_, Message> {
@@ -4783,6 +4916,90 @@ mod tests {
             "{:?}",
             app.notice
         );
+    }
+
+    fn package_index() -> Arc<presswork_toolchain::PackageIndex> {
+        Arc::new(presswork_toolchain::PackageIndex::new(vec![
+            presswork_toolchain::PackageInfo {
+                name: "cetz".to_owned(),
+                version: "0.3.4".to_owned(),
+                description: Some("Drawing with Typst.".to_owned()),
+                ..presswork_toolchain::PackageInfo::default()
+            },
+        ]))
+    }
+
+    fn packages(message: packages_view::Message) -> Message {
+        Message::Packages(message)
+    }
+
+    #[test]
+    fn the_preview_shows_first_and_the_packages_tab_opens_the_packages() {
+        let mut app = app();
+        assert_eq!(app.pane, Pane::Preview);
+        let mut ui = simulator(app.view());
+
+        ui.click("Packages").unwrap();
+        for message in ui.into_messages().collect::<Vec<_>>() {
+            send(&mut app, message);
+        }
+
+        assert_eq!(app.pane, Pane::Packages);
+        let mut ui = simulator(app.view());
+        assert!(
+            ui.find(iced_test::selector::id(packages_view::SEARCH_INPUT))
+                .is_ok()
+        );
+        assert!(ui.find("The list of packages is not available.").is_ok());
+    }
+
+    #[test]
+    fn the_menu_opens_the_packages() {
+        let mut app = app();
+
+        send(&mut app, Message::MenuItem(menu::Item::Packages));
+
+        assert_eq!(app.pane, Pane::Packages);
+    }
+
+    #[test]
+    fn insert_import_puts_the_import_line_above_the_line_of_the_cursor() {
+        let mut app = app();
+        app.editor = Editor::new("Hello.\nWorld.");
+        send(&mut app, move_to(9));
+        send(
+            &mut app,
+            packages(packages_view::Message::Loaded(Ok(package_index()))),
+        );
+        send(
+            &mut app,
+            packages(packages_view::Message::Select("cetz".to_owned())),
+        );
+
+        send(&mut app, packages(packages_view::Message::Insert));
+
+        assert_eq!(
+            editor_text(&app),
+            "Hello.\n#import \"@preview/cetz:0.3.4\"\nWorld."
+        );
+    }
+
+    #[test]
+    fn a_definition_in_a_package_opens_the_package() {
+        let mut app = typed_app("#import \"@preview/cetz:0.3.4\"");
+
+        let found = definition_found(
+            &app,
+            presswork_typst::Definition::Package(presswork_typst::PackageName {
+                namespace: "preview".to_owned(),
+                name: "cetz".to_owned(),
+                version: "0.3.4".to_owned(),
+            }),
+        );
+        send(&mut app, found);
+
+        assert_eq!(app.pane, Pane::Packages);
+        assert_eq!(app.packages_view.selected(), Some("cetz"));
     }
 
     #[test]

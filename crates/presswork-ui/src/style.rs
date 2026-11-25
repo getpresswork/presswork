@@ -327,6 +327,21 @@ pub fn outline(theme: &Theme) -> container::Style {
 }
 
 #[must_use]
+pub fn code_block(theme: &Theme) -> container::Style {
+    let colors = colors(theme);
+    container::Style {
+        text_color: Some(colors.ink),
+        background: Some(colors.chrome.into()),
+        border: Border {
+            color: colors.rule,
+            width: 1.0,
+            radius: radius::SMALL.into(),
+        },
+        ..container::Style::default()
+    }
+}
+
+#[must_use]
 pub fn field(theme: &Theme, status: text_input::Status) -> text_input::Style {
     let colors = colors(theme);
     let border = match status {

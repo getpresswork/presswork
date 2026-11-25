@@ -30,7 +30,7 @@ presswork-ui.workspace = true
 directories.workspace = true
 fluent-bundle.workspace = true
 futures.workspace = true
-iced = { workspace = true, features = ["tokio"] }
+iced = { workspace = true, features = ["markdown", "tokio"] }
 jiff.workspace = true
 png.workspace = true
 rfd.workspace = true
