@@ -90,6 +90,7 @@ pub(crate) struct App {
     shown_problem: Option<usize>,
     compiled_map: SourceMap,
     compiled_files: Vec<FileSnapshot>,
+    checks_run: u64,
     pages_map: SourceMap,
     proofreader: Proofreader,
     modifiers: keyboard::Modifiers,
@@ -191,6 +192,10 @@ pub(crate) enum Message {
     },
     Preview(presswork_preview::Action),
     PagesRendered(presswork_preview::Rendered),
+    Checked {
+        run: u64,
+        checks: Option<Checks>,
+    },
     Outline(outline_panel::Message),
     Files(file_panel::Message),
     Find(find_bar::Message),
@@ -253,6 +258,7 @@ impl App {
             shown_problem: None,
             compiled_map: SourceMap::default(),
             compiled_files: Vec::new(),
+            checks_run: 0,
             pages_map: SourceMap::default(),
             proofreader: Proofreader::default(),
             modifiers: keyboard::Modifiers::default(),
@@ -2005,6 +2011,11 @@ impl App {
             map,
             files,
         ));
+        if let Some(output) = self.compiled.clone().filter(|output| output.has_pages()) {
+            let (settings, profiles) = self.check_inputs();
+            let checks = run_checks(&output, &settings, &profiles);
+            self.apply_checks(self.checks_run, Some(checks));
+        }
         self.preview.render_now();
     }
 
@@ -2035,6 +2046,7 @@ impl App {
         self.preview.show(&output, compiler::SCALE);
         let pages = self.preview.render(Message::PagesRendered);
         self.preview.set_problem(self.problem(&output));
+        let mut checks = Task::none();
         if output.has_pages() {
             self.pages_analysis.clone_from(&output.analysis);
             self.pages_map.clone_from(&self.compiled_map);
@@ -2043,19 +2055,7 @@ impl App {
                     .as_ref()
                     .map_or_else(Vec::new, Analysis::outline),
             );
-            let settings = self.typeset_settings();
-            self.quality = self
-                .pages_analysis
-                .as_ref()
-                .map_or_else(Vec::new, |analysis| analysis.quality(&settings));
-            self.preview.set_baseline_grid(
-                self.pages_analysis
-                    .as_ref()
-                    .and_then(|analysis| analysis.baseline_grid(&settings)),
-            );
-            self.shown_problem = None;
-            let marks = self.problem_marks(&output);
-            self.preview.set_problem_marks(marks);
+            checks = self.start_checks(Arc::clone(&output));
         }
         let proofread = if output.has_pages() {
             self.proofread()
@@ -2064,9 +2064,47 @@ impl App {
         };
         self.compiled = Some(output);
         if self.compiler.finish() {
-            return Task::batch([pages, proofread, self.start_compile()]);
+            return Task::batch([pages, checks, proofread, self.start_compile()]);
         }
-        Task::batch([pages, proofread])
+        Task::batch([pages, checks, proofread])
+    }
+
+    fn check_inputs(&self) -> (TypesetSettings, Vec<ExportProfile>) {
+        let profiles = self.project.as_ref().map_or_else(
+            || vec![ExportProfile::named("PDF", ExportFormat::Pdf)],
+            |project| export_profiles(project).0,
+        );
+        (self.typeset_settings(), profiles)
+    }
+
+    fn start_checks(&mut self, output: Arc<Output>) -> Task<Message> {
+        self.checks_run += 1;
+        let run = self.checks_run;
+        let (settings, profiles) = self.check_inputs();
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        let spawned = std::thread::Builder::new()
+            .name("checks".to_owned())
+            .spawn(move || {
+                let _ = sender.send(run_checks(&output, &settings, &profiles));
+            });
+        if let Err(error) = spawned {
+            tracing::error!(%error, "The check thread did not start");
+            return Task::none();
+        }
+        Task::perform(async move { receiver.await.ok() }, move |checks| {
+            Message::Checked { run, checks }
+        })
+    }
+
+    fn apply_checks(&mut self, run: u64, checks: Option<Checks>) {
+        let Some(checks) = checks.filter(|_| run == self.checks_run) else {
+            return;
+        };
+        self.quality = checks.quality;
+        self.preview.set_baseline_grid(checks.grid);
+        self.shown_problem = None;
+        let marks = self.problem_marks(&checks.preflight);
+        self.preview.set_problem_marks(marks);
     }
 
     fn typeset_settings(&self) -> TypesetSettings {
@@ -2075,11 +2113,7 @@ impl App {
             .map_or_default(|project| project.manifest().typeset)
     }
 
-    fn problem_marks(&self, output: &Output) -> Vec<ProblemMark> {
-        let profiles = self.project.as_ref().map_or_else(
-            || vec![ExportProfile::named("PDF", ExportFormat::Pdf)],
-            |project| export_profiles(project).0,
-        );
+    fn problem_marks(&self, preflight: &[(String, Problem)]) -> Vec<ProblemMark> {
         let layout = self.quality.iter().filter_map(|problem| {
             problem_mark(
                 problem,
@@ -2087,20 +2121,16 @@ impl App {
                 Severity::Warning,
             )
         });
-        let preflight =
-            output
-                .preflight_profiles(&profiles)
-                .into_iter()
-                .filter_map(|(profile, problem)| {
-                    let mut text = problem_sentence(&problem, &self.localizer);
-                    if problem.kind.depends_on_profile() {
-                        let mut args = FluentArgs::new();
-                        args.set("profile", profile.name.clone());
-                        args.set("problem", text);
-                        text = self.localizer.format("problem-in-profile", &args);
-                    }
-                    problem_mark(&problem, text, Severity::Error)
-                });
+        let preflight = preflight.iter().filter_map(|(profile, problem)| {
+            let mut text = problem_sentence(problem, &self.localizer);
+            if problem.kind.depends_on_profile() {
+                let mut args = FluentArgs::new();
+                args.set("profile", profile.clone());
+                args.set("problem", text);
+                text = self.localizer.format("problem-in-profile", &args);
+            }
+            problem_mark(problem, text, Severity::Error)
+        });
         layout.chain(preflight).collect()
     }
 
@@ -2309,6 +2339,7 @@ impl App {
                 self.preview.rendered(rendered);
                 return self.preview.render(Message::PagesRendered);
             }
+            Message::Checked { run, checks } => self.apply_checks(run, checks),
             Message::Outline(message) => return self.outline_message(message),
             Message::Files(message) => return self.file_message(message),
             Message::Find(message) => return self.find_message(message),
@@ -2913,6 +2944,26 @@ impl App {
             .align_y(Vertical::Center)
             .style(style::chrome)
             .into()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Checks {
+    quality: Vec<Problem>,
+    grid: Option<presswork_typst::Grid>,
+    preflight: Vec<(String, Problem)>,
+}
+
+fn run_checks(output: &Output, settings: &TypesetSettings, profiles: &[ExportProfile]) -> Checks {
+    let analysis = output.analysis.as_ref();
+    Checks {
+        quality: analysis.map_or_else(Vec::new, |analysis| analysis.quality(settings)),
+        grid: analysis.and_then(|analysis| analysis.baseline_grid(settings)),
+        preflight: output
+            .preflight_profiles(profiles)
+            .into_iter()
+            .map(|(profile, problem)| (profile.name.clone(), problem))
+            .collect(),
     }
 }
 
