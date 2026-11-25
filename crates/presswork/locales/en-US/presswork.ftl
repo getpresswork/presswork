@@ -202,7 +202,6 @@ replace-all = Replace all
 
 files-title = Files
 files-toggle = Files
-files-not-text = Presswork cannot open { $file }, because it is not a text file.
 files-read-error = Presswork cannot read { $file }.
 files-new = New file
 files-name-placeholder = Path, for example chapters/two.typ

@@ -18,9 +18,10 @@ use crate::i18n::{FluentArgs, Localizer};
 pub(crate) const TOGGLE: &str = "files-toggle";
 pub(crate) const NAME_INPUT: &str = "files-name";
 const NEW: &str = "files-new-button";
-const RENAME: &str = "files-rename-button";
-const DELETE: &str = "files-delete-button";
+pub(crate) const RENAME: &str = "files-rename-button";
+pub(crate) const DELETE: &str = "files-delete-button";
 const INDENT: f32 = 12.0;
+const IMAGES: [&str; 7] = ["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Message {
@@ -48,6 +49,7 @@ pub(crate) struct FilePanel {
     name: String,
     error: Option<String>,
     deleting: Option<PathBuf>,
+    selected: Option<PathBuf>,
 }
 
 impl Default for FilePanel {
@@ -58,6 +60,7 @@ impl Default for FilePanel {
             name: String::new(),
             error: None,
             deleting: None,
+            selected: None,
         }
     }
 }
@@ -130,6 +133,18 @@ impl FilePanel {
 
     pub(crate) fn is_busy(&self) -> bool {
         self.editing.is_some() || self.deleting.is_some()
+    }
+
+    pub(crate) fn select(&mut self, path: PathBuf) {
+        self.selected = Some(path);
+    }
+
+    pub(crate) fn selected(&self) -> Option<&Path> {
+        self.selected.as_deref()
+    }
+
+    pub(crate) fn unselect(&mut self) {
+        self.selected = None;
     }
 
     pub(crate) fn toggle_button(&self, localizer: &Localizer) -> Element<'_, Message> {
@@ -345,6 +360,19 @@ fn tree(files: &[PathBuf]) -> Vec<Entry<'_>> {
     entries
 }
 
+fn file_icon(path: &Path) -> Icon {
+    let image = path.extension().is_some_and(|extension| {
+        IMAGES
+            .iter()
+            .any(|image| extension.eq_ignore_ascii_case(image))
+    });
+    if image {
+        Icon::FileImage
+    } else {
+        Icon::FileText
+    }
+}
+
 fn indent(depth: usize) -> f32 {
     f32::from(u16::try_from(depth).unwrap_or(u16::MAX)) * INDENT
 }
@@ -377,7 +405,7 @@ fn file_row<'a>(
     actions: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let mut content = row![
-        icon(Icon::FileText).size(size::ICON_SMALL),
+        icon(file_icon(path)).size(size::ICON_SMALL),
         text(name)
             .size(font_size::BODY)
             .wrapping(text::Wrapping::None)
@@ -555,6 +583,34 @@ mod tests {
         panel.toggle();
 
         assert!(!panel.is_busy());
+    }
+
+    #[test]
+    fn an_image_has_an_image_icon() {
+        for (path, shape) in [
+            ("images/cover.PNG", Icon::FileImage),
+            ("figure.svg", Icon::FileImage),
+            ("chapters/one.typ", Icon::FileText),
+            ("LICENSE", Icon::FileText),
+        ] {
+            assert_eq!(
+                file_icon(Path::new(path)).unicode(),
+                shape.unicode(),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_selected_file_stays_until_another_file_opens() {
+        let mut panel = FilePanel::default();
+
+        panel.select(PathBuf::from("cover.png"));
+        panel.cancel();
+        assert_eq!(panel.selected(), Some(Path::new("cover.png")));
+
+        panel.unselect();
+        assert_eq!(panel.selected(), None);
     }
 
     #[test]

@@ -629,6 +629,7 @@ impl App {
                 self.others.clear();
                 self.removed_files.clear();
                 self.file_panel.cancel();
+                self.file_panel.unselect();
                 self.apply_suggesting();
                 self.saved = self.editor.revision();
                 self.proofreader.close_project();
@@ -700,6 +701,7 @@ impl App {
         self.others.clear();
         self.removed_files.clear();
         self.file_panel.cancel();
+        self.file_panel.unselect();
         self.apply_suggesting();
         self.saved = self.editor.revision();
         self.project = None;
@@ -886,6 +888,9 @@ impl App {
         } else if let Some(open) = self.others.remove(old) {
             self.others.insert(new.to_path_buf(), open);
         }
+        if self.file_panel.selected() == Some(old) {
+            self.file_panel.select(new.to_path_buf());
+        }
         self.removed_files.push(old.to_path_buf());
         self.change_paths(old, new);
     }
@@ -978,6 +983,9 @@ impl App {
             return Task::none();
         }
         tracing::info!(path = %path.display(), "File deleted");
+        if self.file_panel.selected() == Some(path) {
+            self.file_panel.unselect();
+        }
         if self.file.as_deref() == Some(path) {
             self.open_file(&main);
         }
@@ -1004,6 +1012,7 @@ impl App {
             return false;
         };
         if self.file.as_deref() == Some(path) {
+            self.file_panel.unselect();
             return true;
         }
         let next = match self.others.remove(path) {
@@ -1019,19 +1028,20 @@ impl App {
                         editor,
                     }
                 }
-                Err(error) => {
+                Err(files::ReadError::NotText) => {
+                    self.file_panel.select(path.to_path_buf());
+                    return false;
+                }
+                Err(files::ReadError::Io) => {
                     tracing::warn!(path = %path.display(), "The file did not open");
                     let mut args = FluentArgs::new();
                     args.set("file", files::display_path(path));
-                    let id = match error {
-                        files::ReadError::NotText => "files-not-text",
-                        files::ReadError::Io => "files-read-error",
-                    };
-                    self.notice = Some(self.localizer.format(id, &args));
+                    self.notice = Some(self.localizer.format("files-read-error", &args));
                     return false;
                 }
             },
         };
+        self.file_panel.unselect();
         let previous = OpenFile {
             editor: std::mem::replace(&mut self.editor, next.editor),
             saved: std::mem::replace(&mut self.saved, next.saved),
@@ -3071,7 +3081,7 @@ impl App {
                         &self.localizer,
                         project.files(),
                         &project.manifest().main,
-                        self.file.as_deref(),
+                        self.file_panel.selected().or(self.file.as_deref()),
                         &self.changed_files(),
                     )
                     .map(Message::Files),
@@ -5507,27 +5517,86 @@ mod tests {
         );
     }
 
+    const COVER: [u8; 5] = [0x89, b'P', 0xff, 0xfe, 0x00];
+
+    fn has_rename_button(app: &App) -> bool {
+        simulator(app.view())
+            .find(iced_test::selector::id(file_panel::RENAME))
+            .is_ok()
+    }
+
     #[test]
-    fn a_file_that_is_not_text_does_not_open() {
+    fn a_file_that_is_not_text_is_selected_and_does_not_open() {
         let folder = chaptered();
-        fs::write(
-            folder.path().join("cover.png"),
-            [0x89, b'P', 0xff, 0xfe, 0x00],
-        )
-        .unwrap();
+        fs::write(folder.path().join("cover.png"), COVER).unwrap();
         let mut app = app();
         open(&mut app, &folder);
+        assert!(!has_rename_button(&app));
 
         open_file(&mut app, "cover.png");
 
         assert_eq!(editor_text(&app), CHAPTERED_MAIN);
-        assert!(
-            app.notice
-                .as_deref()
-                .is_some_and(|notice| notice.contains("cover.png")),
-            "{:?}",
-            app.notice
+        assert_eq!(app.notice, None);
+        assert_eq!(app.file_panel.selected(), Some(Path::new("cover.png")));
+        assert!(has_rename_button(&app));
+        open_file(&mut app, "chapters/one.typ");
+        assert_eq!(app.file_panel.selected(), None);
+    }
+
+    #[test]
+    fn an_image_can_be_renamed_and_the_paths_to_it_change() {
+        let folder = chaptered();
+        fs::write(folder.path().join("cover.png"), COVER).unwrap();
+        let chapter = folder.path().join("chapters").join("one.typ");
+        fs::write(&chapter, "= One\n#image(\"../cover.png\")\n").unwrap();
+        let mut app = app();
+        open(&mut app, &folder);
+        open_file(&mut app, "cover.png");
+
+        rename(&mut app, "cover.png", "images/cover.png");
+
+        assert!(!folder.path().join("cover.png").exists());
+        assert!(folder.path().join("images").join("cover.png").is_file());
+        assert_eq!(
+            fs::read_to_string(&chapter).unwrap(),
+            "= One\n#image(\"../images/cover.png\")\n"
         );
+        assert_eq!(
+            app.file_panel.selected(),
+            Some(Path::new("images/cover.png"))
+        );
+    }
+
+    #[test]
+    fn an_image_can_be_deleted() {
+        let folder = chaptered();
+        fs::write(folder.path().join("cover.png"), COVER).unwrap();
+        let mut app = app();
+        open(&mut app, &folder);
+        open_file(&mut app, "cover.png");
+
+        files_message(
+            &mut app,
+            file_panel::Message::Delete(PathBuf::from("cover.png")),
+        );
+        files_message(&mut app, file_panel::Message::ConfirmDelete);
+
+        assert!(!folder.path().join("cover.png").exists());
+        assert_eq!(app.file_panel.selected(), None);
+        assert_eq!(editor_text(&app), CHAPTERED_MAIN);
+    }
+
+    #[test]
+    fn another_project_has_no_selected_file() {
+        let folder = chaptered();
+        fs::write(folder.path().join("cover.png"), COVER).unwrap();
+        let mut app = app();
+        open(&mut app, &folder);
+        open_file(&mut app, "cover.png");
+
+        open(&mut app, &book());
+
+        assert_eq!(app.file_panel.selected(), None);
     }
 
     fn files_message(app: &mut App, message: file_panel::Message) {
