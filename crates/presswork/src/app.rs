@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -34,8 +34,10 @@ use presswork_ui::{font, font_size, size, space as gap};
 use crate::assist;
 use crate::chat_panel::{self, ChatPanel};
 use crate::chrome::{self, Controls, Frame};
-use crate::compiler::{self, Backend, Compiler};
+use crate::compiler::{self, Backend, Compiler, Sources};
+use crate::file_panel::{self, FilePanel};
 use crate::files;
+use crate::files::OpenFile;
 use crate::find_bar::{self, FindBar};
 use crate::i18n::{FluentArgs, Localizer};
 use crate::library_view::{self, LibraryView};
@@ -79,11 +81,15 @@ pub(crate) struct App {
     compiled_revision: Option<u64>,
     pages_analysis: Option<Analysis>,
     outline: OutlinePanel,
+    file_panel: FilePanel,
+    file: Option<PathBuf>,
+    others: BTreeMap<PathBuf, OpenFile>,
     find: FindBar,
     publish: PublishView,
     quality: Vec<Problem>,
     shown_problem: Option<usize>,
     compiled_map: SourceMap,
+    compiled_files: Vec<FileSnapshot>,
     pages_map: SourceMap,
     proofreader: Proofreader,
     modifiers: keyboard::Modifiers,
@@ -106,6 +112,19 @@ pub(crate) struct App {
     chat: ChatPanel,
     tasks: Option<TaskList>,
     library: Option<LibraryView>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Positions {
+    Preview,
+    Export,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct FileSnapshot {
+    path: PathBuf,
+    revision: u64,
+    map: SourceMap,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,6 +182,7 @@ pub(crate) enum Message {
         revision: u64,
         output: Arc<Output>,
         map: SourceMap,
+        files: Vec<FileSnapshot>,
     },
     CompileFailed {
         generation: u64,
@@ -171,6 +191,7 @@ pub(crate) enum Message {
     },
     Preview(presswork_preview::Action),
     Outline(outline_panel::Message),
+    Files(file_panel::Message),
     Find(find_bar::Message),
     Publish(publish_view::Message),
     Typeset(typeset_view::Message),
@@ -222,11 +243,15 @@ impl App {
             compiled_revision: None,
             pages_analysis: None,
             outline: OutlinePanel::default(),
+            file_panel: FilePanel::default(),
+            file: None,
+            others: BTreeMap::new(),
             find: FindBar::default(),
             publish: PublishView::default(),
             quality: Vec::new(),
             shown_problem: None,
             compiled_map: SourceMap::default(),
+            compiled_files: Vec::new(),
             pages_map: SourceMap::default(),
             proofreader: Proofreader::default(),
             modifiers: keyboard::Modifiers::default(),
@@ -332,14 +357,65 @@ impl App {
     }
 
     fn suggestion_map(&self, kind: presswork_text::SuggestionKind) -> SourceMap {
-        SourceMap::removing(
-            self.editor
-                .document()
-                .suggestions()
-                .iter()
-                .filter(|suggestion| suggestion.kind == kind)
-                .map(|suggestion| suggestion.range.start.offset()..suggestion.range.end.offset()),
-        )
+        removed(&self.editor, kind)
+    }
+
+    fn main_active(&self) -> bool {
+        match (&self.project, &self.file) {
+            (Some(project), Some(file)) => *file == project.manifest().main,
+            _ => true,
+        }
+    }
+
+    fn main_editor(&self) -> &Editor {
+        match &self.project {
+            Some(project) if !self.main_active() => self
+                .others
+                .get(&project.manifest().main)
+                .map_or(&self.editor, |open| &open.editor),
+            _ => &self.editor,
+        }
+    }
+
+    fn sources(
+        &self,
+        kind: presswork_text::SuggestionKind,
+    ) -> (Sources, SourceMap, u64, Vec<FileSnapshot>) {
+        let main = self.main_editor();
+        let map = removed(main, kind);
+        let mut sources = Sources::from(map.text(&main.document().buffer().to_string()));
+        let mut snapshots = Vec::new();
+        let main_path = self
+            .project
+            .as_ref()
+            .map(|project| &project.manifest().main);
+        let active = self
+            .file
+            .as_ref()
+            .filter(|_| !self.main_active())
+            .map(|file| (file, &self.editor));
+        let others = self
+            .others
+            .iter()
+            .filter(|(path, _)| Some(*path) != main_path)
+            .map(|(path, open)| (path, &open.editor));
+        for (path, editor) in active.into_iter().chain(others) {
+            let file_map = removed(editor, kind);
+            sources.files.push((
+                path.clone(),
+                file_map.text(&editor.document().buffer().to_string()),
+            ));
+            snapshots.push(FileSnapshot {
+                path: path.clone(),
+                revision: editor.revision(),
+                map: file_map,
+            });
+        }
+        (sources, map, main.revision(), snapshots)
+    }
+
+    fn compile_sources(&self) -> (Sources, SourceMap, u64, Vec<FileSnapshot>) {
+        self.sources(presswork_text::SuggestionKind::Deletion)
     }
 
     fn preview_map(&self) -> SourceMap {
@@ -365,12 +441,14 @@ impl App {
 
     pub(crate) fn marks(&self) -> Vec<Mark> {
         let mut marks = self.diagnostic_marks();
-        marks.extend(
-            self.proofreader
-                .marks(self.editor.revision())
-                .into_iter()
-                .map(|mark| Self::mapped_mark(&self.pages_map, &mark)),
-        );
+        if self.main_active() {
+            marks.extend(
+                self.proofreader
+                    .marks(self.editor.revision())
+                    .into_iter()
+                    .map(|mark| Self::mapped_mark(&self.pages_map, &mark)),
+            );
+        }
         if self.find.is_open() {
             marks.extend(self.find.matches().iter().map(|found| Mark {
                 range: Position::new(found.start)..Position::new(found.end),
@@ -384,16 +462,36 @@ impl App {
         let Some(output) = &self.compiled else {
             return Vec::new();
         };
-        if self.compiled_revision != Some(self.editor.revision()) {
+        let main = self.main_active();
+        let (revision, map) = if main {
+            (self.compiled_revision, &self.compiled_map)
+        } else {
+            match self
+                .compiled_files
+                .iter()
+                .find(|snapshot| self.file.as_ref() == Some(&snapshot.path))
+            {
+                Some(snapshot) => (Some(snapshot.revision), &snapshot.map),
+                None => return Vec::new(),
+            }
+        };
+        if revision != Some(self.editor.revision()) {
             return Vec::new();
         }
         output
             .diagnostics
             .iter()
             .filter_map(|diagnostic| {
-                let range = self
-                    .compiled_map
-                    .range_to_editor(diagnostic.main_range()?.clone());
+                let range = match &diagnostic.source {
+                    Some(SourceRange::Main(range)) if main => range.clone(),
+                    Some(SourceRange::File(path, range))
+                        if !main && self.file.as_ref() == Some(path) =>
+                    {
+                        range.clone()
+                    }
+                    _ => return None,
+                };
+                let range = map.range_to_editor(range);
                 Some(Mark {
                     range: Position::new(range.start)..Position::new(range.end),
                     kind: match diagnostic.severity {
@@ -406,7 +504,7 @@ impl App {
     }
 
     fn show_problem(&mut self) {
-        let Some(start) = self
+        let Some(source) = self
             .compiled
             .as_ref()
             .and_then(|output| {
@@ -415,12 +513,23 @@ impl App {
                     .iter()
                     .find(|diagnostic| diagnostic.severity == Severity::Error)
             })
-            .and_then(Diagnostic::main_range)
-            .map(|range| self.compiled_map.to_editor(range.start, true))
+            .and_then(|diagnostic| diagnostic.source.clone())
         else {
             return;
         };
-        self.move_cursor(start);
+        let (file, start) = match source {
+            SourceRange::Main(range) => (None, range.start),
+            SourceRange::File(path, range) => (Some(path), range.start),
+        };
+        if !self.open_source(file.as_deref()) {
+            return;
+        }
+        let map = if file.is_none() {
+            self.compiled_map.clone()
+        } else {
+            self.preview_map()
+        };
+        self.move_cursor(map.to_editor(start, true));
     }
 
     fn open_folder(&self) -> Task<Message> {
@@ -441,6 +550,8 @@ impl App {
                 let main = opened.project.manifest().main.clone();
                 let (editor, suggestions_notice) = self.restored_editor(&root, &main, &opened.text);
                 self.editor = editor;
+                self.file = Some(main.clone());
+                self.others.clear();
                 self.apply_suggesting();
                 self.saved = self.editor.revision();
                 self.proofreader.close_project();
@@ -508,6 +619,8 @@ impl App {
             live.join_chat(organization, name);
         }
         self.editor = Editor::new("");
+        self.file = None;
+        self.others.clear();
         self.apply_suggesting();
         self.saved = self.editor.revision();
         self.project = None;
@@ -517,6 +630,89 @@ impl App {
         self.notice = None;
         self.workspace = Workspace::Write;
         Task::batch([self.request_compile(), self.load_library()])
+    }
+
+    fn file_message(&mut self, message: file_panel::Message) -> Task<Message> {
+        match message {
+            file_panel::Message::Toggle => self.file_panel.toggle(),
+            file_panel::Message::Open(path) => {
+                if self.open_file(&path) {
+                    return operation::focus(EDITOR);
+                }
+            }
+        }
+        Task::none()
+    }
+
+    fn open_file(&mut self, path: &Path) -> bool {
+        let Some(root) = self
+            .project
+            .as_ref()
+            .map(|project| project.root().to_path_buf())
+        else {
+            return false;
+        };
+        if self.file.as_deref() == Some(path) {
+            return true;
+        }
+        let next = match self.others.remove(path) {
+            Some(open) => open,
+            None => match files::read_text(&root.join(path)) {
+                Ok(text) => {
+                    let (editor, notice) = self.restored_editor(&root, path, &text);
+                    if notice.is_some() {
+                        self.notice = notice;
+                    }
+                    OpenFile {
+                        saved: editor.revision(),
+                        editor,
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(path = %path.display(), "The file did not open");
+                    let mut args = FluentArgs::new();
+                    args.set("file", files::display_path(path));
+                    let id = match error {
+                        files::ReadError::NotText => "files-not-text",
+                        files::ReadError::Io => "files-read-error",
+                    };
+                    self.notice = Some(self.localizer.format(id, &args));
+                    return false;
+                }
+            },
+        };
+        let previous = OpenFile {
+            editor: std::mem::replace(&mut self.editor, next.editor),
+            saved: std::mem::replace(&mut self.saved, next.saved),
+        };
+        if let Some(old) = self.file.replace(path.to_path_buf()) {
+            self.others.insert(old, previous);
+        }
+        self.apply_suggesting();
+        self.hovered = None;
+        self.tooltip = None;
+        self.completions = None;
+        true
+    }
+
+    fn open_source(&mut self, file: Option<&Path>) -> bool {
+        match file {
+            Some(path) => {
+                let opened = self.open_file(path);
+                if !opened && self.project.is_none() {
+                    self.other_file_notice(path);
+                }
+                opened
+            }
+            None => match self
+                .project
+                .as_ref()
+                .map(|project| project.manifest().main.clone())
+            {
+                Some(main) => self.open_file(&main),
+                None => true,
+            },
+        }
     }
 
     fn toggle_suggesting(&mut self) {
@@ -548,6 +744,7 @@ impl App {
         self.quality.clear();
         self.shown_problem = None;
         self.compiled_map = SourceMap::default();
+        self.compiled_files.clear();
         self.pages_map = SourceMap::default();
     }
 
@@ -867,18 +1064,18 @@ impl App {
     }
 
     fn export(&mut self, index: usize) -> Task<Message> {
-        let Some((run, text, profile)) = self.start_export(index) else {
+        let Some((run, sources, profile)) = self.start_export(index) else {
             return Task::none();
         };
-        Task::perform(self.compiler.export_job(text, profile), move |result| {
+        Task::perform(self.compiler.export_job(sources, profile), move |result| {
             Message::Publish(publish_view::Message::Exported { index, run, result })
         })
     }
 
     #[cfg(test)]
     pub(crate) fn export_now(&mut self, index: usize) {
-        if let Some((run, text, profile)) = self.start_export(index) {
-            let result = self.compiler.export_now(text.as_str(), &profile);
+        if let Some((run, sources, profile)) = self.start_export(index) {
+            let result = self.compiler.export_now(sources, &profile);
             send(
                 self,
                 Message::Publish(publish_view::Message::Exported { index, run, result }),
@@ -886,17 +1083,15 @@ impl App {
         }
     }
 
-    fn start_export(&mut self, index: usize) -> Option<(u64, String, ExportProfile)> {
+    fn start_export(&mut self, index: usize) -> Option<(u64, Sources, ExportProfile)> {
         let profile = self
             .project
             .as_ref()
             .and_then(|project| export_profiles(project).0.into_iter().nth(index))?;
         let run = self.publish.start(index)?;
         tracing::info!(profile = %profile.name, "Export started");
-        let text = self
-            .file_map()
-            .text(&self.editor.document().buffer().to_string());
-        Some((run, text, profile))
+        let (sources, ..) = self.sources(presswork_text::SuggestionKind::Insertion);
+        Some((run, sources, profile))
     }
 
     fn show_export_problem(&mut self, index: usize, problem: usize) -> Task<Message> {
@@ -904,8 +1099,7 @@ impl App {
             .publish
             .problem(index, problem)
             .and_then(|problem| problem.source.clone());
-        let map = self.file_map();
-        self.show_source(source, &map)
+        self.show_source(source, Positions::Export)
     }
 
     fn show_layout_problem(&mut self, index: usize) -> Task<Message> {
@@ -931,25 +1125,33 @@ impl App {
             .quality
             .get(index)
             .and_then(|problem| problem.source.clone());
-        let map = self.pages_map.clone();
-        self.show_source(source, &map)
+        self.show_source(source, Positions::Preview)
     }
 
-    fn show_source(&mut self, source: Option<SourceRange>, map: &SourceMap) -> Task<Message> {
+    fn show_source(&mut self, source: Option<SourceRange>, positions: Positions) -> Task<Message> {
         let Some(source) = source else {
             return Task::none();
         };
-        match source {
-            SourceRange::Main(range) => {
-                let range = map.range_to_editor(range);
-                let workspace = self.select_workspace(Workspace::Write);
-                let select = self.select_range(range.start, range.end);
-                Task::batch([workspace, select, operation::focus(EDITOR)])
-            }
-            SourceRange::File(path, _) => {
-                self.other_file_notice(&path);
-                Task::none()
-            }
+        let (file, range) = match source {
+            SourceRange::Main(range) => (None, range),
+            SourceRange::File(path, range) => (Some(path), range),
+        };
+        if !self.open_source(file.as_deref()) {
+            return Task::none();
+        }
+        let range = self
+            .positions_map(positions, file.is_none())
+            .range_to_editor(range);
+        let workspace = self.select_workspace(Workspace::Write);
+        let select = self.select_range(range.start, range.end);
+        Task::batch([workspace, select, operation::focus(EDITOR)])
+    }
+
+    fn positions_map(&self, positions: Positions, main: bool) -> SourceMap {
+        match (positions, main) {
+            (Positions::Preview, true) => self.pages_map.clone(),
+            (Positions::Preview, false) => self.preview_map(),
+            (Positions::Export, _) => self.file_map(),
         }
     }
 
@@ -967,17 +1169,19 @@ impl App {
             Some(point) => self.preview.show_point(point, Instant::now()),
             None => Task::none(),
         };
-        match heading.source {
-            Some(SourceRange::Main(range)) => {
-                self.move_cursor(self.pages_map.to_editor(range.start, true));
-                Task::batch([operation::focus(EDITOR), preview])
-            }
-            Some(SourceRange::File(path, _)) => {
-                self.other_file_notice(&path);
-                preview
-            }
-            None => preview,
+        let (file, start) = match heading.source {
+            Some(SourceRange::Main(range)) => (None, range.start),
+            Some(SourceRange::File(path, range)) => (Some(path), range.start),
+            None => return preview,
+        };
+        if !self.open_source(file.as_deref()) {
+            return preview;
         }
+        let start = self
+            .positions_map(Positions::Preview, file.is_none())
+            .to_editor(start, true);
+        self.move_cursor(start);
+        Task::batch([operation::focus(EDITOR), preview])
     }
 
     fn assist_message(&mut self, message: Message) -> Task<Message> {
@@ -1012,7 +1216,7 @@ impl App {
     }
 
     fn find_definition(&self, position: Position) -> Task<Message> {
-        let Some(analysis) = self.assist_analysis() else {
+        let Some(analysis) = self.assist_analysis().filter(|_| self.main_active()) else {
             return Task::none();
         };
         let (text, map) = self.compile_text();
@@ -1039,11 +1243,24 @@ impl App {
                 let range = self.preview_map().range_to_editor(range);
                 self.select_range(range.start, range.end)
             }
-            Some(presswork_typst::Definition::File(path, _)) => {
-                let mut args = FluentArgs::new();
-                args.set("file", path.display().to_string());
-                self.notice = Some(self.localizer.format("definition-other-file", &args));
-                Task::none()
+            Some(presswork_typst::Definition::File(path, range)) => {
+                if self.project.is_none() {
+                    let mut args = FluentArgs::new();
+                    args.set("file", files::display_path(&path));
+                    self.notice = Some(self.localizer.format("definition-other-file", &args));
+                    return Task::none();
+                }
+                if !self.open_file(&path) {
+                    return Task::none();
+                }
+                let select = match range {
+                    Some(range) => {
+                        let range = self.preview_map().range_to_editor(range);
+                        self.select_range(range.start, range.end)
+                    }
+                    None => Task::none(),
+                };
+                Task::batch([select, operation::focus(EDITOR)])
             }
             Some(presswork_typst::Definition::Library(name)) => {
                 let mut args = FluentArgs::new();
@@ -1081,6 +1298,9 @@ impl App {
     }
 
     fn correction_here(&self, revision: u64) -> Option<Correction> {
+        if !self.main_active() {
+            return None;
+        }
         let map = &self.pages_map;
         let correction = self
             .proofreader
@@ -1300,7 +1520,7 @@ impl App {
     }
 
     fn request_completions(&self, explicit: bool) -> Task<Message> {
-        let Some(analysis) = self.assist_analysis() else {
+        let Some(analysis) = self.assist_analysis().filter(|_| self.main_active()) else {
             return Task::none();
         };
         let (text, map) = self.compile_text();
@@ -1377,6 +1597,9 @@ impl App {
                 text,
                 code: false,
             });
+            return Task::none();
+        }
+        if !self.main_active() {
             return Task::none();
         }
         if let Some(text) = self.proofreader.tooltip(
@@ -1460,6 +1683,9 @@ impl App {
     }
 
     fn follow_cursor(&mut self) -> Task<Message> {
+        if !self.main_active() {
+            return Task::none();
+        }
         let offset = self.pages_map.to_compiled(self.cursor().offset());
         let point = self
             .pages_analysis
@@ -1482,18 +1708,20 @@ impl App {
             }
             return Task::none();
         };
-        match jump {
-            Some(Jump::Main(offset)) => {
-                self.move_cursor(self.pages_map.to_editor(offset, true));
-                Task::batch([operation::focus(EDITOR), self.follow_cursor()])
-            }
-            Some(Jump::File(path, _)) => {
-                self.other_file_notice(&path);
-                Task::none()
-            }
-            Some(Jump::Page(target)) => self.preview.show_point(target, Instant::now()),
-            None => Task::none(),
+        let (file, offset) = match jump {
+            Some(Jump::Main(offset)) => (None, offset),
+            Some(Jump::File(path, offset)) => (Some(path), offset),
+            Some(Jump::Page(target)) => return self.preview.show_point(target, Instant::now()),
+            None => return Task::none(),
+        };
+        if !self.open_source(file.as_deref()) {
+            return Task::none();
         }
+        let offset = self
+            .positions_map(Positions::Preview, file.is_none())
+            .to_editor(offset, true);
+        self.move_cursor(offset);
+        Task::batch([operation::focus(EDITOR), self.follow_cursor()])
     }
 
     fn snapped(&self, offset: usize) -> Position {
@@ -1627,31 +1855,56 @@ impl App {
     }
 
     fn save(&mut self) {
+        let (Some(project), Some(file)) = (&self.project, &self.file) else {
+            return;
+        };
+        match write_file(project.root(), file, &self.editor) {
+            Ok(()) => self.saved = self.editor.revision(),
+            Err(notice) => self.notice = Some(notice.text(&self.localizer)),
+        }
+    }
+
+    fn save_all(&mut self) {
+        if self.editor.revision() != self.saved {
+            self.save();
+        }
         let Some(project) = &self.project else {
             return;
         };
-        let path = project.main();
-        let text = self.editor.document().buffer().to_string();
-        let suggestions = self.editor.document().suggestions();
-        let written = fs::write(&path, sidecar::file_text(&text, suggestions)).and_then(|()| {
-            sidecar::save(project.root(), &project.manifest().main, &text, suggestions)
-        });
-        match written {
-            Ok(()) => {
-                tracing::info!(path = %path.display(), "File saved");
-                self.saved = self.editor.revision();
+        for (path, open) in &mut self.others {
+            if open.editor.revision() == open.saved {
+                continue;
             }
-            Err(error) => {
-                tracing::error!(%error, path = %path.display(), "File not saved");
-                let mut args = FluentArgs::new();
-                args.set("file", path.display().to_string());
-                self.notice = Some(self.localizer.format("save-error", &args));
+            match write_file(project.root(), path, &open.editor) {
+                Ok(()) => open.saved = open.editor.revision(),
+                Err(notice) => self.notice = Some(notice.text(&self.localizer)),
             }
         }
     }
 
     fn is_saved(&self) -> bool {
-        self.project.is_none() || self.editor.revision() == self.saved
+        self.project.is_none()
+            || (self.editor.revision() == self.saved
+                && self
+                    .others
+                    .values()
+                    .all(|open| open.editor.revision() == open.saved))
+    }
+
+    fn changed_files(&self) -> Vec<PathBuf> {
+        let mut changed: Vec<PathBuf> = self
+            .others
+            .iter()
+            .filter(|(_, open)| open.editor.revision() != open.saved)
+            .map(|(path, _)| path.clone())
+            .collect();
+        if self.editor.revision() != self.saved
+            && let Some(file) = &self.file
+        {
+            changed.push(file.clone());
+        }
+        changed.sort();
+        changed
     }
 
     fn choice(&self) -> Option<Choice> {
@@ -1733,23 +1986,23 @@ impl App {
     }
 
     fn start_compile(&self) -> Task<Message> {
-        let (text, map) = self.compile_text();
+        let (sources, map, revision, files) = self.compile_sources();
         let generation = self.compiler.generation();
-        let revision = self.editor.revision();
-        Task::perform(self.compiler.job(text), move |result| {
-            compiled(generation, revision, result, map)
+        Task::perform(self.compiler.job(sources), move |result| {
+            compiled(generation, revision, result, map, files)
         })
     }
 
     #[cfg(test)]
     pub(crate) fn compile_now(&mut self) {
-        let (text, map) = self.compile_text();
-        let result = self.compiler.run_now(text.as_str());
+        let (sources, map, revision, files) = self.compile_sources();
+        let result = self.compiler.run_now(sources);
         let _ = self.update(compiled(
             self.compiler.generation(),
-            self.editor.revision(),
+            revision,
             result,
             map,
+            files,
         ));
     }
 
@@ -1759,12 +2012,14 @@ impl App {
         revision: u64,
         output: Arc<Output>,
         map: SourceMap,
+        files: Vec<FileSnapshot>,
     ) -> Task<Message> {
         if generation != self.compiler.generation() {
             return Task::none();
         }
         self.compiled_revision = Some(revision);
         self.compiled_map = map;
+        self.compiled_files = files;
         tracing::debug!(
             duration_ms = output.duration.as_millis(),
             diagnostics = output.diagnostics.len(),
@@ -2024,7 +2279,8 @@ impl App {
                 revision,
                 output,
                 map,
-            } => return self.show_output(generation, revision, output, map),
+                files,
+            } => return self.show_output(generation, revision, output, map, files),
             Message::CompileFailed {
                 generation,
                 revision,
@@ -2032,10 +2288,17 @@ impl App {
             } => {
                 tracing::warn!(%error, "The Typst program did not compile");
                 let output = Arc::new(self.failed_output(&error));
-                return self.show_output(generation, revision, output, SourceMap::default());
+                return self.show_output(
+                    generation,
+                    revision,
+                    output,
+                    SourceMap::default(),
+                    Vec::new(),
+                );
             }
             Message::Preview(action) => return self.preview_action(action),
             Message::Outline(message) => return self.outline_message(message),
+            Message::Files(message) => return self.file_message(message),
             Message::Find(message) => return self.find_message(message),
             Message::Publish(message) => return self.publish_message(message),
             Message::Typeset(typeset_view::Message::Show(index)) => {
@@ -2136,7 +2399,7 @@ impl App {
         self.quitting = false;
         match answer {
             unsaved::Answer::Save => {
-                self.save();
+                self.save_all();
                 if self.is_saved() {
                     iced::exit()
                 } else {
@@ -2205,9 +2468,13 @@ impl App {
                     .map(Message::Server),
             );
         }
-        if let Some(project) = self.project.as_ref().filter(|_| self.quitting) {
-            let file = project.manifest().main.display().to_string();
-            layers = layers.push(unsaved::view(&self.localizer, &file));
+        if self.project.is_some() && self.quitting {
+            let files: Vec<String> = self
+                .changed_files()
+                .iter()
+                .map(|path| files::display_path(path))
+                .collect();
+            layers = layers.push(unsaved::view(&self.localizer, &files.join(", ")));
         }
         chrome::window(self.frame(self.main_window), layers)
     }
@@ -2318,6 +2585,40 @@ impl App {
         }
     }
 
+    fn side_panels(&self) -> Option<Element<'_, Message>> {
+        let mut side = column![];
+        let mut open = false;
+        if let Some(project) = self.project.as_ref().filter(|_| self.file_panel.is_open()) {
+            side = side.push(
+                file_panel::view(
+                    &self.localizer,
+                    project.files(),
+                    self.file.as_deref(),
+                    &self.changed_files(),
+                )
+                .map(Message::Files),
+            );
+            open = true;
+        }
+        if self.outline.is_open() {
+            let note = (self.compiler.backend() != &Backend::Embedded)
+                .then(|| self.localizer.text("outline-needs-engine"));
+            let cursor = self
+                .main_active()
+                .then(|| self.pages_map.to_compiled(self.cursor().offset()));
+            if open {
+                side = side.push(hairline());
+            }
+            side = side.push(
+                self.outline
+                    .view(&self.localizer, cursor, note)
+                    .map(Message::Outline),
+            );
+            open = true;
+        }
+        open.then(|| side.into())
+    }
+
     fn workspace_area(&self) -> Element<'_, Message> {
         let workspace = self.workspace;
         if workspace == Workspace::Plan
@@ -2361,19 +2662,9 @@ impl App {
                 editor.into()
             };
             let mut panes = row![];
-            if self.outline.is_open() {
-                let note = (self.compiler.backend() != &Backend::Embedded)
-                    .then(|| self.localizer.text("outline-needs-engine"));
+            if let Some(side) = self.side_panels() {
                 panes = panes
-                    .push(
-                        self.outline
-                            .view(
-                                &self.localizer,
-                                self.pages_map.to_compiled(self.cursor().offset()),
-                                note,
-                            )
-                            .map(Message::Outline),
-                    )
+                    .push(side)
                     .push(rule::vertical(1).style(style::hairline));
             }
             if self.preview_window.is_some() {
@@ -2467,7 +2758,10 @@ impl App {
         };
         let mut args = FluentArgs::new();
         args.set("name", project.manifest().name.clone());
-        args.set("file", project.manifest().main.display().to_string());
+        args.set(
+            "file",
+            files::display_path(self.file.as_ref().unwrap_or(&project.manifest().main)),
+        );
         self.localizer.format("status-project", &args)
     }
 
@@ -2546,6 +2840,13 @@ impl App {
                     indicators.push(status_text(self.localizer.format("status-compiled", &args)));
             }
             indicators = indicators.push(status_text(self.cursor_position()));
+            if self.project.is_some() {
+                indicators = indicators.push(
+                    self.file_panel
+                        .toggle_button(&self.localizer)
+                        .map(Message::Files),
+                );
+            }
             indicators = indicators.push(
                 self.outline
                     .toggle_button(&self.localizer)
@@ -2603,11 +2904,51 @@ impl App {
     }
 }
 
+struct SaveError(PathBuf);
+
+impl SaveError {
+    fn text(&self, localizer: &Localizer) -> String {
+        let mut args = FluentArgs::new();
+        args.set("file", files::display_path(&self.0));
+        localizer.format("save-error", &args)
+    }
+}
+
+fn write_file(root: &Path, file: &Path, editor: &Editor) -> Result<(), SaveError> {
+    let path = root.join(file);
+    let text = editor.document().buffer().to_string();
+    let suggestions = editor.document().suggestions();
+    let written = fs::write(&path, sidecar::file_text(&text, suggestions))
+        .and_then(|()| sidecar::save(root, file, &text, suggestions));
+    match written {
+        Ok(()) => {
+            tracing::info!(path = %path.display(), "File saved");
+            Ok(())
+        }
+        Err(error) => {
+            tracing::error!(%error, path = %path.display(), "File not saved");
+            Err(SaveError(file.to_path_buf()))
+        }
+    }
+}
+
+fn removed(editor: &Editor, kind: presswork_text::SuggestionKind) -> SourceMap {
+    SourceMap::removing(
+        editor
+            .document()
+            .suggestions()
+            .iter()
+            .filter(|suggestion| suggestion.kind == kind)
+            .map(|suggestion| suggestion.range.start.offset()..suggestion.range.end.offset()),
+    )
+}
+
 fn compiled(
     generation: u64,
     revision: u64,
     result: Result<Output, String>,
     map: SourceMap,
+    files: Vec<FileSnapshot>,
 ) -> Message {
     match result {
         Ok(output) => Message::Compiled {
@@ -2615,6 +2956,7 @@ fn compiled(
             revision,
             output: Arc::new(output),
             map,
+            files,
         },
         Err(error) => Message::CompileFailed {
             generation,
@@ -2805,6 +3147,7 @@ mod tests {
             revision: 0,
             output: Arc::new(output),
             map: SourceMap::default(),
+            files: Vec::new(),
         }
     }
 
@@ -2931,7 +3274,7 @@ mod tests {
     }
 
     #[test]
-    fn a_click_on_text_of_another_file_names_the_file() {
+    fn a_click_on_text_of_another_file_opens_the_file() {
         let folder = project_folder(&[
             ("presswork.toml", "[project]\nname = \"The Book\"\n"),
             ("main.typ", "#include \"part.typ\""),
@@ -2950,13 +3293,8 @@ mod tests {
             }),
         );
 
-        assert!(
-            app.notice
-                .as_deref()
-                .is_some_and(|notice| notice.contains("part.typ")),
-            "{:?}",
-            app.notice
-        );
+        assert_eq!(editor_text(&app), "Included words.");
+        assert_eq!(app.notice, None);
     }
 
     #[test]
@@ -2984,6 +3322,7 @@ mod tests {
                 revision,
                 output: Arc::new(output),
                 map: SourceMap::default(),
+                files: Vec::new(),
             },
         );
 
@@ -3302,7 +3641,7 @@ mod tests {
     }
 
     #[test]
-    fn a_heading_in_another_file_names_the_file() {
+    fn a_heading_in_another_file_opens_the_file() {
         let folder = project_folder(&[
             ("presswork.toml", "[project]\nname = \"The Book\"\n"),
             ("main.typ", "#include \"part.typ\""),
@@ -3314,13 +3653,8 @@ mod tests {
 
         click_in(&mut app, "Part");
 
-        assert!(
-            app.notice
-                .as_deref()
-                .is_some_and(|notice| notice.contains("part.typ")),
-            "{:?}",
-            app.notice
-        );
+        assert_eq!(editor_text(&app), "= Part");
+        assert_eq!(app.cursor(), Position::new(0));
     }
 
     #[test]
@@ -4229,6 +4563,196 @@ mod tests {
         );
     }
 
+    const CHAPTERED_MAIN: &str = "= Book\n#include \"chapters/one.typ\"\n";
+    const CHAPTER: &str = "= One\nThe press stopped.\n";
+
+    fn chaptered() -> tempfile::TempDir {
+        let folder = project_folder(&[
+            ("presswork.toml", "[project]\nname = \"Field Notes\"\n"),
+            ("main.typ", CHAPTERED_MAIN),
+        ]);
+        fs::create_dir(folder.path().join("chapters")).unwrap();
+        fs::write(folder.path().join("chapters").join("one.typ"), CHAPTER).unwrap();
+        folder
+    }
+
+    fn open_file(app: &mut App, path: &str) {
+        send(
+            app,
+            Message::Files(file_panel::Message::Open(PathBuf::from(path))),
+        );
+    }
+
+    fn editor_text(app: &App) -> String {
+        app.editor.document().buffer().to_string()
+    }
+
+    #[test]
+    fn the_files_panel_lists_the_files_of_the_project() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+
+        let mut ui = simulator(app.view());
+
+        assert!(ui.find("chapters").is_ok());
+        assert!(ui.find("one.typ").is_ok());
+    }
+
+    #[test]
+    fn a_file_of_the_project_opens_in_the_editor() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+
+        open_file(&mut app, "chapters/one.typ");
+
+        assert_eq!(editor_text(&app), CHAPTER);
+        assert!(
+            simulator(app.view())
+                .find("Field Notes · chapters/one.typ")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn the_changes_of_each_file_stay_when_you_open_another_file() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        send(&mut app, insert("Late. "));
+        open_file(&mut app, "chapters/one.typ");
+        send(&mut app, insert("Now. "));
+
+        open_file(&mut app, "main.typ");
+        assert_eq!(editor_text(&app), format!("Late. {CHAPTERED_MAIN}"));
+        open_file(&mut app, "chapters/one.typ");
+        assert_eq!(editor_text(&app), format!("Now. {CHAPTER}"));
+        assert!(!app.is_saved());
+    }
+
+    #[test]
+    fn save_writes_the_file_in_the_editor() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        open_file(&mut app, "chapters/one.typ");
+        send(&mut app, insert("Now. "));
+
+        send(&mut app, Message::Save);
+
+        let read = |path: &str| fs::read_to_string(folder.path().join(path)).unwrap();
+        assert_eq!(read("chapters/one.typ"), format!("Now. {CHAPTER}"));
+        assert_eq!(read("main.typ"), CHAPTERED_MAIN);
+        assert!(app.is_saved());
+    }
+
+    #[test]
+    fn the_question_before_quit_names_each_changed_file_and_saves_all() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        send(&mut app, insert("Late. "));
+        open_file(&mut app, "chapters/one.typ");
+        send(&mut app, insert("Now. "));
+
+        send(&mut app, Message::MenuItem(menu::Item::Quit));
+        assert!(
+            simulator(app.view())
+                .find("Save the changes to chapters/one.typ, main.typ?")
+                .is_ok()
+        );
+        send(&mut app, Message::Unsaved(unsaved::Answer::Save));
+
+        let read = |path: &str| fs::read_to_string(folder.path().join(path)).unwrap();
+        assert_eq!(read("main.typ"), format!("Late. {CHAPTERED_MAIN}"));
+        assert_eq!(read("chapters/one.typ"), format!("Now. {CHAPTER}"));
+        assert!(app.is_saved());
+    }
+
+    #[test]
+    fn the_preview_uses_the_unsaved_text_of_each_open_file() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        open_file(&mut app, "chapters/one.typ");
+        send(&mut app, insert("= Prologue\n"));
+
+        app.compile_now();
+
+        let titles: Vec<String> = app
+            .compiled
+            .as_ref()
+            .unwrap()
+            .analysis
+            .as_ref()
+            .unwrap()
+            .outline()
+            .into_iter()
+            .map(|heading| heading.title)
+            .collect();
+        assert_eq!(titles, ["Book", "Prologue", "One"]);
+    }
+
+    #[test]
+    fn errors_in_the_open_file_are_marked() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        open_file(&mut app, "chapters/one.typ");
+        send(&mut app, insert("#nothing\n"));
+
+        app.compile_now();
+
+        assert!(
+            app.marks()
+                .iter()
+                .any(|mark| mark.kind == MarkKind::Error && mark.range.start == Position::new(1)),
+            "{:?}",
+            app.marks()
+        );
+    }
+
+    #[test]
+    fn a_file_that_is_not_text_does_not_open() {
+        let folder = chaptered();
+        fs::write(
+            folder.path().join("cover.png"),
+            [0x89, b'P', 0xff, 0xfe, 0x00],
+        )
+        .unwrap();
+        let mut app = app();
+        open(&mut app, &folder);
+
+        open_file(&mut app, "cover.png");
+
+        assert_eq!(editor_text(&app), CHAPTERED_MAIN);
+        assert!(
+            app.notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("cover.png")),
+            "{:?}",
+            app.notice
+        );
+    }
+
+    #[test]
+    fn a_heading_of_the_main_file_opens_the_main_file() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        app.compile_now();
+        open_file(&mut app, "chapters/one.typ");
+
+        send(
+            &mut app,
+            Message::Outline(outline_panel::Message::Select(0)),
+        );
+
+        assert_eq!(editor_text(&app), CHAPTERED_MAIN);
+        assert_eq!(app.cursor(), Position::new(0));
+    }
+
     #[test]
     fn opening_a_project_folder_shows_its_main_file() {
         let folder = book();
@@ -4390,9 +4914,9 @@ mod tests {
     fn an_export_uses_the_text_of_the_file() {
         let (mut suggested, _folder) = suggested_book();
 
-        let (_, text, _) = suggested.start_export(0).unwrap();
+        let (_, sources, _) = suggested.start_export(0).unwrap();
 
-        assert_eq!(text, "= Book");
+        assert_eq!(sources.main, "= Book");
     }
 
     fn suggestion_key() -> Message {

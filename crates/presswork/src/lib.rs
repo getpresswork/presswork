@@ -4,6 +4,7 @@ mod chat_panel;
 mod chrome;
 mod compiler;
 mod dictionary_list;
+mod file_panel;
 mod files;
 mod find_bar;
 mod i18n;

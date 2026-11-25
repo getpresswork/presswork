@@ -79,7 +79,7 @@ impl OutlinePanel {
     pub(crate) fn view(
         &self,
         localizer: &Localizer,
-        cursor: usize,
+        cursor: Option<usize>,
         note: Option<String>,
     ) -> Element<'_, Message> {
         let note = note.or_else(|| {
@@ -90,7 +90,7 @@ impl OutlinePanel {
         let body: Element<'_, Message> = if let Some(note) = note {
             text(note).size(font_size::SMALL).style(style::muted).into()
         } else {
-            let current = self.current(cursor);
+            let current = cursor.and_then(|cursor| self.current(cursor));
             let rows = self
                 .headings
                 .iter()
@@ -225,7 +225,7 @@ mod tests {
         }]);
         let localizer = Localizer::english();
 
-        let mut ui = simulator(panel.view(&localizer, 0, None));
+        let mut ui = simulator(panel.view(&localizer, Some(0), None));
 
         assert!(ui.find("1.2 Methods").is_ok());
         assert!(ui.find("iv").is_ok());
@@ -235,7 +235,7 @@ mod tests {
     fn a_click_on_a_heading_selects_it() {
         let panel = panel();
         let localizer = Localizer::english();
-        let mut ui = simulator(panel.view(&localizer, 0, None));
+        let mut ui = simulator(panel.view(&localizer, Some(0), None));
 
         ui.click("Two").unwrap();
 
@@ -247,7 +247,7 @@ mod tests {
         let panel = OutlinePanel::default();
         let localizer = Localizer::english();
 
-        let mut ui = simulator(panel.view(&localizer, 0, None));
+        let mut ui = simulator(panel.view(&localizer, Some(0), None));
 
         assert!(ui.find("The document has no headings.").is_ok());
     }
@@ -257,7 +257,7 @@ mod tests {
         let panel = panel();
         let localizer = Localizer::english();
 
-        let mut ui = simulator(panel.view(&localizer, 0, Some("A note.".to_owned())));
+        let mut ui = simulator(panel.view(&localizer, Some(0), Some("A note.".to_owned())));
 
         assert!(ui.find("A note.").is_ok());
         assert!(ui.find("One").is_err());

@@ -1,9 +1,32 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use presswork_editor::Editor;
 use presswork_project::{Project, ProjectError};
 
 use crate::i18n::{FluentArgs, Localizer};
+
+pub(crate) struct OpenFile {
+    pub(crate) editor: Editor,
+    pub(crate) saved: u64,
+}
+
+pub(crate) enum ReadError {
+    NotText,
+    Io,
+}
+
+pub(crate) fn read_text(path: &Path) -> Result<String, ReadError> {
+    let bytes = fs::read(path).map_err(|_| ReadError::Io)?;
+    String::from_utf8(bytes).map_err(|_| ReadError::NotText)
+}
+
+pub(crate) fn display_path(path: &Path) -> String {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
 
 pub(crate) async fn pick_folder(title: String) -> Option<PathBuf> {
     rfd::AsyncFileDialog::new()
