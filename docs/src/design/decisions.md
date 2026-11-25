@@ -1690,3 +1690,14 @@ Do not change what an accepted decision says. You can correct its language. To c
   - A note tells how many files changed.
 - **Reason:** A book has many chapter files. A rename must not break the document.
 - **Other options:** A question before the change. A change only in the open files. A change of named path arguments, for example `style` of `bibliography` and `theme` of `raw`.
+
+## D211. Files that are not text in the files panel
+
+- **Status:** Accepted, 2026-11-25. **Origin:** Default, from a requirement of the project owner.
+- **Decision:**
+  - A click on a file that is not text, for example an image, a PDF file, or a font, selects its row in the files panel. The editor keeps the open file. Presswork does not show a note.
+  - The selected row has the **Rename** and **Delete** buttons, as the row of the open file. A rename changes the paths to the file in the Typst files of the project (D210), and the row stays selected.
+  - The selection stops when a file opens, when the selected file is deleted, or when another project or a server document opens.
+  - Files with the extensions `avif`, `gif`, `jpeg`, `jpg`, `png`, `svg`, and `webp` have an image icon.
+- **Reason:** A book has images, and a person who renames or deletes an image does not want to use a different program for it.
+- **Other options:** Rename and Delete buttons on each row. A context menu. A preview of the image in the editor area.

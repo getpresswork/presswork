@@ -234,7 +234,7 @@ The outline panel shows the headings of the document at the left of the editor (
 The files panel shows the files of the project above the outline (D204).
 
 - The panel shows the folders and the files of the project folder. It does not show hidden files, for example the `.presswork` folder.
-- Click a file to open it in the editor. The location in the status bar shows the name of the file. A text file opens; a file that is not text, for example an image, gives a note.
+- Click a file to open it in the editor. The location in the status bar shows the name of the file. A text file opens. A click on a file that is not text, for example an image, selects its row, and the editor keeps the open file (D211). An image has an image icon.
 - The changes in each open file stay when you open another file. A dot after the name marks a file with changes that are not saved.
 - The preview always compiles the main file with the changes of all open files, also when the changes are not saved.
 - Ctrl+S saves the file in the editor. Before Presswork closes, the dialog names all files with changes, and **Save** saves all of them.
@@ -242,7 +242,7 @@ The files panel shows the files of the project above the outline (D204).
 - A click on the pages, a heading, a definition, or a problem opens the file of that place.
 - The **Files** button in the status bar opens or closes the panel.
 - To make a file, click **New file** (the plus icon) in the header of the panel. Type a path in the project folder, for example `chapters/two.typ`, and push Enter. Presswork makes an empty file and opens it. The field starts with the folder of the open file. Escape stops (D205).
-- The row of the open file has a **Rename** button and a **Delete** button. Rename moves the file to the path that you type, with its changes that are not saved and its suggestions. Delete asks first, then removes the file from the disk and opens the main file. You cannot undo a delete.
+- The row of the open file or of the selected file has a **Rename** button and a **Delete** button. Rename moves the file to the path that you type, with its changes that are not saved and its suggestions. Delete asks first, then removes the file from the disk. If the file was open, the editor shows the main file. You cannot undo a delete.
 - The main file and `presswork.toml` have no Rename or Delete button.
 - After a rename, Presswork changes the paths to the file in the Typst files of the project, for example in `#include`, `#import`, and `image` (D210). If the file moves to another folder, its own relative paths also change, so that they find the same files. An open file gets the change as one step that you can undo. A note tells how many files changed. Presswork does not change paths after a delete.
 
