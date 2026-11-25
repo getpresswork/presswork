@@ -56,10 +56,86 @@ mod tests {
     use super::*;
     use crate::compile::Severity;
     use crate::fonts::Fonts;
+    use crate::render::render_page;
 
     fn world() -> Mutex<World> {
         let today = Datetime::from_ymd(2026, 11, 15).unwrap();
         Mutex::new(World::new(Arc::new(Fonts::embedded()), Some(today)))
+    }
+
+    fn render_all(document: &typst_layout::PagedDocument) -> (Duration, usize) {
+        let start = Instant::now();
+        let bytes = (0..document.pages().len())
+            .filter_map(|index| render_page(document, index, 2.0, false))
+            .map(|image| image.rgba.len())
+            .sum();
+        (start.elapsed(), bytes)
+    }
+
+    #[test]
+    #[ignore = "times a large book; set PRESSWORK_BENCH_PROJECT to its folder"]
+    fn time_a_large_book() {
+        let Some(root) = std::env::var_os("PRESSWORK_BENCH_PROJECT").map(std::path::PathBuf::from)
+        else {
+            eprintln!("Set PRESSWORK_BENCH_PROJECT to a project folder with main.typ.");
+            return;
+        };
+        let text = std::fs::read_to_string(root.join("main.typ")).unwrap();
+        let start = Instant::now();
+        let fonts = Arc::new(Fonts::embedded());
+        let fonts_time = start.elapsed();
+        let mut world = World::open(
+            fonts,
+            crate::today(),
+            root.clone(),
+            std::path::Path::new("main.typ"),
+        );
+        world.set_main_text(&text);
+
+        let start = Instant::now();
+        let cold = compile(&world);
+        let cold_time = start.elapsed();
+        let errors: Vec<&str> = cold
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert_eq!(errors, Vec::<&str>::new());
+        let document = cold.document.unwrap();
+        let pages = document.pages().len();
+        let (cold_render, bytes) = render_all(&document);
+
+        let start = Instant::now();
+        let analysis = Analysis::new(world.clone(), Some(document.clone()));
+        let headings = analysis.outline().len();
+        let outline_time = start.elapsed();
+        let start = Instant::now();
+        let problems = analysis
+            .quality(&presswork_project::TypesetSettings::default())
+            .len();
+        let quality_time = start.elapsed();
+
+        let middle = text[..text.len() / 2].rfind(' ').unwrap_or(0);
+        let mut changed = text.clone();
+        changed.insert_str(middle, " word");
+        world.set_main_text(&changed);
+        let start = Instant::now();
+        let hot = compile(&world);
+        let hot_time = start.elapsed();
+        let (hot_render, _) = render_all(&hot.document.unwrap());
+
+        eprintln!("pages: {pages}, headings: {headings}, QA problems: {problems}");
+        eprintln!("fonts: {fonts_time:?}");
+        eprintln!("cold compile: {cold_time:?}");
+        eprintln!(
+            "cold render of all pages: {cold_render:?} ({:?} per page, {} MB of images)",
+            cold_render / u32::try_from(pages.max(1)).unwrap(),
+            bytes / 1_000_000
+        );
+        eprintln!("outline: {outline_time:?}, QA report: {quality_time:?}");
+        eprintln!("hot compile after one word: {hot_time:?}");
+        eprintln!("hot render of all pages: {hot_render:?}");
     }
 
     #[test]
