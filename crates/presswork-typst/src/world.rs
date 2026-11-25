@@ -12,6 +12,7 @@ use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 
 use crate::fonts::Fonts;
+use crate::package::{DownloadError, Downloader, PackageName, package_cache};
 
 #[derive(Debug, Clone)]
 pub struct World {
@@ -22,6 +23,7 @@ pub struct World {
     overlays: HashMap<FileId, Source>,
     today: Option<Datetime>,
     packages: Vec<PathBuf>,
+    downloader: Option<Arc<dyn Downloader>>,
 }
 
 impl World {
@@ -35,12 +37,23 @@ impl World {
             overlays: HashMap::new(),
             today,
             packages: package_folders(),
+            downloader: None,
         }
     }
 
     #[must_use]
     pub fn with_packages(self, packages: Vec<PathBuf>) -> Self {
         Self { packages, ..self }
+    }
+
+    #[must_use]
+    pub fn with_downloader(mut self, downloader: Option<Arc<dyn Downloader>>) -> Self {
+        self.set_downloader(downloader);
+        self
+    }
+
+    pub fn set_downloader(&mut self, downloader: Option<Arc<dyn Downloader>>) {
+        self.downloader = downloader;
     }
 
     #[must_use]
@@ -85,11 +98,36 @@ impl World {
         let relative = Path::new(spec.namespace.as_str())
             .join(spec.name.as_str())
             .join(spec.version.to_string());
-        self.packages
+        if let Some(folder) = self
+            .packages
             .iter()
             .map(|folder| folder.join(&relative))
             .find(|folder| folder.is_dir())
-            .ok_or_else(|| FileError::Package(PackageError::NotFound(spec.clone())))
+        {
+            return Ok(folder);
+        }
+        let Some(downloader) = self
+            .downloader
+            .as_ref()
+            .filter(|_| spec.namespace == "preview")
+        else {
+            return Err(FileError::Package(PackageError::NotFound(spec.clone())));
+        };
+        let package = PackageName {
+            namespace: spec.namespace.to_string(),
+            name: spec.name.to_string(),
+            version: spec.version.to_string(),
+        };
+        downloader.download(&package).map_err(|error| {
+            FileError::Package(match error {
+                DownloadError::NotFound => PackageError::NotFound(spec.clone()),
+                DownloadError::VersionNotFound(latest) => match latest.parse() {
+                    Ok(latest) => PackageError::VersionNotFound(spec.clone(), latest),
+                    Err(_) => PackageError::NotFound(spec.clone()),
+                },
+                DownloadError::Failed(message) => PackageError::NetworkFailed(Some(message.into())),
+            })
+        })
     }
 
     #[must_use]
@@ -112,12 +150,9 @@ impl World {
 }
 
 fn package_folders() -> Vec<PathBuf> {
-    directories::BaseDirs::new().map_or_else(Vec::new, |folders| {
-        vec![
-            folders.data_dir().join("typst").join("packages"),
-            folders.cache_dir().join("typst").join("packages"),
-        ]
-    })
+    let data = directories::BaseDirs::new()
+        .map(|folders| folders.data_dir().join("typst").join("packages"));
+    data.into_iter().chain(package_cache()).collect()
 }
 
 pub(crate) fn file_id(path: &Path) -> Option<FileId> {
@@ -184,6 +219,7 @@ impl typst_ide::IdeWorld for World {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::sync::Mutex;
 
     use tempfile::TempDir;
 
@@ -307,6 +343,108 @@ mod tests {
         let errors = errors(&world);
         assert_eq!(errors.len(), 1);
         assert!(errors[0].contains("missing"), "{errors:?}");
+    }
+
+    #[derive(Debug)]
+    struct FakeDownloader {
+        folder: PathBuf,
+        failure: Option<DownloadError>,
+        calls: Mutex<Vec<PackageName>>,
+    }
+
+    impl FakeDownloader {
+        fn new(folder: &Path, failure: Option<DownloadError>) -> Arc<Self> {
+            Arc::new(Self {
+                folder: folder.to_path_buf(),
+                failure,
+                calls: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn calls(&self) -> Vec<String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .map(ToString::to_string)
+                .collect()
+        }
+    }
+
+    impl Downloader for FakeDownloader {
+        fn download(&self, package: &PackageName) -> Result<PathBuf, DownloadError> {
+            self.calls.lock().unwrap().push(package.clone());
+            if let Some(failure) = &self.failure {
+                return Err(failure.clone());
+            }
+            let folder = self
+                .folder
+                .join(&package.namespace)
+                .join(&package.name)
+                .join(&package.version);
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(
+                folder.join("typst.toml"),
+                "[package]\nname = \"greeting\"\nversion = \"0.1.0\"\nentrypoint = \"lib.typ\"\n",
+            )
+            .unwrap();
+            fs::write(folder.join("lib.typ"), "#let greet = [Hello]").unwrap();
+            Ok(folder)
+        }
+    }
+
+    fn downloading(
+        main: &str,
+        failure: Option<DownloadError>,
+    ) -> (World, Arc<FakeDownloader>, TempDir, TempDir) {
+        let packages = tempfile::tempdir().unwrap();
+        let downloader = FakeDownloader::new(packages.path(), failure);
+        let folder = folder(&[("main.typ", main)]);
+        let world = project(folder.path())
+            .with_packages(vec![packages.path().to_path_buf()])
+            .with_downloader(Some(Arc::clone(&downloader) as Arc<dyn Downloader>));
+        (world, downloader, packages, folder)
+    }
+
+    const PREVIEW_IMPORT: &str = "#import \"@preview/greeting:0.1.0\": greet\n#greet";
+
+    #[test]
+    fn a_missing_preview_package_comes_from_the_downloader() {
+        let (world, downloader, _packages, _folder) = downloading(PREVIEW_IMPORT, None);
+
+        assert_eq!(errors(&world), Vec::<String>::new());
+        assert_eq!(downloader.calls(), ["@preview/greeting:0.1.0"]);
+    }
+
+    #[test]
+    fn a_package_of_another_namespace_is_not_downloaded() {
+        let (world, downloader, _packages, _folder) =
+            downloading("#import \"@local/greeting:0.1.0\": greet", None);
+
+        assert_eq!(errors(&world).len(), 1);
+        assert_eq!(downloader.calls(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_failed_download_names_the_problem() {
+        let failure = DownloadError::Failed("no connection".to_owned());
+        let (world, _downloader, _packages, _folder) = downloading(PREVIEW_IMPORT, Some(failure));
+
+        let errors = errors(&world);
+
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("no connection"), "{errors:?}");
+    }
+
+    #[test]
+    fn a_missing_version_names_the_latest_version() {
+        let failure = DownloadError::VersionNotFound("0.2.0".to_owned());
+        let (world, _downloader, _packages, _folder) = downloading(PREVIEW_IMPORT, Some(failure));
+
+        let errors = errors(&world);
+
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("0.2.0"), "{errors:?}");
     }
 
     #[test]
