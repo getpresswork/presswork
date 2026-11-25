@@ -3,6 +3,7 @@ mod assist;
 mod clock;
 mod compile;
 mod docs;
+mod example;
 mod export;
 mod fonts;
 mod ide;
@@ -26,7 +27,10 @@ pub use area::Area;
 pub use assist::{Completion, CompletionKind, Completions, Definition, Tooltip};
 pub use clock::today;
 pub use compile::{Compilation, Diagnostic, Severity, compile};
-pub use docs::{DOCS_LINK, DocKind, DocPage, DocParam, ParamFlag, Reference, reference};
+pub use docs::{
+    DOCS_LINK, DocExample, DocKind, DocPage, DocParam, ParamFlag, Reference, example_id, reference,
+};
+pub use example::render_example;
 pub use export::{ExportError, ExportSettings, Format, export};
 pub use fonts::Fonts;
 pub use ide::{Analysis, Jump, PagePoint};

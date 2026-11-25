@@ -2,12 +2,14 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::sync::LazyLock;
 
-use typst::foundations::{CastInfo, ParamInfo, Repr, Scope, Value};
+use typst::foundations::{CastInfo, Func, ParamInfo, Repr, Scope, Value};
 use typst::syntax::ast::{self, AstNode as _};
 use typst::syntax::{SyntaxKind, SyntaxNode};
+use typst::utils::hash128;
 use typst::{Library, LibraryExt as _};
 
 pub const DOCS_LINK: &str = "docs:";
+const EXAMPLE: &str = "example-";
 const WEB_DOCS: &str = "https://typst.app/docs/";
 const SKIPPED: [&str; 3] = ["std", "sym", "emoji"];
 const DEEPEST: usize = 2;
@@ -57,6 +59,12 @@ pub struct DocParam {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocExample {
+    pub id: u128,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocPage {
     pub path: String,
     pub title: String,
@@ -68,6 +76,7 @@ pub struct DocPage {
     pub returns: Option<String>,
     pub members: Vec<String>,
     pub keywords: Vec<String>,
+    pub examples: Vec<DocExample>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -152,6 +161,55 @@ pub fn reference() -> &'static Reference {
     &REFERENCE
 }
 
+#[must_use]
+pub fn example_id(language: &str) -> Option<u128> {
+    u128::from_str_radix(language.strip_prefix(EXAMPLE)?, 16).ok()
+}
+
+fn examples_in(texts: &[&str]) -> Vec<DocExample> {
+    let mut found = Vec::new();
+    for text in texts {
+        collect_examples(&typst::syntax::parse(text), &mut found);
+    }
+    found
+}
+
+fn collect_examples(node: &SyntaxNode, found: &mut Vec<DocExample>) {
+    if let Some(example) = ast::Raw::from_untyped(node).and_then(example) {
+        if found.iter().all(|known| known.id != example.id) {
+            found.push(example);
+        }
+        return;
+    }
+    for child in node.children() {
+        collect_examples(child, found);
+    }
+}
+
+fn example(raw: ast::Raw<'_>) -> Option<DocExample> {
+    let language = raw.lang().map(|lang| lang.get().as_str());
+    if !raw.block() || language != Some("example") {
+        return None;
+    }
+    let mut source = String::new();
+    for line in raw.lines() {
+        let line = line.get().as_str();
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("<<<") {
+            continue;
+        }
+        let compiled = trimmed
+            .strip_prefix(">>>")
+            .map_or(line, |rest| rest.strip_prefix(' ').unwrap_or(rest));
+        source.push_str(compiled);
+        source.push('\n');
+    }
+    Some(DocExample {
+        id: hash128(&source),
+        source,
+    })
+}
+
 pub(crate) fn library_path(value: &Value) -> Option<String> {
     let mut found = None;
     walk(&Library::default(), &mut |path, candidate, _| {
@@ -194,6 +252,7 @@ fn page_of(path: &str, value: &Value, category: Option<&'static str>) -> Option<
     let page = match value {
         Value::Func(func) => {
             let docs = func.docs()?;
+            let texts: Vec<&str> = std::iter::once(docs).chain(param_docs(func)).collect();
             DocPage {
                 path: path.to_owned(),
                 title: func.title().unwrap_or(name).to_owned(),
@@ -209,32 +268,40 @@ fn page_of(path: &str, value: &Value, category: Option<&'static str>) -> Option<
                     .iter()
                     .map(|word| (*word).to_owned())
                     .collect(),
+                examples: examples_in(&texts),
             }
         }
-        Value::Type(ty) => DocPage {
-            path: path.to_owned(),
-            title: ty.title().to_owned(),
-            kind: DocKind::Type,
-            category,
-            summary: summary(&clean_docs(ty.docs())),
-            docs: clean_docs(ty.docs()),
-            params: ty.constructor().map_or_else(
-                |_| Vec::new(),
-                |constructor| {
-                    constructor
-                        .params()
-                        .filter_map(|info| param(&info))
-                        .collect()
-                },
-            ),
-            returns: None,
-            members: members(Some(ty.scope()), path),
-            keywords: ty
-                .keywords()
-                .iter()
-                .map(|word| (*word).to_owned())
-                .collect(),
-        },
+        Value::Type(ty) => {
+            let constructor = ty.constructor().ok();
+            let texts: Vec<&str> = std::iter::once(ty.docs())
+                .chain(constructor.iter().flat_map(param_docs))
+                .collect();
+            DocPage {
+                path: path.to_owned(),
+                title: ty.title().to_owned(),
+                kind: DocKind::Type,
+                category,
+                summary: summary(&clean_docs(ty.docs())),
+                docs: clean_docs(ty.docs()),
+                params: ty.constructor().map_or_else(
+                    |_| Vec::new(),
+                    |constructor| {
+                        constructor
+                            .params()
+                            .filter_map(|info| param(&info))
+                            .collect()
+                    },
+                ),
+                returns: None,
+                members: members(Some(ty.scope()), path),
+                keywords: ty
+                    .keywords()
+                    .iter()
+                    .map(|word| (*word).to_owned())
+                    .collect(),
+                examples: examples_in(&texts),
+            }
+        }
         Value::Module(module) => {
             let members = members(Some(module.scope()), path);
             if members.is_empty() {
@@ -251,6 +318,7 @@ fn page_of(path: &str, value: &Value, category: Option<&'static str>) -> Option<
                 returns: None,
                 members,
                 keywords: Vec::new(),
+                examples: Vec::new(),
             }
         }
         _ => return None,
@@ -272,6 +340,11 @@ fn members(scope: Option<&Scope>, path: &str) -> Vec<String> {
         })
         .map(|(name, _)| format!("{path}.{name}"))
         .collect()
+}
+
+fn param_docs(func: &Func) -> impl Iterator<Item = &'static str> + '_ {
+    func.params()
+        .filter_map(|info| info.to_native().map(|native| native.docs))
 }
 
 fn param(info: &ParamInfo) -> Option<DocParam> {
@@ -502,12 +575,10 @@ fn write_raw(raw: ast::Raw<'_>, out: &mut String) {
         write_code(inner, out);
         return;
     }
-    let language = raw.lang().map_or("", |lang| lang.get().as_str());
-    let language = if language == "example" {
-        "typ"
-    } else {
-        language
-    };
+    let language = example(raw).map_or_else(
+        || raw.lang().map_or("", |lang| lang.get().as_str()).to_owned(),
+        |example| format!("{EXAMPLE}{:032x}", example.id),
+    );
     let _ = writeln!(out, "```{language}");
     for line in lines {
         if line.trim_start().starts_with(">>>") {
@@ -609,10 +680,93 @@ mod tests {
     }
 
     #[test]
-    fn example_blocks_become_typst_code_without_hidden_lines() {
+    fn example_blocks_become_examples_that_show_the_code_without_hidden_lines() {
         let docs = "Text.\n```example\n>>> #set page(width: 100pt)\n<<< #show: rest\n= Title\n```";
 
-        assert_eq!(clean_docs(docs), "Text.\n```typ\n#show: rest\n= Title\n```");
+        let examples = examples_in(&[docs]);
+
+        assert_eq!(examples.len(), 1);
+        let example = &examples[0];
+        assert_eq!(example.source, "#set page(width: 100pt)\n= Title\n");
+        let language = format!("example-{:032x}", example.id);
+        assert_eq!(
+            clean_docs(docs),
+            format!("Text.\n```{language}\n#show: rest\n= Title\n```")
+        );
+        assert_eq!(example_id(&language), Some(example.id));
+        assert_eq!(example_id("typ"), None);
+    }
+
+    #[test]
+    #[ignore = "compiles each example of the reference"]
+    fn each_example_that_does_not_render_needs_a_file() {
+        let files = [
+            ".bib",
+            ".csv",
+            ".html",
+            ".jpg",
+            ".json",
+            ".png",
+            ".sublime-syntax",
+            ".svg",
+            ".tmTheme",
+            ".toml",
+            ".wasm",
+            ".xml",
+            ".yaml",
+        ];
+        let mut seen = HashSet::new();
+
+        let unexplained: Vec<&str> = reference()
+            .pages
+            .iter()
+            .flat_map(|page| &page.examples)
+            .filter(|example| seen.insert(example.id))
+            .filter(|example| crate::example::render_example(&example.source, 0.1).is_none())
+            .map(|example| example.source.as_str())
+            .filter(|source| !files.iter().any(|file| source.contains(file)))
+            .collect();
+
+        assert_eq!(unexplained, Vec::<&str>::new());
+    }
+
+    #[test]
+    fn other_code_blocks_keep_their_language() {
+        assert_eq!(clean_docs("```typ\n#x\n```"), "```typ\n#x\n```");
+        assert_eq!(
+            examples_in(&["```typ\n#x\n```", "`{inline}`"]),
+            Vec::<DocExample>::new()
+        );
+    }
+
+    #[test]
+    fn a_page_has_the_examples_of_its_text_and_of_its_parameters() {
+        let text = page("text");
+        let ids: Vec<u128> = text.examples.iter().map(|example| example.id).collect();
+        let fenced: Vec<u128> = std::iter::once(&text.docs)
+            .chain(text.params.iter().map(|param| &param.docs))
+            .flat_map(|docs| {
+                docs.lines()
+                    .filter_map(|line| line.strip_prefix("```").and_then(example_id))
+            })
+            .collect();
+
+        assert!(
+            text.params
+                .iter()
+                .any(|param| param.docs.contains("```example-"))
+        );
+        assert_ne!(fenced, Vec::<u128>::new());
+        assert!(
+            fenced.iter().all(|id| ids.contains(id)),
+            "{fenced:?} {ids:?}"
+        );
+        assert!(
+            page("calc.pow")
+                .examples
+                .iter()
+                .any(|example| example.source.contains("#calc.pow(2, 3)"))
+        );
     }
 
     #[test]

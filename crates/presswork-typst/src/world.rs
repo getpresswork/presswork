@@ -29,8 +29,16 @@ pub struct World {
 impl World {
     #[must_use]
     pub fn new(fonts: Arc<Fonts>, today: Option<Datetime>) -> Self {
+        Self::with_library(fonts, today, LazyHash::new(Library::default()))
+    }
+
+    pub(crate) fn with_library(
+        fonts: Arc<Fonts>,
+        today: Option<Datetime>,
+        library: LazyHash<Library>,
+    ) -> Self {
         Self {
-            library: LazyHash::new(Library::default()),
+            library,
             fonts,
             root: None,
             main: main_id(),
