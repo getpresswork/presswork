@@ -352,6 +352,8 @@ fn render_packages(app: &mut App) {
     render(app, "docs-contents");
     send(app, Message::Docs(DocsMessage::Open("text".to_owned())));
     render(app, "docs-page");
+    send(app, Message::Docs(DocsMessage::Open("circle".to_owned())));
+    render(app, "docs-example");
     send(app, Message::Pane(Pane::Preview));
 }
 
