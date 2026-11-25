@@ -69,7 +69,7 @@ The engine changes each Typst diagnostic into a Presswork diagnostic with these 
 
 The editor underlines the range. The diagnostics panel shows a list of all diagnostics. A click on a diagnostic moves the cursor to its range.
 
-In milestone 2, a diagnostic has the file of its source and the byte range in that file. The editor shows only the main file, so it marks only the diagnostics of the main file. The command-line tool shows the file, the line, and the column of each diagnostic.
+In milestone 2, a diagnostic has the file of its source and the byte range in that file. The editor marks the diagnostics of the file that it shows (D204). The command-line tool shows the file, the line, and the column of each diagnostic.
 
 ## Page images
 
@@ -85,6 +85,14 @@ In milestone 1, the engine has these limits:
 - The world reads the files of the open project folder. It does not read packages yet.
 - Exports are not available yet. The preview of a project with a different pin uses the managed toolchain.
 - The engine renders all pages after each compilation, at 2 pixels for each point.
+
+In milestone 2, the engine does these things:
+
+- The world reads packages from the package folders of Typst (D203): first the data folder, for example `%APPDATA%\typst\packages` on Windows, then the cache folder, for example `%LOCALAPPDATA%\typst\packages`. The toolchain manager does not download packages yet. Thus a package must be in one of these folders before Presswork can use it, for example after a compilation with the Typst command-line tool.
+- The compilation makes no page images. The preview draws only the pages near its visible part, on a separate thread, at 2 pixels for each point (D202).
+- The preview keeps each page image by a hash of the page and of the bleed setting. After a change, it draws again only the pages with a different hash. It keeps up to 32 images.
+- The QA report, the baseline grid, and the preflight checks run on a separate thread after each compilation. The results of an older compilation are not used.
+- The ignored test `time_a_large_book` times a large book. Set `PRESSWORK_BENCH_PROJECT` to its folder.
 
 ## IDE functions
 

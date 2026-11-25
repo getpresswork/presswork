@@ -117,8 +117,7 @@ In a suggestion, Ctrl+. shows "Accept the suggestion" and "Reject the suggestion
 
 Push F12 or Ctrl+click a name to go to the definition of the item (D173).
 
-- If the definition is in the main file, the editor selects the name in the definition. For a reference, the editor selects the element with the label.
-- If the definition is in another file, a note gives the name of the file, because the editor shows only the main file.
+- The editor opens the file of the definition and selects the name in the definition. For a reference, the editor selects the element with the label. Without a project, a definition in another file gives a note with the name of the file.
 - If the item is part of the Typst library, for example `text`, a note tells this.
 
 ### Find and replace
@@ -202,18 +201,18 @@ In milestone 2, the preview also does these things (D180):
 
 - The **Spreads** button (a book) shows facing pages side by side, as in a printed book. The first page is a right-hand page alone. Then each spread has the next page on the left and the page after it on the right. Fit width then fits two pages.
 - The **Thumbnails** button (a panel at the left of the toolbar) shows small images of all pages at the left of the preview. Click a thumbnail to scroll the preview to its page. The thumbnail of the page in the middle of the preview has the accent color.
-- The **Guides** button (a frame) shows the bleed around each page and a line at the trim box, where the printer cuts the page (D181). Thus you see the content that goes into the bleed. When you switch the guides on or off, the engine compiles the document again. If the document has no bleed, the guides show no bleed and no trim line. If the project has a baseline grid, the guides also show the grid lines (D195). The guides need the built-in Typst engine. The preview does not show the text area yet.
+- The **Guides** button (a frame) shows the bleed around each page and a line at the trim box, where the printer cuts the page (D181). Thus you see the content that goes into the bleed. When you switch the guides on or off, the preview draws the visible pages again with or without the bleed (D202). If the document has no bleed, the guides show no bleed and no trim line. If the project has a baseline grid, the guides also show the grid lines (D195). The guides need the built-in Typst engine. The preview does not show the text area yet.
 - The **Problems** button (a warning triangle) shows or hides the problem marks (D191). After each compilation with pages, the preview puts a box around each problem of the typesetting QA report in the warning color, and around each preflight problem in the error color. If the mouse pointer stays on a box for half a second, a tooltip tells the problem. The marks are on by default. They need the built-in Typst engine.
 - The Typeset workspace also shows the preview, at the right of the QA report (D192). It has the same pages, zoom, and buttons as in the Write workspace.
 - The preview keeps its place on the pages when its size, the zoom, or the spreads change, when the workspace changes, and when the preview moves into its own window or back (D193).
+- The preview draws only the pages near the visible part, on a separate thread (D202). A page that is not drawn yet shows as a white page of the correct size. After a change to the text, the preview draws again only the pages that changed. Thus a book with hundreds of pages opens and changes as quickly as the compilation permits.
 
 ## Source and pages
 
 The embedded engine connects the points on the pages to the source, and the source positions to the pages (D169).
 
-- Click a point on a page. If the point is on text of the main file, the editor moves the cursor to that character and gets the keyboard focus. A click on the text of a web link also goes to the text (D170). A click on a link to a label or to a position scrolls the preview to the target of the link.
-- If the text comes from another file, a note gives the name of the file, because the editor shows only the main file.
-- If you move the cursor with the keys or the mouse, the preview marks the cursor position in the pages for 1.5 seconds. If the position is not in the visible part of the preview, the preview scrolls until the position is at one third of its height. While you type, the preview does not move (D171).
+- Click a point on a page. The editor opens the file of that text, moves the cursor to that character, and gets the keyboard focus (D204). A click on the text of a web link also goes to the text (D170). A click on a link to a label or to a position scrolls the preview to the target of the link.
+- If you move the cursor in the main file with the keys or the mouse, the preview marks the cursor position in the pages for 1.5 seconds. If the position is not in the visible part of the preview, the preview scrolls until the position is at one third of its height. While you type, the preview does not move (D171).
 - The positions come from the last compilation that gave pages. If you changed the text after that compilation, a position can be a few characters away from the correct position.
 - With the managed toolchain, the jumps are not available. A click on the pages shows a note that tells why.
 
@@ -224,7 +223,19 @@ The outline panel shows the headings of the document at the left of the editor (
 - Each heading shows its number, its text, and its page. The indent shows the level of the heading.
 - The page is the printed page number. If the page has no numbering, it is the position of the page in the document.
 - The heading that contains the cursor has the accent color.
-- Click a heading to move the cursor to the start of the heading. The editor gets the keyboard focus, and the preview shows and marks the heading.
-- If the heading is in another file, the preview shows the heading, and a note gives the name of the file.
+- Click a heading to open its file and to move the cursor to the start of the heading. The editor gets the keyboard focus, and the preview shows and marks the heading.
 - The **Outline** button in the status bar opens or closes the panel. In a narrow window, close the panel to give more space to the editor.
 - The outline comes from the last compilation that gave pages. With the managed toolchain, the outline is not available, and a note tells why.
+
+## Files
+
+The files panel shows the files of the project above the outline (D204).
+
+- The panel shows the folders and the files of the project folder. It does not show hidden files, for example the `.presswork` folder.
+- Click a file to open it in the editor. The location in the status bar shows the name of the file. A text file opens; a file that is not text, for example an image, gives a note.
+- The changes in each open file stay when you open another file. A dot after the name marks a file with changes that are not saved.
+- The preview always compiles the main file with the changes of all open files, also when the changes are not saved.
+- Ctrl+S saves the file in the editor. Before Presswork closes, the dialog names all files with changes, and **Save** saves all of them.
+- The editor marks the errors and the warnings of the file that it shows. Tooltips, completion, Go to definition, the spelling marks, and the preview mark of the cursor operate only in the main file at this time.
+- A click on the pages, a heading, a definition, or a problem opens the file of that place.
+- The **Files** button in the status bar opens or closes the panel.

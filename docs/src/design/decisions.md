@@ -1578,3 +1578,36 @@ Do not change what an accepted decision says. You can correct its language. To c
 - **Decision:** The release packages contain only the desktop application and the server. To use `presswork-cli`, a person builds it from the source code with `cargo install --locked --path crates/presswork-cli`.
 - **Reason:** The command-line tool is for CI systems and scripts. Their users do not install the desktop packages, and a person with the desktop application has the same checks in the Publish and Typeset workspaces. Thus the tool in each package would make the packages larger and add changes to the installers for a small group of users.
 - **Other options:** The tool in each desktop package, with a PATH entry from the MSI file. A separate archive of the tool for each platform. The `build` and `check` commands in the desktop program (on Windows, a program with a window cannot write to the terminal that starts it).
+
+## D202. Page images on demand
+
+- **Status:** Accepted, 2026-11-24. **Origin:** Default.
+- **Decision:**
+  - The compilation with the built-in engine makes no page images. The preview knows the size of each page from the layout.
+  - The preview draws only the pages from one screen above to one screen below its visible part. It draws them on a separate thread at 2 pixels for each point. Before a page is drawn, it shows as a white page of the correct size.
+  - The key of a page image is a hash of the laid-out page and of the bleed setting. After a compilation, the preview uses a kept image if the key is the same. Thus only changed pages are drawn again. The preview keeps up to 32 images and removes the images far from the visible part.
+  - The guides change only the drawing of the pages, not the compilation.
+  - The QA report, the baseline grid, and the preflight checks run on a separate thread after each compilation. The results of an older compilation are not used.
+  - The managed toolchain still gives all pages as images.
+- **Reason:** A book of 787 pages took 20 s to draw all pages after each compilation and used 3 GB for the images. The QA report stopped the window for 3 to 4 seconds. With images on demand, the first visible pages take 14 ms, and a change of one word draws one page again.
+- **Other options:** Images at the scale of the zoom. Tiles of a page at high zoom levels. Smaller images for the thumbnails. The checks only on request.
+
+## D203. Packages from the Typst package folders
+
+- **Status:** Accepted, 2026-11-24. **Origin:** Default.
+- **Decision:** The world reads a package `@namespace/name:version` from `namespace/name/version` in the data folder of Typst, then in its cache folder: on Windows `%APPDATA%\typst\packages` and `%LOCALAPPDATA%\typst\packages`, on macOS `~/Library/Application Support/typst/packages` and `~/Library/Caches/typst/packages`, on Linux `~/.local/share/typst/packages` and `~/.cache/typst/packages`. A package that is in neither folder gives the error "package not found". Presswork does not download packages yet.
+- **Reason:** These are the folders of the Typst command-line tool, so local packages and downloaded packages work in Presswork without changes. Real books use packages, for example the house packages of a publisher.
+- **Other options:** Downloads from Typst Universe now. A package folder for each project. A package folder in the settings.
+
+## D204. Files of a project in the editor
+
+- **Status:** Accepted, 2026-11-24. **Origin:** Default.
+- **Decision:**
+  - A files panel above the outline shows the folders and files of the project, without hidden files. The **Files** button in the status bar opens or closes it.
+  - A click opens a file in the editor. Each open file keeps its own text, undo history, and suggestions. The status bar shows the open file. A file that is not UTF-8 text does not open, and a note tells this.
+  - Each compilation uses the text of all open files, also the changes that are not saved. Exports do the same, with the text of the files (D198).
+  - Ctrl+S saves the file in the editor. The dialog before Presswork closes names all files with changes, and **Save** saves all of them.
+  - The editor marks the diagnostics of the open file. A jump from the preview, the outline, Go to definition, the first error, the QA report, or the preflight problems opens the file of the target.
+  - Tooltips, completion, Go to definition, spelling marks, corrections, and the preview mark of the cursor operate only in the main file at this time.
+- **Reason:** Books keep their chapters in separate files. Before this decision, the editor showed only the main file.
+- **Other options:** Tabs for the open files. A separate window for each file. Save all files with Ctrl+S.

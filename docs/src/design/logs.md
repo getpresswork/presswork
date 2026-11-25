@@ -46,7 +46,7 @@ In milestone 2, each export writes its build report as a JSON file, `<profile na
 - `problems`: the preflight problems, with the page, the kind, and the source of each.
 - `files`: the path, the size in bytes, and the SHA-256 digest of each export file.
 
-The report has no packages and no inputs yet, because Presswork does not load packages and has no inputs at this time.
+The report does not list the packages yet (D203). It has no inputs, because Presswork has no inputs at this time.
 
 ## Support bundle
 

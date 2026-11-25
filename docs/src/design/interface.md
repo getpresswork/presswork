@@ -65,7 +65,7 @@ The window of the detached preview has its own top bar. It shows the title of th
 | Item | Keys | Result |
 | --- | --- | --- |
 | Open folder… | Ctrl+O | Opens a project folder. |
-| Save | Ctrl+S | Saves the main file. This item is not available when no project is open. |
+| Save | Ctrl+S | Saves the file in the editor. This item is not available when no project is open. |
 | Connect to a server… | | Opens the server dialog. Refer to [Server documents](#server-documents). |
 | Typst versions | | Opens or closes the Toolchains panel. |
 | Logs | | Opens or closes the log panel. |
@@ -75,7 +75,7 @@ On macOS, the keys use Cmd. To close the menu, push Escape or click outside of t
 
 ### Changes that are not saved
 
-If the main file has changes that are not saved, a dialog opens before Presswork closes (D120). Quit, Ctrl+Q, the close button of the project window, and the close command of the system (for example Alt+F4) open the dialog. The close button of the detached preview only attaches the preview to the project window again.
+If a file of the project has changes that are not saved, a dialog opens before Presswork closes (D120). The dialog names all files with changes, and **Save** saves all of them (D204). Quit, Ctrl+Q, the close button of the project window, and the close command of the system (for example Alt+F4) open the dialog. The close button of the detached preview only attaches the preview to the project window again.
 
 - **Save** saves the file and closes Presswork. If Presswork cannot save the file, it stays open and shows the problem.
 - **Do not save** closes Presswork. The changes are lost.
@@ -150,7 +150,7 @@ In milestone 1, the status bar shows these items:
 - The Typst version that the project uses. If no installed version agrees with the pin of the project, the item shows a warning. Click it to open the Toolchains panel.
 - The number of log errors and warnings, and the Logs button.
 
-In milestone 2, the status bar of the Write workspace also shows the **Outline** button. It opens or closes the outline panel at the left of the editor. Refer to [Editor and preview](editor.md#outline).
+In milestone 2, the status bar of the Write workspace also shows the **Outline** button. It opens or closes the outline panel at the left of the editor. Refer to [Editor and preview](editor.md#outline). With a project, the **Files** button opens or closes the files panel above the outline. Refer to [Editor and preview](editor.md#files).
 
 The **Suggest** button starts or stops suggestion mode. While suggestion mode is on, the button stays pressed. Refer to [Editorial tools](editorial.md#suggestion-mode).
 
@@ -169,8 +169,8 @@ A project is a folder with a `presswork.toml` manifest. The manifest has a `[pro
 Presswork ignores the keys that it does not know. Thus an older Presswork release can open a project from a newer release.
 
 - To open a project, click **Open folder** in the top bar, select **Open folder…** in the Presswork menu, or push Ctrl+O. Then select the project folder.
-- The Write workspace shows the main file in the editor and its pages in the preview.
-- To save the main file, push Ctrl+S.
+- The Write workspace shows the main file in the editor and its pages in the preview. To edit another file, click it in the files panel.
+- To save the file in the editor, push Ctrl+S.
 - If the folder is not a project, a notice tells the problem.
 
 The manifest can also have `[[export]]` tables. Each table is an export profile:
