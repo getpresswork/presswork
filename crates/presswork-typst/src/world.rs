@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use typst::Library;
 use typst::LibraryExt;
-use typst::diag::{FileError, FileResult};
+use typst::diag::{FileError, FileResult, PackageError};
 use typst::foundations::{Bytes, Datetime, Duration};
+use typst::syntax::package::PackageSpec;
 use typst::syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
@@ -20,6 +21,7 @@ pub struct World {
     main: FileId,
     overlays: HashMap<FileId, Source>,
     today: Option<Datetime>,
+    packages: Vec<PathBuf>,
 }
 
 impl World {
@@ -32,7 +34,13 @@ impl World {
             main: main_id(),
             overlays: HashMap::new(),
             today,
+            packages: package_folders(),
         }
+    }
+
+    #[must_use]
+    pub fn with_packages(self, packages: Vec<PathBuf>) -> Self {
+        Self { packages, ..self }
     }
 
     #[must_use]
@@ -56,17 +64,26 @@ impl World {
 
     fn read(&self, id: FileId) -> FileResult<Vec<u8>> {
         let rooted = id.get();
-        if let VirtualRoot::Package(_) = rooted.root() {
-            return Err(FileError::Other(Some(
-                "Packages are not available yet.".into(),
-            )));
-        }
-        let root = self.root.as_ref().ok_or(FileError::AccessDenied)?;
+        let root = match rooted.root() {
+            VirtualRoot::Package(spec) => self.package_root(spec)?,
+            VirtualRoot::Project => self.root.clone().ok_or(FileError::AccessDenied)?,
+        };
         let path = rooted
             .vpath()
-            .realize(root)
+            .realize(&root)
             .map_err(|_| FileError::AccessDenied)?;
         std::fs::read(&path).map_err(|error| FileError::from_io(error, &path))
+    }
+
+    fn package_root(&self, spec: &PackageSpec) -> FileResult<PathBuf> {
+        let relative = Path::new(spec.namespace.as_str())
+            .join(spec.name.as_str())
+            .join(spec.version.to_string());
+        self.packages
+            .iter()
+            .map(|folder| folder.join(&relative))
+            .find(|folder| folder.is_dir())
+            .ok_or_else(|| FileError::Package(PackageError::NotFound(spec.clone())))
     }
 
     #[must_use]
@@ -86,6 +103,15 @@ impl World {
             }
         }
     }
+}
+
+fn package_folders() -> Vec<PathBuf> {
+    directories::BaseDirs::new().map_or_else(Vec::new, |folders| {
+        vec![
+            folders.data_dir().join("typst").join("packages"),
+            folders.cache_dir().join("typst").join("packages"),
+        ]
+    })
 }
 
 pub(crate) fn file_id(path: &Path) -> Option<FileId> {
@@ -228,6 +254,41 @@ mod tests {
         let folder = folder(&[("main.typ", "#include \"missing.typ\"")]);
 
         assert_eq!(errors(&project(folder.path())).len(), 1);
+    }
+
+    #[test]
+    fn a_package_comes_from_the_first_package_folder_that_has_it() {
+        let packages = folder(&[
+            (
+                "local/greeting/0.1.0/typst.toml",
+                "[package]\nname = \"greeting\"\nversion = \"0.1.0\"\nentrypoint = \"lib.typ\"\n",
+            ),
+            ("local/greeting/0.1.0/lib.typ", "#let greet = [Hello]"),
+        ]);
+        let empty = tempfile::tempdir().unwrap();
+        let folder = folder(&[(
+            "main.typ",
+            "#import \"@local/greeting:0.1.0\": greet\n#greet",
+        )]);
+
+        let world = project(folder.path()).with_packages(vec![
+            empty.path().to_path_buf(),
+            packages.path().to_path_buf(),
+        ]);
+
+        assert_eq!(errors(&world), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_package_that_is_not_installed_gives_an_error() {
+        let packages = tempfile::tempdir().unwrap();
+        let folder = folder(&[("main.typ", "#import \"@local/missing:0.1.0\": *")]);
+
+        let world = project(folder.path()).with_packages(vec![packages.path().to_path_buf()]);
+
+        let errors = errors(&world);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("missing"), "{errors:?}");
     }
 
     #[test]
