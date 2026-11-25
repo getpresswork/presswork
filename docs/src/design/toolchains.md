@@ -85,7 +85,14 @@ To change the commit or to add a language, do these steps:
 
 ## Network access
 
-Presswork connects to GitHub only when you open the Toolchains panel, click "Try again", install a version, or download a dictionary. It reads the release list from `api.github.com` and downloads the release files from `github.com`. The requests contain no personal data. They identify the application as "Presswork" with its version.
+Presswork connects to these servers only for the actions in the table:
+
+| Server | Actions |
+| --- | --- |
+| `api.github.com` and `github.com` | You open the Toolchains panel, click **Try again** in it, install a version, or download a dictionary. Presswork reads the release list from `api.github.com` and downloads the release files from `github.com`. |
+| `packages.typst.org` | A document imports a `@preview` package that is not on this computer (D206). You open the Packages tab for the first time, or click **Try again** in it. You select a package that is not on this computer, and Presswork reads its README from the package archive. |
+
+The requests contain no personal data. They identify the application as "Presswork" with its version.
 
 ## Milestone 1
 
@@ -102,6 +109,10 @@ In milestone 1, the toolchain manager does these things:
 - Before you go offline, the manager can download all packages of a project. It finds the imports with the Typst parser.
 - A team can publish private packages to its Presswork server. The manager installs them into the local package folder under the namespace of the organization, for example `@acme/letterhead:1.0.0`.
 - The package panel shows the packages in the cache. It can remove old versions.
+
+In milestone 2, the manager downloads each `@preview` package that a document imports and that is not on this computer (D206). The Packages tab finds packages in the package index (D208).
+
+To make sure that Presswork agrees with the real package server, run the ignored test `the_real_package_server_gives_the_index_and_the_packages` in `presswork-toolchain`. It downloads the package index and the package `@preview/example:0.1.0` into a temporary folder. It makes sure that the index has each field that Presswork reads, with the correct type. It also makes sure that the README of the package is in its archive, and that a document that imports the package compiles.
 
 ## Fonts
 
