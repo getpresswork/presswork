@@ -2,13 +2,15 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use typst::foundations::Repr;
-use typst::syntax::{FileId, Side, VirtualRoot};
+use typst::foundations::{Repr, Value};
+use typst::syntax::ast::{self, AstNode as _};
+use typst::syntax::{FileId, LinkedNode, Side, Source, SyntaxKind, VirtualRoot};
 use typst::{World as _, WorldExt as _};
 
 use crate::ide::{Analysis, project_path};
 use crate::outline::LabelTarget;
 use crate::package::PackageName;
+use crate::world::World;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tooltip {
@@ -110,7 +112,11 @@ impl Analysis {
         let found = typst_ide::definition(&world, self.document(), &source, offset, Side::After)
             .or_else(|| {
                 typst_ide::definition(&world, self.document(), &source, offset, Side::Before)
-            })?;
+            });
+        let Some(found) = found else {
+            let value = field_value(&world, &source, offset)?;
+            return crate::docs::library_path(&value).map(Definition::Library);
+        };
         match found {
             typst_ide::Definition::Span(span) => {
                 let id = span.id()?;
@@ -128,11 +134,29 @@ impl Analysis {
                 Some(package) => Some(Definition::Package(package)),
                 None => Some(Definition::File(project_path(id)?, None)),
             },
-            typst_ide::Definition::Std(value) => {
-                Some(Definition::Library(value.repr().to_string()))
-            }
+            typst_ide::Definition::Std(value) => Some(Definition::Library(
+                crate::docs::library_path(&value).unwrap_or_else(|| value.repr().to_string()),
+            )),
         }
     }
+}
+
+fn field_value(world: &World, source: &Source, offset: usize) -> Option<Value> {
+    let root = LinkedNode::new(source.root());
+    let is_name = |leaf: &LinkedNode<'_>| leaf.kind() == SyntaxKind::Ident;
+    let leaf = root
+        .leaf_at(offset, Side::After)
+        .filter(is_name)
+        .or_else(|| root.leaf_at(offset, Side::Before).filter(is_name))?;
+    let parent = leaf.parent()?;
+    let access = parent.cast::<ast::FieldAccess<'_>>()?;
+    if access.field().span() != leaf.span() {
+        return None;
+    }
+    typst_ide::analyze_expr(world, parent)
+        .into_iter()
+        .next()
+        .map(|(value, _)| value)
 }
 
 fn package_of(id: FileId) -> Option<PackageName> {
@@ -361,6 +385,15 @@ mod tests {
             matches!(&definition, Some(Definition::Main(range)) if text[range.clone()].starts_with("= Start")),
             "{definition:?}"
         );
+    }
+
+    #[test]
+    fn a_function_of_a_library_module_gives_its_page_path() {
+        let text = "#calc.pow(2, 3)";
+
+        let definition = analysis(text).definition(None, text, inside(text, "pow"));
+
+        assert_eq!(definition, Some(Definition::Library("calc.pow".to_owned())));
     }
 
     #[test]
