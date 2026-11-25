@@ -634,7 +634,7 @@ fn install(
     })
 }
 
-fn user_agent() -> String {
+pub(crate) fn user_agent() -> String {
     format!(
         "Presswork/{} (https://github.com/getpresswork/presswork)",
         env!("CARGO_PKG_VERSION")

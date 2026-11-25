@@ -7,7 +7,7 @@ use presswork_language::{Dictionaries, Dictionary, HouseStyle, RuleProblem, Styl
 use presswork_project::{
     Colors, ExportProfile, HOUSE_STYLE, Manifest, Project, ProjectError, WORD_LIST,
 };
-use presswork_toolchain::{Engine, Version, choose, parse_pin};
+use presswork_toolchain::{Engine, Packages, Version, choose, parse_pin};
 use presswork_typst::{
     Analysis, Diagnostic, Fonts, Misspelling, Problem, ProblemKind, ProfileError, Severity,
     SourceRange, StyleProblem, World, analyze, today,
@@ -19,6 +19,11 @@ use crate::location::line_column;
 
 pub(crate) const SUCCESS: u8 = 0;
 pub(crate) const FAILURE: u8 = 1;
+const USER_AGENT: &str = concat!(
+    "Presswork CLI/",
+    env!("CARGO_PKG_VERSION"),
+    " (https://github.com/getpresswork/presswork)"
+);
 
 pub(crate) fn run(cli: &Cli, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
     let mut console = Console {
@@ -58,7 +63,8 @@ fn work(target: &Target, build: bool, console: &mut Console<'_>) -> Result<(), F
         today(),
         project.root().to_path_buf(),
         &manifest.main,
-    );
+    )
+    .with_downloader(Packages::downloader(USER_AGENT));
     let output = analyze(&Mutex::new(world), &text);
     let places = Places {
         folder: &target.folder,

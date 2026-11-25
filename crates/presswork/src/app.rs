@@ -22,7 +22,7 @@ use presswork_log::{Level, LogStore};
 use presswork_preview::{Preview, ProblemMark};
 use presswork_project::{ExportFormat, ExportProfile, Project, TypesetSettings};
 use presswork_text::{ChangeSet, Position, Unit};
-use presswork_toolchain::{Engine, Version, choose, parse_pin};
+use presswork_toolchain::{Engine, Packages, Version, choose, parse_pin};
 use presswork_typst::{
     Analysis, Diagnostic, Jump, LabelKind, LabelTarget, Output, PagePoint, Problem, Program,
     Severity, SourceRange,
@@ -239,6 +239,8 @@ impl App {
         let mut app = Self::with_toolchains(store, toolchain_directory());
         app.proofreader
             .set_personal_list(proofreading::personal_word_list());
+        app.compiler
+            .set_downloader(Packages::downloader(&toolchain_panel::user_agent()));
         app
     }
 

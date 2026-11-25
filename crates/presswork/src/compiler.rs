@@ -6,7 +6,7 @@ use futures::channel::oneshot;
 use presswork_project::ExportProfile;
 pub(crate) use presswork_typst::Export;
 use presswork_typst::{
-    ExportError, Fonts, Output, ProfileError, Program, Scheduler, Stop, World, today,
+    Downloader, ExportError, Fonts, Output, ProfileError, Program, Scheduler, Stop, World, today,
 };
 
 pub(crate) const SCALE: f32 = 2.0;
@@ -61,6 +61,7 @@ pub(crate) enum Backend {
 
 pub(crate) struct Compiler {
     engine: Arc<Mutex<World>>,
+    downloader: Option<Arc<dyn Downloader>>,
     root: Option<PathBuf>,
     main: PathBuf,
     backend: Backend,
@@ -73,6 +74,7 @@ impl Compiler {
     pub(crate) fn new() -> Self {
         Self {
             engine: Arc::new(Mutex::new(World::new(Arc::clone(&FONTS), today()))),
+            downloader: None,
             root: None,
             main: PathBuf::from("main.typ"),
             backend: Backend::Embedded,
@@ -83,7 +85,8 @@ impl Compiler {
     }
 
     pub(crate) fn open(&mut self, root: &Path, main: &Path, backend: Backend) {
-        let world = World::open(Arc::clone(&FONTS), today(), root.to_path_buf(), main);
+        let world = World::open(Arc::clone(&FONTS), today(), root.to_path_buf(), main)
+            .with_downloader(self.downloader.clone());
         self.engine = Arc::new(Mutex::new(world));
         self.root = Some(root.to_path_buf());
         self.main = main.to_path_buf();
@@ -92,7 +95,9 @@ impl Compiler {
     }
 
     pub(crate) fn scratch(&mut self) {
-        self.engine = Arc::new(Mutex::new(World::new(Arc::clone(&FONTS), today())));
+        let world =
+            World::new(Arc::clone(&FONTS), today()).with_downloader(self.downloader.clone());
+        self.engine = Arc::new(Mutex::new(world));
         self.root = None;
         self.backend = Backend::Embedded;
         self.restart();
@@ -100,6 +105,14 @@ impl Compiler {
 
     pub(crate) fn backend(&self) -> &Backend {
         &self.backend
+    }
+
+    pub(crate) fn set_downloader(&mut self, downloader: Option<Arc<dyn Downloader>>) {
+        self.engine
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .set_downloader(downloader.clone());
+        self.downloader = downloader;
     }
 
     pub(crate) fn set_file(&mut self, path: &Path, text: &str) {
@@ -260,6 +273,7 @@ impl From<ProfileError> for ExportFailure {
 #[cfg(test)]
 mod tests {
     use presswork_project::ExportFormat;
+    use presswork_typst::{DownloadError, PackageName};
 
     use super::*;
 
@@ -308,6 +322,37 @@ mod tests {
             .iter()
             .filter(|diagnostic| diagnostic.severity == presswork_typst::Severity::Error)
             .count()
+    }
+
+    #[derive(Debug)]
+    struct Greeting(tempfile::TempDir);
+
+    impl Downloader for Greeting {
+        fn download(&self, package: &PackageName) -> Result<PathBuf, DownloadError> {
+            let folder = self.0.path().join(&package.name);
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(
+                folder.join("typst.toml"),
+                "[package]\nname = \"greeting\"\nversion = \"0.1.0\"\nentrypoint = \"lib.typ\"\n",
+            )
+            .unwrap();
+            std::fs::write(folder.join("lib.typ"), "#let greet = [Hello]").unwrap();
+            Ok(folder)
+        }
+    }
+
+    #[test]
+    fn each_world_of_the_compiler_uses_the_downloader() {
+        let mut compiler = Compiler::new();
+        compiler.set_downloader(Some(Arc::new(Greeting(tempfile::tempdir().unwrap()))));
+        let import = "#import \"@preview/greeting:0.1.0\": greet\n#greet";
+
+        assert_eq!(error_count(&compiler.run_now(import).unwrap()), 0);
+        let folder = tempfile::tempdir().unwrap();
+        compiler.open(folder.path(), Path::new("main.typ"), Backend::Embedded);
+        assert_eq!(error_count(&compiler.run_now(import).unwrap()), 0);
+        compiler.scratch();
+        assert_eq!(error_count(&compiler.run_now(import).unwrap()), 0);
     }
 
     #[test]
