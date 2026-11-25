@@ -1352,7 +1352,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D183. Details of the command-line tool
 
-- **Status:** Accepted, 2026-11-20. The preflight rule is replaced by D184. **Origin:** Default.
+- **Status:** Accepted, 2026-11-20. The preflight rule is replaced by D184. The rule for the release packages is replaced by D201. **Origin:** Default.
 - **Decision:**
   - In milestone 2, `presswork-cli` has two commands: `build` and `check`. Each command takes the project folder (the current folder by default) and `--profile NAME`, which you can give more than one time.
   - The program uses the built-in Typst engine and the fonts of Presswork, as the desktop application does. If the Typst pin of the project does not accept the built-in version, the program stops with a message.
@@ -1571,3 +1571,10 @@ Do not change what an accepted decision says. You can correct its language. To c
   - Presswork 0.1.0 does not know the marks. It shows the inserted text and the deleted text of a suggestion as text without suggestions.
 - **Reason:** Loro moves the marks with the text in all clients, thus the server needs no change. One key for all suggestions gives a maximum of one suggestion for each character, as in the editor. An undo that changes only the suggestions of its step does not remove the work of other persons.
 - **Other options:** A Loro list of suggestions with cursors. A mark key for each kind or for each author. Suggestions only in the client that made them. Clients that do not know the marks cannot open a server document.
+
+## D201. The command-line tool is not in the release packages
+
+- **Status:** Accepted, 2026-11-24. **Origin:** Project owner.
+- **Decision:** The release packages contain only the desktop application and the server. To use `presswork-cli`, a person builds it from the source code with `cargo install --locked --path crates/presswork-cli`.
+- **Reason:** The command-line tool is for CI systems and scripts. Their users do not install the desktop packages, and a person with the desktop application has the same checks in the Publish and Typeset workspaces. Thus the tool in each package would make the packages larger and add changes to the installers for a small group of users.
+- **Other options:** The tool in each desktop package, with a PATH entry from the MSI file. A separate archive of the tool for each platform. The `build` and `check` commands in the desktop program (on Windows, a program with a window cannot write to the terminal that starts it).

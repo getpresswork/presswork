@@ -38,6 +38,8 @@ Use the `x86_64` packages for Intel and AMD processors, and the `aarch64` packag
 
 For the server, use the container image `ghcr.io/getpresswork/presswork-server` or the server archive from the releases. Refer to [Deployment](https://getpresswork.github.io/presswork/design/server.html#deployment).
 
+The packages do not contain the command-line tool `presswork-cli`. To use it, build it from the source code. Refer to [Build from source](#build-from-source).
+
 ## Build from source
 
 1. Install Rust with [rustup](https://rustup.rs).
@@ -51,7 +53,7 @@ For the server, use the container image `ghcr.io/getpresswork/presswork-server` 
 4. To build and check projects without a window, install the command-line tool:
 
    ```sh
-   cargo install --path crates/presswork-cli
+   cargo install --locked --path crates/presswork-cli
    ```
 
    Then run `presswork-cli build` or `presswork-cli check` in a project folder.

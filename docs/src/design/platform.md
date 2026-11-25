@@ -30,7 +30,7 @@ In milestone 2, the program has the `build` and `check` commands (D183):
 - If the Typst pin of the project does not accept the built-in Typst version, the command stops.
 - `presswork-cli --help` shows all options.
 
-The release packages do not contain the command-line tool yet. To install it from the source code, run `cargo install --path crates/presswork-cli` in the repository.
+The release packages do not contain the command-line tool (D201). To use it, build it from the source code: run `cargo install --locked --path crates/presswork-cli` in the repository.
 
 ## API
 
