@@ -283,6 +283,36 @@ fn render_screens() {
     render_suggestions(&mut app);
     render_server_suggestions(&mut app);
     render_packages(&mut app);
+    render_files(&mut app);
+}
+
+fn render_files(app: &mut App) {
+    let book = folder(&[
+        ("presswork.toml", "[project]\nname = \"Field Notes\"\n"),
+        ("main.typ", "= Field Notes\n#include \"chapters/one.typ\"\n"),
+    ]);
+    for part in ["chapters", "images"] {
+        std::fs::create_dir(book.path().join(part)).unwrap();
+    }
+    std::fs::write(
+        book.path().join("chapters").join("one.typ"),
+        "= One\nThe press stopped.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        book.path().join("images").join("cover.png"),
+        [0x89, b'P', b'N', b'G', 0xff, 0xfe],
+    )
+    .unwrap();
+    open_folder(app, book.path());
+    app.compile_now();
+    send(
+        app,
+        Message::Files(crate::file_panel::Message::Open(PathBuf::from(
+            "images/cover.png",
+        ))),
+    );
+    render(app, "files-image");
 }
 
 const PACKAGE_README: &str = "# Sketch\n\nSketch draws figures with Typst.\n\n\
