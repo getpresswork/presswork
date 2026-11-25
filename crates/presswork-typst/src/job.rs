@@ -55,13 +55,12 @@ mod tests {
         Mutex::new(World::new(Arc::new(Fonts::embedded()), Some(today)))
     }
 
-    fn render_all(document: &typst_layout::PagedDocument) -> (Duration, usize) {
+    fn render(document: &typst_layout::PagedDocument, pages: &[usize]) -> Duration {
         let start = Instant::now();
-        let bytes = (0..document.pages().len())
-            .filter_map(|index| render_page(document, index, 2.0, false))
-            .map(|image| image.rgba.len())
-            .sum();
-        (start.elapsed(), bytes)
+        for &index in pages {
+            let _ = render_page(document, index, 2.0, false);
+        }
+        start.elapsed()
     }
 
     #[test]
@@ -96,7 +95,9 @@ mod tests {
         assert_eq!(errors, Vec::<&str>::new());
         let document = cold.document.unwrap();
         let pages = document.pages().len();
-        let (cold_render, bytes) = render_all(&document);
+        let start = Instant::now();
+        let sizes = crate::render::page_sizes(&document, false).len();
+        let first_view = start.elapsed() + render(&document, &[0, 1, 2]);
 
         let start = Instant::now();
         let analysis = Analysis::new(world.clone(), Some(document.clone()));
@@ -107,6 +108,20 @@ mod tests {
             .quality(&presswork_project::TypesetSettings::default())
             .len();
         let quality_time = start.elapsed();
+        let start = Instant::now();
+        let _ = analysis.baseline_grid(&presswork_project::TypesetSettings::default());
+        let grid_time = start.elapsed();
+        let start = Instant::now();
+        let output = Output {
+            analysis: Some(analysis.clone()),
+            ..Output::default()
+        };
+        let profiles = [presswork_project::ExportProfile::named(
+            "PDF",
+            presswork_project::ExportFormat::Pdf,
+        )];
+        let preflight_problems = output.preflight_profiles(&profiles).len();
+        let preflight_time = start.elapsed();
 
         let middle = text[..text.len() / 2].rfind(' ').unwrap_or(0);
         let mut changed = text.clone();
@@ -115,19 +130,28 @@ mod tests {
         let start = Instant::now();
         let hot = compile(&world);
         let hot_time = start.elapsed();
-        let (hot_render, _) = render_all(&hot.document.unwrap());
+        let hot_document = hot.document.unwrap();
+        let start = Instant::now();
+        let key = crate::render::page_key;
+        let changed: Vec<usize> = (0..pages)
+            .filter(|&index| key(&document, index, false) != key(&hot_document, index, false))
+            .collect();
+        let compare_time = start.elapsed();
+        let redraw = render(&hot_document, &changed);
 
-        eprintln!("pages: {pages}, headings: {headings}, QA problems: {problems}");
+        eprintln!("pages: {pages} ({sizes} sizes), headings: {headings}, QA problems: {problems}");
         eprintln!("fonts: {fonts_time:?}");
         eprintln!("cold compile: {cold_time:?}");
-        eprintln!(
-            "cold render of all pages: {cold_render:?} ({:?} per page, {} MB of images)",
-            cold_render / u32::try_from(pages.max(1)).unwrap(),
-            bytes / 1_000_000
-        );
+        eprintln!("page sizes and the first three pages: {first_view:?}");
         eprintln!("outline: {outline_time:?}, QA report: {quality_time:?}");
+        eprintln!(
+            "baseline grid: {grid_time:?}, preflight of the PDF profile: {preflight_time:?} ({preflight_problems} problems)"
+        );
         eprintln!("hot compile after one word: {hot_time:?}");
-        eprintln!("hot render of all pages: {hot_render:?}");
+        eprintln!(
+            "pages changed by the word: {} (keys of all pages compared in {compare_time:?}), drawn again in {redraw:?}",
+            changed.len()
+        );
     }
 
     #[test]
