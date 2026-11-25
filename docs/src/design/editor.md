@@ -236,6 +236,9 @@ The files panel shows the files of the project above the outline (D204).
 - The changes in each open file stay when you open another file. A dot after the name marks a file with changes that are not saved.
 - The preview always compiles the main file with the changes of all open files, also when the changes are not saved.
 - Ctrl+S saves the file in the editor. Before Presswork closes, the dialog names all files with changes, and **Save** saves all of them.
-- The editor marks the errors and the warnings of the file that it shows. Tooltips, completion, Go to definition, the spelling marks, and the preview mark of the cursor operate only in the main file at this time.
+- The editor marks the errors and the warnings of the file that it shows. Tooltips, completion, Go to definition, the spelling and house style marks, the corrections, and the preview mark of the cursor operate in each file.
 - A click on the pages, a heading, a definition, or a problem opens the file of that place.
 - The **Files** button in the status bar opens or closes the panel.
+- To make a file, click **New file** (the plus icon) in the header of the panel. Type a path in the project folder, for example `chapters/two.typ`, and push Enter. Presswork makes an empty file and opens it. The field starts with the folder of the open file. Escape stops (D205).
+- The row of the open file has a **Rename** button and a **Delete** button. Rename moves the file to the path that you type, with its changes that are not saved and its suggestions. Delete asks first, then removes the file from the disk and opens the main file. You cannot undo a delete.
+- The main file and `presswork.toml` have no Rename or Delete button. Presswork does not change the `#include` and `#import` paths after a rename or a delete.

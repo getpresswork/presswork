@@ -1608,6 +1608,21 @@ Do not change what an accepted decision says. You can correct its language. To c
   - Each compilation uses the text of all open files, also the changes that are not saved. Exports do the same, with the text of the files (D198).
   - Ctrl+S saves the file in the editor. The dialog before Presswork closes names all files with changes, and **Save** saves all of them.
   - The editor marks the diagnostics of the open file. A jump from the preview, the outline, Go to definition, the first error, the QA report, or the preflight problems opens the file of the target.
-  - Tooltips, completion, Go to definition, spelling marks, corrections, and the preview mark of the cursor operate only in the main file at this time.
+  - Tooltips, completion, Go to definition, spelling marks, house style marks, corrections, and the preview mark of the cursor operate in each open file. A definition in the main file opens the main file.
 - **Reason:** Books keep their chapters in separate files. Before this decision, the editor showed only the main file.
 - **Other options:** Tabs for the open files. A separate window for each file. Save all files with Ctrl+S.
+
+## D205. New projects and file actions
+
+- **Status:** Accepted, 2026-11-24. **Origin:** Default.
+- **Decision:**
+  - **New project…** in the Presswork menu asks for a folder. If the folder has no `presswork.toml`, Presswork writes one with the name of the folder. If the folder has no `main.typ`, Presswork writes one with the name of the folder as its heading. Other files in the folder stay. A folder that is a project opens as it is.
+  - Before Presswork opens a different project, a new project, or a server document, it asks about the changes that are not saved, as it does before it closes.
+  - The **New file** button in the header of the files panel opens a name field. The field starts with the folder of the open file. Enter makes an empty file and opens it in the editor. Escape stops.
+  - The row of the open file has a **Rename** button and a **Delete** button. Rename moves the file to the new path, also to a different folder. The changes that are not saved and the suggestions of the file stay with it. A change of only the letter case is permitted.
+  - Delete asks first. Then Presswork removes the file and its suggestions from the disk, and the editor shows the main file. The changes that are not saved are lost.
+  - The main file and `presswork.toml` have no Rename or Delete button.
+  - A file name is a path in the project folder. A part of the path cannot be empty, start with a period, or end with a period or a space, and it cannot contain `< > : " | ? *` or control characters. A new name cannot replace a file.
+  - After a rename or a delete, the compilation does not use the old text of the file. Presswork does not change the `#include` and `#import` paths to the file, thus the compilation shows an error for an old path.
+- **Reason:** A person who writes a book makes, renames, and deletes chapter files often. Before this decision, the person had to use a different program for each of these tasks. The rules for names keep a project usable on Windows, macOS, and Linux.
+- **Other options:** Delete to the trash of the operating system (this needs a new crate). Rename and Delete buttons on each row or in a context menu. A change of the references after a rename. The `.typ` extension for a name without an extension.

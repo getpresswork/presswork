@@ -64,6 +64,7 @@ The window of the detached preview has its own top bar. It shows the title of th
 
 | Item | Keys | Result |
 | --- | --- | --- |
+| New project… | | Makes a project in a folder that you select, and opens it (D205). |
 | Open folder… | Ctrl+O | Opens a project folder. |
 | Save | Ctrl+S | Saves the file in the editor. This item is not available when no project is open. |
 | Connect to a server… | | Opens the server dialog. Refer to [Server documents](#server-documents). |
@@ -82,6 +83,8 @@ If a file of the project has changes that are not saved, a dialog opens before P
 - **Cancel** closes the dialog. Presswork stays open.
 
 Escape gives the same result as **Cancel**, and Enter gives the same result as **Save**. On macOS, Cmd+Q in the system menu closes Presswork at once in this release.
+
+The same dialog opens before Presswork opens a different project, a new project, or a server document (D205). **Save** and **Do not save** then open it, and **Cancel** keeps the open project.
 
 ## Commands
 
@@ -169,7 +172,8 @@ A project is a folder with a `presswork.toml` manifest. The manifest has a `[pro
 Presswork ignores the keys that it does not know. Thus an older Presswork release can open a project from a newer release.
 
 - To open a project, click **Open folder** in the top bar, select **Open folder…** in the Presswork menu, or push Ctrl+O. Then select the project folder.
-- The Write workspace shows the main file in the editor and its pages in the preview. To edit another file, click it in the files panel.
+- To make a project, select **New project…** in the Presswork menu. Then select or make a folder. Presswork writes `presswork.toml` and `main.typ` if the folder does not have them, and opens the project (D205).
+- The Write workspace shows the main file in the editor and its pages in the preview. To edit another file, click it in the files panel. The files panel also makes, renames, and deletes files. Refer to [Editor and preview](editor.md#files).
 - To save the file in the editor, push Ctrl+S.
 - If the folder is not a project, a notice tells the problem.
 
