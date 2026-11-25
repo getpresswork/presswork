@@ -68,6 +68,7 @@ Until the project model is ready, the Write workspace shows a scratch document. 
 | Ctrl+. | Show the corrections for the spelling or house style problem at the cursor. In a suggestion, accept or reject the suggestion. |
 | Ctrl+Shift+E | Start or stop suggestion mode. |
 | F12 | Go to the definition of the item at the cursor. |
+| F1 | Open the Typst documentation next to the editor. |
 | Ctrl+F | Open the find bar. |
 | Ctrl+H | Open the find bar with the replace row. |
 | F3 and Shift+F3 | Go to the next or the previous result of the find bar. |
@@ -118,7 +119,8 @@ In a suggestion, Ctrl+. shows "Accept the suggestion" and "Reject the suggestion
 Push F12 or Ctrl+click a name to go to the definition of the item (D173).
 
 - The editor opens the file of the definition and selects the name in the definition. For a reference, the editor selects the element with the label. Without a project, a definition in another file gives a note with the name of the file.
-- If the item is part of the Typst library, for example `text`, a note tells this.
+- If the item is part of the Typst library, for example `text` or `calc.pow`, the Docs tab opens at its page (D208). If the documentation has no page for it, a note tells that it is part of the Typst library.
+- If the item comes from a package of Typst Universe, for example the path in `#import "@preview/cetz:0.3.4"`, the Packages tab opens at the package. A package on this computer, for example `@local/name:1.0.0`, gives a note.
 
 ### Find and replace
 
@@ -242,3 +244,28 @@ The files panel shows the files of the project above the outline (D204).
 - To make a file, click **New file** (the plus icon) in the header of the panel. Type a path in the project folder, for example `chapters/two.typ`, and push Enter. Presswork makes an empty file and opens it. The field starts with the folder of the open file. Escape stops (D205).
 - The row of the open file has a **Rename** button and a **Delete** button. Rename moves the file to the path that you type, with its changes that are not saved and its suggestions. Delete asks first, then removes the file from the disk and opens the main file. You cannot undo a delete.
 - The main file and `presswork.toml` have no Rename or Delete button. Presswork does not change the `#include` and `#import` paths after a rename or a delete.
+
+## Docs and packages
+
+Three tabs above the right pane of the Write workspace select what the pane shows: **Preview**, **Docs**, and **Packages** (D208). The preview shows first. When the preview is in its own window, the right pane shows only for Docs and Packages.
+
+### Typst documentation
+
+The Docs tab shows the reference of the Typst version in Presswork (D207). Presswork makes the reference from the embedded engine, thus it agrees with the engine and does not need the network.
+
+- To open the documentation, click **Docs**, push F1, or select **Typst documentation** in the Presswork menu.
+- The contents show the functions, the types, and the modules of each category, for example Text and Layout.
+- Type in the search field to find a page by its name, its title, its keywords, or the words of its summary.
+- A page shows the description, the examples as Typst code, the parameters with their types, their default values, and their properties (Required, Positional, Variadic, Settable), the type of the result, and the definitions of the item, for example the methods of a type.
+- A link to another page of the reference opens that page. The arrows go back and forward. A link to the guides or the tutorial opens typst.app in your web browser.
+- F12 on a function or a type of the Typst library opens its page.
+
+### Packages
+
+The Packages tab finds packages of Typst Universe (D208).
+
+- When the tab opens for the first time, Presswork gets the list of packages from Typst Universe. If this fails, a note tells the problem, and **Try again** gets the list again.
+- Type in the search field to find packages by their name, their keywords and categories, and their description. Packages with the words in their name come first.
+- Select a package to show its description, its authors, its license, the Typst version that it needs, its versions, and its README.
+- **Insert import** puts `#import "@preview/name:version"` with the newest version on a new line above the line of the cursor. **Copy import** copies the same line. **Repository** opens the repository of the package in your web browser.
+- When a document imports a package that is not on this computer, Presswork downloads it from Typst Universe during the compilation (D206).

@@ -1594,7 +1594,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D203. Packages from the Typst package folders
 
-- **Status:** Accepted, 2026-11-24. **Origin:** Default.
+- **Status:** Accepted, 2026-11-24. Extended by D206. **Origin:** Default.
 - **Decision:** The world reads a package `@namespace/name:version` from `namespace/name/version` in the data folder of Typst, then in its cache folder: on Windows `%APPDATA%\typst\packages` and `%LOCALAPPDATA%\typst\packages`, on macOS `~/Library/Application Support/typst/packages` and `~/Library/Caches/typst/packages`, on Linux `~/.local/share/typst/packages` and `~/.cache/typst/packages`. A package that is in neither folder gives the error "package not found". Presswork does not download packages yet.
 - **Reason:** These are the folders of the Typst command-line tool, so local packages and downloaded packages work in Presswork without changes. Real books use packages, for example the house packages of a publisher.
 - **Other options:** Downloads from Typst Universe now. A package folder for each project. A package folder in the settings.
@@ -1626,3 +1626,40 @@ Do not change what an accepted decision says. You can correct its language. To c
   - After a rename or a delete, the compilation does not use the old text of the file. Presswork does not change the `#include` and `#import` paths to the file, thus the compilation shows an error for an old path.
 - **Reason:** A person who writes a book makes, renames, and deletes chapter files often. Before this decision, the person had to use a different program for each of these tasks. The rules for names keep a project usable on Windows, macOS, and Linux.
 - **Other options:** Delete to the trash of the operating system (this needs a new crate). Rename and Delete buttons on each row or in a context menu. A change of the references after a rename. The `.typ` extension for a name without an extension.
+
+## D206. Downloads of Typst Universe packages
+
+- **Status:** Accepted, 2026-11-24. **Origin:** Default.
+- **Decision:**
+  - When a document imports a `@preview` package that is in no package folder (D203), the world asks the toolchain manager for it. The toolchain manager downloads `https://packages.typst.org/preview/<name>-<version>.tar.gz` and unpacks it into the cache folder of Typst, `<cache>/typst/packages/preview/<name>/<version>`. The desktop application and the command-line tool do this during the compilation and the export.
+  - Presswork does not download packages of other namespaces.
+  - The names and the version must be safe for a path and a URL. The unpacking refuses entries outside the package folder and links, as for toolchains. A package that is not complete does not get its folder. The `.tar.gz` archives use `flate2`, which was already in the dependency tree through Typst.
+  - If the server does not have the version, Presswork reads the package index and tells the newest version, or tells that the package does not exist.
+  - Presswork tries a failed package again only after 60 seconds, so a compilation for each change does not try again each time. One download runs at a time.
+  - Typst Universe gives no signatures for packages, thus Presswork cannot check them. It uses HTTPS.
+  - The Packages tab reads the package index once in each session and reads the README of a package from its archive in memory. This does not install the package.
+- **Reason:** Many documents import packages from Typst Universe, and the Typst command-line tool and the Typst web application download them in the same way. The shared cache folder lets Presswork and the command-line tool use one download.
+- **Other options:** Ask before each download. A package folder for each project. A setting that turns downloads off. Downloads of the README from the GitHub repository of Typst Universe.
+
+## D207. Markdown and the reference of the embedded engine
+
+- **Status:** Accepted, 2026-11-24. **Origin:** Project owner.
+- **Decision:**
+  - Presswork shows Markdown with the `markdown` feature of iced, which uses the `pulldown-cmark` crate. Package READMEs and the documentation use it. `pulldown-cmark` 0.12.2 (MIT) adds four crates: `pulldown-cmark`, `pulldown-cmark-escape`, `unicase`, and `getopts`. `cargo deny` accepts them.
+  - The documentation is the reference of the embedded Typst version, made at run time from its library: each function, type, and module with its description, its parameters, and its definitions. Presswork does not copy the guides and the tutorial of Typst. Links to them open typst.app.
+  - The descriptions in Typst 0.15 use Typst markup. Presswork parses them with the Typst parser and makes Markdown: headings, references, links, strong and emphasized text, lists, term lists, inline code, and code blocks. Examples show their code, without the hidden lines.
+- **Reason:** The reference agrees with the engine of the application and works without the network. A Markdown widget shows READMEs, which are Markdown.
+- **Other options:** Plain text without formatting. The guides and the tutorial as copied files. The documentation in the web browser only.
+
+## D208. Docs and packages next to the editor
+
+- **Status:** Accepted, 2026-11-24. **Origin:** Default.
+- **Decision:**
+  - Tabs above the right pane of the Write workspace select the preview, the documentation, or the packages. When the preview is in its own window, the right pane shows only for the documentation and the packages.
+  - F1 and the menu item **Typst documentation** open the documentation. The menu item **Typst packages** opens the packages. A click on a tab, F1, and the menu items put the cursor in the search field.
+  - F12 on an item of the Typst library opens its page, also for a field such as `calc.pow`. F12 on a package import opens the page of the package. The cursor stays in the editor.
+  - **Insert import** puts the import line of the newest version on its own line above the line of the cursor.
+  - Links to web pages open in the web browser of the system, only for `http` and `https` links.
+  - The package list shows up to 100 results.
+- **Reason:** A person who writes Typst looks up functions and packages while the document is open. The right pane keeps the editor visible.
+- **Other options:** A separate window for the documentation. A panel at the left like the outline. The documentation and the packages in the Research workspace. Renders of the examples.
