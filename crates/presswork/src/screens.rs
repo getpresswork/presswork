@@ -20,14 +20,17 @@ use presswork_language::{Dictionaries, Dictionary};
 use presswork_preview::Action as PreviewAction;
 use presswork_sync::TextDocument;
 use presswork_text::{ChangeSet, Edit, Position, Suggestion, SuggestionKind};
-use presswork_toolchain::{Digest, Platform, Release, ReleaseFile, Version};
+use presswork_toolchain::{
+    Digest, PackageIndex, PackageInfo, Platform, Release, ReleaseFile, Version,
+};
 use uuid::Uuid;
 
-use crate::app::{App, Message, send};
+use crate::app::{App, Message, Pane, send};
 use crate::chat_panel::Message as ChatPanelMessage;
 use crate::find_bar::Message as FindMessage;
 use crate::library_view::{Message as LibraryMessage, PickedFile, Target};
 use crate::live_session::Event as LiveEvent;
+use crate::packages_view::Message as PackagesMessage;
 use crate::proofreading::Message as ProofreadingMessage;
 use crate::publish_view::Message as PublishMessage;
 use crate::server_dialog::{Connection, Message as ServerMessage, Shelf};
@@ -113,6 +116,11 @@ fn rest_on(ui: &mut Simulator<'_, Message>, target: &str) {
     let _ = ui.simulate([moved.clone()]);
     std::thread::sleep(TOOLTIP_WAIT);
     let _ = ui.simulate([moved]);
+}
+
+fn open_folder(app: &mut App, folder: &std::path::Path) {
+    send(app, Message::FolderPicked(Some(folder.to_path_buf())));
+    send(app, Message::Unsaved(unsaved::Answer::Discard));
 }
 
 fn sample_store() -> LogStore {
@@ -201,10 +209,7 @@ fn render_screens() {
         ("presswork.toml", "[project]\nname = \"Field Notes\"\n"),
         ("main.typ", BOOK),
     ]);
-    send(
-        &mut app,
-        Message::FolderPicked(Some(book.path().to_path_buf())),
-    );
+    open_folder(&mut app, book.path());
     send(
         &mut app,
         Message::Editor(EditorAction::Move {
@@ -241,10 +246,7 @@ fn render_screens() {
     send(&mut app, Message::WindowClosed(preview));
 
     let notes = folder(&[("notes.txt", "")]);
-    send(
-        &mut app,
-        Message::FolderPicked(Some(notes.path().to_path_buf())),
-    );
+    open_folder(&mut app, notes.path());
     render(&mut app, "notice");
 
     send(&mut app, Message::DismissNotice);
@@ -279,6 +281,73 @@ fn render_screens() {
     render_house_style(&mut app);
     render_suggestions(&mut app);
     render_server_suggestions(&mut app);
+    render_packages(&mut app);
+}
+
+const PACKAGE_README: &str = "# Sketch\n\nSketch draws figures with Typst.\n\n\
+                              ## Usage\n\n\
+                              ```typ\n#import \"@preview/sketch:0.3.4\"\n\
+                              #sketch.canvas({\n  circle((0, 0), radius: 1)\n})\n```\n\n\
+                              - Lines, circles, and arcs\n\
+                              - Points with `anchors`\n\n\
+                              Read the [manual](https://example.com/sketch).\n";
+
+fn package(name: &str, version: &str, description: &str) -> PackageInfo {
+    PackageInfo {
+        name: name.to_owned(),
+        version: version.to_owned(),
+        description: Some(description.to_owned()),
+        ..PackageInfo::default()
+    }
+}
+
+fn render_packages(app: &mut App) {
+    send(app, Message::SelectWorkspace(Workspace::Write));
+    send(app, Message::Pane(Pane::Packages));
+    let index = PackageIndex::new(vec![
+        PackageInfo {
+            authors: vec!["Ann Lee".to_owned(), "Bob Ito".to_owned()],
+            license: Some("MIT".to_owned()),
+            repository: Some("https://example.com/sketch".to_owned()),
+            compiler: Some("0.13.1".to_owned()),
+            ..package(
+                "sketch",
+                "0.3.4",
+                "Draw figures with lines, circles, and arcs.",
+            )
+        },
+        package("sketch", "0.3.3", "Draw figures."),
+        package("sketch-plot", "0.1.1", "Plots for sketch."),
+        package(
+            "arrows",
+            "0.5.7",
+            "Diagrams with nodes and arrows. Uses sketch.",
+        ),
+        package("tables", "0.0.9", "Tables with more control."),
+        package("slides", "0.6.1", "Presentation slides."),
+    ]);
+    send(
+        app,
+        Message::Packages(PackagesMessage::Loaded(Ok(Arc::new(index)))),
+    );
+    send(
+        app,
+        Message::Packages(PackagesMessage::Query("sketch".to_owned())),
+    );
+    send(
+        app,
+        Message::Packages(PackagesMessage::Select("sketch".to_owned())),
+    );
+    send(
+        app,
+        Message::Packages(PackagesMessage::Readme {
+            name: "sketch".to_owned(),
+            version: "0.3.4".to_owned(),
+            result: Ok(Some(PACKAGE_README.to_owned())),
+        }),
+    );
+    render(app, "packages");
+    send(app, Message::Pane(Pane::Preview));
 }
 
 const LIVE_SUGGESTED: &str = "#set text(font: \"Libertinus Serif\")\n= Paper\n\n\
@@ -293,6 +362,7 @@ fn render_server_suggestions(app: &mut App) {
         path: "chapters/paper.typ".to_owned(),
     };
     send(app, Message::Server(ServerMessage::Open(document)));
+    send(app, Message::Unsaved(unsaved::Answer::Discard));
     let (sender, _receiver) = futures::channel::mpsc::unbounded();
     send(app, Message::Live(LiveEvent::Ready(sender)));
     send(app, Message::Live(LiveEvent::Connected));
@@ -350,7 +420,7 @@ fn render_suggestions(app: &mut App) {
         ("main.typ", SUGGESTED),
     ]);
     send(app, Message::SelectWorkspace(Workspace::Write));
-    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    open_folder(app, book.path());
     app.suggest_as("Ann Lee");
     let first = SUGGESTED.find("first").unwrap();
     select(app, first, first + "first".len());
@@ -411,7 +481,7 @@ fn render_house_style(app: &mut App) {
         ("presswork-style.toml", HOUSE_STYLE),
     ]);
     send(app, Message::SelectWorkspace(Workspace::Write));
-    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    open_folder(app, book.path());
     send(
         app,
         Message::Proofreading(ProofreadingMessage::Loaded(Arc::new(dictionaries))),
@@ -450,7 +520,7 @@ fn render_typeset(app: &mut App) {
         ("presswork.toml", "[project]\nname = \"Field Notes\"\n"),
         ("main.typ", TYPESET),
     ]);
-    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    open_folder(app, book.path());
     app.compile_now();
     send(app, Message::SelectWorkspace(Workspace::Typeset));
     send(app, Message::Typeset(TypesetMessage::Show(0)));
@@ -468,7 +538,7 @@ fn render_problem_marks(app: &mut App) {
         ),
         ("main.typ", &text),
     ]);
-    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    open_folder(app, book.path());
     app.compile_now();
     send(app, Message::SelectWorkspace(Workspace::Write));
     render_scene(
@@ -505,7 +575,7 @@ fn render_publish(app: &mut App) {
         ("map.svg", MAP),
     ]);
     std::fs::write(book.path().join("meadow.png"), gradient(300, 200)).unwrap();
-    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    open_folder(app, book.path());
     send(app, Message::SelectWorkspace(Workspace::Publish));
     app.export_now(0);
     send(app, Message::Publish(PublishMessage::Export(2)));
@@ -550,7 +620,7 @@ fn render_spreads(app: &mut App) {
         ("main.typ", &text),
     ]);
     send(app, Message::SelectWorkspace(Workspace::Write));
-    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    open_folder(app, book.path());
     app.compile_now();
     send(app, Message::Preview(PreviewAction::Spreads));
     render(app, "spreads");
@@ -576,7 +646,7 @@ fn render_guides(app: &mut App) {
         ),
         ("main.typ", text),
     ]);
-    send(app, Message::FolderPicked(Some(book.path().to_path_buf())));
+    open_folder(app, book.path());
     send(app, Message::Preview(PreviewAction::Guides));
     app.compile_now();
     render(app, "guides");
@@ -800,6 +870,7 @@ fn render_server(app: &mut App) {
         path: "main.typ".to_owned(),
     };
     send(app, Message::Server(ServerMessage::Open(document)));
+    send(app, Message::Unsaved(unsaved::Answer::Discard));
     let (sender, _receiver) = futures::channel::mpsc::unbounded();
     send(app, Message::Live(LiveEvent::Ready(sender)));
     send(app, Message::Live(LiveEvent::Connected));
