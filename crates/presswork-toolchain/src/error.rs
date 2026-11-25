@@ -18,6 +18,8 @@ pub enum ToolchainError {
     PackageVersionNotFound { package: String, latest: String },
     #[error("the package index is not valid: {0}")]
     InvalidPackageIndex(String),
+    #[error("the download is larger than {limit} bytes")]
+    TooLarge { limit: u64 },
     #[error("the archive contains an unsafe entry: {0}")]
     UnsafeArchiveEntry(String),
     #[error("the archive is damaged: {0}")]

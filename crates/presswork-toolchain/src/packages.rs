@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -13,6 +14,9 @@ use crate::unpack::unpack;
 
 pub const PACKAGE_SERVER: &str = "https://packages.typst.org";
 const RETRY_AFTER: Duration = Duration::from_secs(60);
+const README: &str = "README.md";
+const MAX_ARCHIVE: u64 = 64 * 1024 * 1024;
+const MAX_README: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PackageInfo {
@@ -28,6 +32,113 @@ pub struct PackageInfo {
     pub disciplines: Vec<String>,
     pub compiler: Option<String>,
     pub updated: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageEntry {
+    pub info: PackageInfo,
+    pub versions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PackageIndex {
+    entries: Vec<PackageEntry>,
+}
+
+impl PackageIndex {
+    #[must_use]
+    pub fn new(infos: Vec<PackageInfo>) -> Self {
+        let mut groups: HashMap<String, Vec<PackageInfo>> = HashMap::new();
+        for info in infos {
+            groups.entry(info.name.clone()).or_default().push(info);
+        }
+        let mut entries: Vec<PackageEntry> = groups
+            .into_values()
+            .filter_map(|mut versions| {
+                versions.sort_by_key(|info| std::cmp::Reverse(version_key(&info.version)));
+                let names = versions.iter().map(|info| info.version.clone()).collect();
+                Some(PackageEntry {
+                    info: versions.into_iter().next()?,
+                    versions: names,
+                })
+            })
+            .collect();
+        entries.sort_by(|one, other| one.info.name.cmp(&other.info.name));
+        Self { entries }
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    #[must_use]
+    pub fn entry(&self, name: &str) -> Option<&PackageEntry> {
+        self.entries.iter().find(|entry| entry.info.name == name)
+    }
+
+    #[must_use]
+    pub fn search(&self, query: &str) -> Vec<&PackageEntry> {
+        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+        let mut found: Vec<(usize, &PackageEntry)> = self
+            .entries
+            .iter()
+            .filter_map(|entry| Some((score(entry, &words)?, entry)))
+            .collect();
+        found.sort_by(|one, other| {
+            one.0
+                .cmp(&other.0)
+                .then_with(|| one.1.info.name.cmp(&other.1.info.name))
+        });
+        found.into_iter().map(|(_, entry)| entry).collect()
+    }
+}
+
+fn score(entry: &PackageEntry, words: &[String]) -> Option<usize> {
+    let info = &entry.info;
+    let name = info.name.to_lowercase();
+    let tags: Vec<String> = info
+        .keywords
+        .iter()
+        .chain(&info.categories)
+        .chain(&info.disciplines)
+        .map(|tag| tag.to_lowercase())
+        .collect();
+    let description = info
+        .description
+        .as_deref()
+        .unwrap_or_default()
+        .to_lowercase();
+    words
+        .iter()
+        .map(|word| {
+            let word = word.as_str();
+            if name == word {
+                Some(0)
+            } else if name.starts_with(word) {
+                Some(1)
+            } else if name.contains(word) {
+                Some(2)
+            } else if tags.iter().any(|tag| tag == word) {
+                Some(3)
+            } else if tags.iter().any(|tag| tag.contains(word)) {
+                Some(4)
+            } else if description.contains(word) {
+                Some(5)
+            } else {
+                None
+            }
+        })
+        .sum()
+}
+
+fn version_key(version: &str) -> Option<semver::Version> {
+    semver::Version::parse(version).ok()
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +226,25 @@ impl Packages {
         }
     }
 
+    pub async fn readme(
+        &self,
+        namespace: &str,
+        name: &str,
+        version: &str,
+    ) -> Result<Option<String>, ToolchainError> {
+        if !valid_name(namespace) || !valid_name(name) || !valid_version(version) {
+            return Err(ToolchainError::InvalidPackage(format!(
+                "@{namespace}/{name}:{version}"
+            )));
+        }
+        let folder = self.root.join(namespace).join(name).join(version);
+        if folder.is_dir() {
+            return Ok(readme_in_folder(&folder));
+        }
+        let url = format!("{}/{namespace}/{name}-{version}.tar.gz", self.server);
+        readme_in_archive(&self.client.bytes(&url, MAX_ARCHIVE).await?)
+    }
+
     pub async fn index(&self, namespace: &str) -> Result<Vec<PackageInfo>, ToolchainError> {
         if !valid_name(namespace) {
             return Err(ToolchainError::InvalidPackage(namespace.to_owned()));
@@ -170,6 +300,38 @@ fn package_info(value: &Value) -> Option<PackageInfo> {
         compiler: text("compiler"),
         updated: value.get("updatedAt").and_then(Value::as_i64),
     })
+}
+
+fn is_readme(name: &str) -> bool {
+    name.eq_ignore_ascii_case(README)
+}
+
+fn readme_in_folder(folder: &Path) -> Option<String> {
+    let entry = fs::read_dir(folder)
+        .ok()?
+        .filter_map(Result::ok)
+        .find(|entry| is_readme(&entry.file_name().to_string_lossy()))?;
+    let bytes = fs::read(entry.path()).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn readme_in_archive(bytes: &[u8]) -> Result<Option<String>, ToolchainError> {
+    let broken = |error: std::io::Error| ToolchainError::BrokenArchive(error.to_string());
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes));
+    for entry in archive.entries().map_err(broken)? {
+        let entry = entry.map_err(broken)?;
+        let path = String::from_utf8_lossy(&entry.path_bytes()).into_owned();
+        if !entry.header().entry_type().is_file() || !is_readme(path.trim_start_matches("./")) {
+            continue;
+        }
+        let mut text = Vec::new();
+        entry
+            .take(MAX_README)
+            .read_to_end(&mut text)
+            .map_err(broken)?;
+        return Ok(Some(String::from_utf8_lossy(&text).into_owned()));
+    }
+    Ok(None)
 }
 
 fn latest_version(index: &[PackageInfo], name: &str) -> Option<String> {
@@ -476,6 +638,105 @@ mod tests {
             result,
             Err(DownloadError::VersionNotFound("0.10.0".to_owned()))
         );
+    }
+
+    fn info(name: &str, version: &str, description: &str, keywords: &[&str]) -> PackageInfo {
+        PackageInfo {
+            name: name.to_owned(),
+            version: version.to_owned(),
+            description: Some(description.to_owned()),
+            keywords: keywords.iter().map(|word| (*word).to_owned()).collect(),
+            ..PackageInfo::default()
+        }
+    }
+
+    fn names(entries: &[&PackageEntry]) -> Vec<String> {
+        entries
+            .iter()
+            .map(|entry| entry.info.name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn the_index_keeps_one_entry_for_each_package_with_its_newest_version() {
+        let index = PackageIndex::new(vec![
+            info("cetz", "0.3.4", "Old.", &[]),
+            info("cetz", "0.10.0", "New.", &[]),
+            info("algo", "1.0.0", "Algorithms.", &[]),
+        ]);
+
+        assert_eq!(index.len(), 2);
+        assert_eq!(names(&index.search("")), ["algo", "cetz"]);
+        let cetz = index.entry("cetz").unwrap();
+        assert_eq!(cetz.info.description.as_deref(), Some("New."));
+        assert_eq!(cetz.versions, ["0.10.0", "0.3.4"]);
+    }
+
+    #[test]
+    fn a_search_puts_name_matches_before_other_matches() {
+        let index = PackageIndex::new(vec![
+            info(
+                "fletcher",
+                "0.5.0",
+                "Diagrams with arrows, after cetz.",
+                &["diagram"],
+            ),
+            info("cetz", "0.3.4", "Drawing with Typst.", &["draw", "canvas"]),
+            info("cetz-plot", "0.1.0", "Plots.", &["plot"]),
+            info("tablex", "0.0.9", "More tables.", &["table"]),
+        ]);
+
+        assert_eq!(
+            names(&index.search("cetz")),
+            ["cetz", "cetz-plot", "fletcher"]
+        );
+        assert_eq!(names(&index.search("CANVAS")), ["cetz"]);
+        assert_eq!(names(&index.search("plot cetz")), ["cetz-plot"]);
+        assert_eq!(names(&index.search("tables")), ["tablex"]);
+        assert_eq!(names(&index.search("nothing")), Vec::<String>::new());
+    }
+
+    fn with_readme(name: &str, text: &[u8]) -> Vec<u8> {
+        tar_gz_bytes(&[
+            ("typst.toml", tar::EntryType::Regular, b"[package]"),
+            (name, tar::EntryType::Regular, text),
+        ])
+    }
+
+    #[test]
+    fn the_readme_comes_from_the_archive_without_an_installation() {
+        let archive = with_readme("./README.md", b"# Greeting\nSays hello.");
+        let base = serve(move |_| vec![Route::new("/preview/greeting-0.1.0.tar.gz", archive)]);
+        let root = tempfile::tempdir().unwrap();
+
+        let readme = run(packages(&base, root.path()).readme("preview", "greeting", "0.1.0"));
+
+        assert_eq!(readme.unwrap().as_deref(), Some("# Greeting\nSays hello."));
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn the_readme_of_an_installed_package_comes_from_its_folder() {
+        let base = serve(|_| Vec::new());
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("preview/greeting/0.1.0");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("readme.md"), "Local.").unwrap();
+
+        let readme = run(packages(&base, root.path()).readme("preview", "greeting", "0.1.0"));
+
+        assert_eq!(readme.unwrap().as_deref(), Some("Local."));
+    }
+
+    #[test]
+    fn a_package_without_a_readme_gives_no_text() {
+        let archive = with_readme("docs/README.md", b"Not at the top.");
+        let base = serve(move |_| vec![Route::new("/preview/greeting-0.1.0.tar.gz", archive)]);
+        let root = tempfile::tempdir().unwrap();
+
+        let readme = run(packages(&base, root.path()).readme("preview", "greeting", "0.1.0"));
+
+        assert_eq!(readme.unwrap(), None);
     }
 
     #[test]

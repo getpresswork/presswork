@@ -82,6 +82,24 @@ impl Client {
             .map_err(|error| network(&error))
     }
 
+    pub async fn bytes(&self, url: &str, limit: u64) -> Result<Vec<u8>, ToolchainError> {
+        let response = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .map_err(|error| network(&error))?;
+        let mut response = success(response)?;
+        let mut data = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|error| network(&error))? {
+            data.extend_from_slice(&chunk);
+            if data.len() as u64 > limit {
+                return Err(ToolchainError::TooLarge { limit });
+            }
+        }
+        Ok(data)
+    }
+
     pub async fn download(
         &self,
         url: &str,
