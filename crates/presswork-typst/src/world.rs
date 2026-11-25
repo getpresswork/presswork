@@ -113,21 +113,20 @@ impl World {
         else {
             return Err(FileError::Package(PackageError::NotFound(spec.clone())));
         };
-        let package = PackageName {
-            namespace: spec.namespace.to_string(),
-            name: spec.name.to_string(),
-            version: spec.version.to_string(),
-        };
-        downloader.download(&package).map_err(|error| {
-            FileError::Package(match error {
-                DownloadError::NotFound => PackageError::NotFound(spec.clone()),
-                DownloadError::VersionNotFound(latest) => match latest.parse() {
-                    Ok(latest) => PackageError::VersionNotFound(spec.clone(), latest),
-                    Err(_) => PackageError::NotFound(spec.clone()),
-                },
-                DownloadError::Failed(message) => PackageError::NetworkFailed(Some(message.into())),
+        downloader
+            .download(&PackageName::from(spec))
+            .map_err(|error| {
+                FileError::Package(match error {
+                    DownloadError::NotFound => PackageError::NotFound(spec.clone()),
+                    DownloadError::VersionNotFound(latest) => match latest.parse() {
+                        Ok(latest) => PackageError::VersionNotFound(spec.clone(), latest),
+                        Err(_) => PackageError::NotFound(spec.clone()),
+                    },
+                    DownloadError::Failed(message) => {
+                        PackageError::NetworkFailed(Some(message.into()))
+                    }
+                })
             })
-        })
     }
 
     #[must_use]

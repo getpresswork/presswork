@@ -3,11 +3,12 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use typst::foundations::Repr;
-use typst::syntax::Side;
+use typst::syntax::{FileId, Side, VirtualRoot};
 use typst::{World as _, WorldExt as _};
 
 use crate::ide::{Analysis, project_path};
 use crate::outline::LabelTarget;
+use crate::package::PackageName;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tooltip {
@@ -49,6 +50,7 @@ pub struct Completions {
 pub enum Definition {
     Main(Range<usize>),
     File(PathBuf, Option<Range<usize>>),
+    Package(PackageName),
     Library(String),
 }
 
@@ -112,6 +114,9 @@ impl Analysis {
         match found {
             typst_ide::Definition::Span(span) => {
                 let id = span.id()?;
+                if let Some(package) = package_of(id) {
+                    return Some(Definition::Package(package));
+                }
                 let range = world.range(span)?;
                 if id == world.main() {
                     Some(Definition::Main(range))
@@ -119,11 +124,21 @@ impl Analysis {
                     Some(Definition::File(project_path(id)?, Some(range)))
                 }
             }
-            typst_ide::Definition::File(id) => Some(Definition::File(project_path(id)?, None)),
+            typst_ide::Definition::File(id) => match package_of(id) {
+                Some(package) => Some(Definition::Package(package)),
+                None => Some(Definition::File(project_path(id)?, None)),
+            },
             typst_ide::Definition::Std(value) => {
                 Some(Definition::Library(value.repr().to_string()))
             }
         }
+    }
+}
+
+fn package_of(id: FileId) -> Option<PackageName> {
+    match id.get().root() {
+        VirtualRoot::Package(spec) => Some(PackageName::from(spec)),
+        VirtualRoot::Project => None,
     }
 }
 
@@ -403,6 +418,36 @@ mod tests {
         assert_eq!(
             definition,
             Some(Definition::File(PathBuf::from("part.typ"), Some(5..8)))
+        );
+    }
+
+    #[test]
+    fn an_imported_package_gives_the_package() {
+        let packages = tempfile::tempdir().unwrap();
+        let folder = packages.path().join("local/greeting/0.1.0");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("typst.toml"),
+            "[package]\nname = \"greeting\"\nversion = \"0.1.0\"\nentrypoint = \"lib.typ\"\n",
+        )
+        .unwrap();
+        std::fs::write(folder.join("lib.typ"), "#let greet = [Hello]").unwrap();
+        let text = "#import \"@local/greeting:0.1.0\": greet\n#greet";
+        let world = Mutex::new(
+            World::new(Arc::new(Fonts::embedded()), None)
+                .with_packages(vec![packages.path().to_path_buf()]),
+        );
+        let analysis = analyze(&world, text).analysis.unwrap();
+
+        let definition = analysis.definition(None, text, inside(text, "greeting"));
+
+        assert_eq!(
+            definition,
+            Some(Definition::Package(PackageName {
+                namespace: "local".to_owned(),
+                name: "greeting".to_owned(),
+                version: "0.1.0".to_owned(),
+            }))
         );
     }
 

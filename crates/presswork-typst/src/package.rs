@@ -1,6 +1,8 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use typst::syntax::package::PackageSpec;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PackageName {
     pub namespace: String,
@@ -15,6 +17,16 @@ impl fmt::Display for PackageName {
             "@{}/{}:{}",
             self.namespace, self.name, self.version
         )
+    }
+}
+
+impl From<&PackageSpec> for PackageName {
+    fn from(spec: &PackageSpec) -> Self {
+        Self {
+            namespace: spec.namespace.to_string(),
+            name: spec.name.to_string(),
+            version: spec.version.to_string(),
+        }
     }
 }
 
