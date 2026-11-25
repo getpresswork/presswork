@@ -216,6 +216,10 @@ files-path-invalid = Presswork cannot use { $file } as a file name. Use a path i
 files-exists = A file with the name { $file } is already in the project.
 files-make-error = Presswork cannot make { $file }.
 files-rename-error = Presswork cannot rename { $file }.
+files-paths-changed = Presswork changed the paths in { $count ->
+    [one] 1 file
+   *[other] { $count } files
+}.
 files-delete-error = Presswork cannot delete { $file }.
 
 pane-preview = Preview

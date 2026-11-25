@@ -887,6 +887,79 @@ impl App {
             self.others.insert(new.to_path_buf(), open);
         }
         self.removed_files.push(old.to_path_buf());
+        self.change_paths(old, new);
+    }
+
+    fn change_paths(&mut self, old: &Path, new: &Path) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        let root = project.root().to_path_buf();
+        let sources: Vec<PathBuf> = project
+            .files()
+            .iter()
+            .filter(|file| file.extension().is_some_and(|extension| extension == "typ"))
+            .cloned()
+            .collect();
+        let mut changed = 0_usize;
+        let mut problem = None;
+        for file in &sources {
+            let change = PathChange {
+                root: &root,
+                file,
+                before: if file == new { old } else { file },
+                old,
+                new,
+            };
+            let (done, notice) = self.change_paths_in(&change);
+            changed += usize::from(done);
+            problem = notice.or(problem);
+        }
+        if changed > 0 {
+            tracing::info!(changed, "Paths changed after a rename");
+        }
+        if problem.is_some() {
+            self.notice = problem;
+        } else if changed > 0 {
+            let mut args = FluentArgs::new();
+            args.set("count", changed);
+            self.notice = Some(self.localizer.format("files-paths-changed", &args));
+        }
+    }
+
+    fn change_paths_in(&mut self, change: &PathChange<'_>) -> (bool, Option<String>) {
+        if self.file.as_deref() == Some(change.file) {
+            return change_editor_paths(change, &mut self.editor, &mut self.saved, &self.localizer);
+        }
+        if let Some(open) = self.others.get_mut(change.file) {
+            return change_editor_paths(change, &mut open.editor, &mut open.saved, &self.localizer);
+        }
+        let Ok(text) = files::read_text(&change.root.join(change.file)) else {
+            return (false, None);
+        };
+        if sidecar::path(change.root, change.file).is_file() {
+            let (mut editor, notice) = self.restored_editor(change.root, change.file, &text);
+            let mut saved = editor.revision();
+            let (done, problem) =
+                change_editor_paths(change, &mut editor, &mut saved, &self.localizer);
+            return (done, problem.or(notice));
+        }
+        let edits = presswork_typst::renamed_paths(&text, change.before, change.old, change.new);
+        if edits.is_empty() {
+            return (false, None);
+        }
+        let mut text = text;
+        for (range, literal) in edits.into_iter().rev() {
+            text.replace_range(range, &literal);
+        }
+        match fs::write(change.root.join(change.file), text) {
+            Ok(()) => (true, None),
+            Err(error) => {
+                tracing::error!(%error, path = %change.file.display(), "The paths did not change");
+                let failure = SaveError(change.file.to_path_buf());
+                (false, Some(failure.text(&self.localizer)))
+            }
+        }
     }
 
     fn delete_file(&mut self, path: &Path) -> Task<Message> {
@@ -3374,6 +3447,58 @@ impl SaveError {
     }
 }
 
+struct PathChange<'a> {
+    root: &'a Path,
+    file: &'a Path,
+    before: &'a Path,
+    old: &'a Path,
+    new: &'a Path,
+}
+
+fn change_editor_paths(
+    change: &PathChange<'_>,
+    editor: &mut Editor,
+    saved: &mut u64,
+    localizer: &Localizer,
+) -> (bool, Option<String>) {
+    let text = editor.document().buffer().to_string();
+    let edits = presswork_typst::renamed_paths(&text, change.before, change.old, change.new);
+    if edits.is_empty() {
+        return (false, None);
+    }
+    let clean = editor.revision() == *saved;
+    let replacements = edits
+        .into_iter()
+        .map(|(range, literal)| {
+            (
+                Position::new(range.start)..Position::new(range.end),
+                literal,
+            )
+        })
+        .collect();
+    let author = editor.suggesting().map(str::to_owned);
+    editor.set_suggesting(None);
+    let result = editor.perform(
+        presswork_editor::Action::ReplaceAll(replacements),
+        Instant::now(),
+    );
+    editor.set_suggesting(author);
+    if let Err(error) = result {
+        tracing::warn!(%error, path = %change.file.display(), "The paths did not change");
+        return (false, None);
+    }
+    if !clean {
+        return (true, None);
+    }
+    match write_file(change.root, change.file, editor) {
+        Ok(()) => {
+            *saved = editor.revision();
+            (true, None)
+        }
+        Err(failure) => (true, Some(failure.text(localizer))),
+    }
+}
+
 fn write_file(root: &Path, file: &Path, editor: &Editor) -> Result<(), SaveError> {
     let path = root.join(file);
     let text = editor.document().buffer().to_string();
@@ -5503,8 +5628,13 @@ mod tests {
         );
     }
 
+    fn rename(app: &mut App, old: &str, new: &str) {
+        files_message(app, file_panel::Message::Rename(PathBuf::from(old)));
+        name_file(app, new);
+    }
+
     #[test]
-    fn the_main_file_no_longer_finds_a_renamed_file() {
+    fn the_main_file_finds_a_renamed_file() {
         let folder = chaptered();
         let mut app = app();
         open(&mut app, &folder);
@@ -5512,14 +5642,102 @@ mod tests {
         app.compile_now();
         assert_eq!(error_count(&app), 0);
 
-        files_message(
-            &mut app,
-            file_panel::Message::Rename(PathBuf::from("chapters/one.typ")),
-        );
-        name_file(&mut app, "chapters/first.typ");
+        rename(&mut app, "chapters/one.typ", "chapters/first.typ");
         app.compile_now();
 
-        assert_eq!(error_count(&app), 1);
+        assert_eq!(error_count(&app), 0);
+        assert_eq!(
+            fs::read_to_string(folder.path().join("main.typ")).unwrap(),
+            "= Book\n#include \"chapters/first.typ\"\n"
+        );
+        assert_eq!(app.changed_files(), Vec::<PathBuf>::new());
+        assert!(
+            app.notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("1 file")),
+            "{:?}",
+            app.notice
+        );
+    }
+
+    #[test]
+    fn a_changed_open_file_gets_the_new_path_and_stays_unsaved() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        send(&mut app, insert("Now. "));
+
+        rename(&mut app, "chapters/one.typ", "chapters/first.typ");
+
+        assert_eq!(
+            editor_text(&app),
+            "Now. = Book\n#include \"chapters/first.typ\"\n"
+        );
+        assert_eq!(
+            fs::read_to_string(folder.path().join("main.typ")).unwrap(),
+            CHAPTERED_MAIN
+        );
+        assert_eq!(app.changed_files(), [PathBuf::from("main.typ")]);
+    }
+
+    #[test]
+    fn a_closed_file_gets_the_new_path_on_the_disk_and_keeps_its_suggestions() {
+        let folder = chaptered();
+        let notes = "= Notes\n#include \"chapters/one.typ\"\n";
+        fs::write(folder.path().join("notes.typ"), notes).unwrap();
+        let inserted = presswork_text::Suggestion {
+            kind: presswork_text::SuggestionKind::Insertion,
+            range: Position::new(notes.len())..Position::new(notes.len() + 5),
+            author: "Ann".to_owned(),
+            time: 1_763_700_000,
+        };
+        crate::sidecar::save(
+            folder.path(),
+            Path::new("notes.typ"),
+            &format!("{notes}More."),
+            &[inserted],
+        )
+        .unwrap();
+        let mut app = app();
+        open(&mut app, &folder);
+
+        rename(&mut app, "chapters/one.typ", "chapters/first.typ");
+
+        let changed = "= Notes\n#include \"chapters/first.typ\"\n";
+        assert_eq!(
+            fs::read_to_string(folder.path().join("notes.typ")).unwrap(),
+            changed
+        );
+        assert!(
+            app.notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("2 files")),
+            "{:?}",
+            app.notice
+        );
+        open_file(&mut app, "notes.typ");
+        assert_eq!(editor_text(&app), format!("{changed}More."));
+        assert_eq!(app.editor.document().suggestions().len(), 1);
+    }
+
+    #[test]
+    fn a_moved_file_keeps_the_targets_of_its_own_paths() {
+        let folder = chaptered();
+        let chapters = folder.path().join("chapters");
+        fs::write(chapters.join("one.typ"), "= One\n#include \"one-a.typ\"\n").unwrap();
+        fs::write(chapters.join("one-a.typ"), "More.").unwrap();
+        let mut app = app();
+        open(&mut app, &folder);
+
+        rename(&mut app, "chapters/one.typ", "parts/one.typ");
+        app.compile_now();
+
+        assert_eq!(
+            fs::read_to_string(folder.path().join("parts").join("one.typ")).unwrap(),
+            "= One\n#include \"../chapters/one-a.typ\"\n"
+        );
+        assert_eq!(editor_text(&app), "= Book\n#include \"parts/one.typ\"\n");
+        assert_eq!(error_count(&app), 0);
     }
 
     #[test]
