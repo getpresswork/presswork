@@ -427,7 +427,10 @@ fn download_error(error: ToolchainError) -> DownloadError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::fs;
+
+    use presswork_typst::{Fonts, World, compile};
 
     use super::*;
     use crate::testing::{Route, run, serve, tar_gz_bytes};
@@ -473,6 +476,74 @@ mod tests {
             name: name.to_owned(),
             version: version.to_owned(),
         }
+    }
+
+    type Check = fn(&Value) -> bool;
+
+    fn is_list(value: &Value) -> bool {
+        value
+            .as_array()
+            .is_some_and(|items| items.iter().all(Value::is_string))
+    }
+
+    #[test]
+    #[ignore = "downloads the real package index and a package from Typst Universe"]
+    fn the_real_package_server_gives_the_index_and_the_packages() {
+        let root = tempfile::tempdir().unwrap();
+        let packages = Packages::new(Client::new(AGENT).unwrap(), root.path().to_path_buf());
+        let url = format!("{PACKAGE_SERVER}/preview/index.json");
+        let text = run(packages.client.text(&url)).unwrap();
+        let values: Vec<Value> = serde_json::from_str(&text).unwrap();
+        let keys: BTreeSet<&str> = values
+            .iter()
+            .filter_map(Value::as_object)
+            .flat_map(|entry| entry.keys().map(String::as_str))
+            .collect();
+        let fields: [(&str, Check); 12] = [
+            ("name", Value::is_string),
+            ("version", Value::is_string),
+            ("description", Value::is_string),
+            ("authors", is_list),
+            ("license", Value::is_string),
+            ("repository", Value::is_string),
+            ("homepage", Value::is_string),
+            ("keywords", is_list),
+            ("categories", is_list),
+            ("disciplines", is_list),
+            ("compiler", Value::is_string),
+            ("updatedAt", Value::is_i64),
+        ];
+        for (key, valid) in fields {
+            let found: Vec<&Value> = values.iter().filter_map(|value| value.get(key)).collect();
+            assert!(
+                !found.is_empty(),
+                "No entry has {key}. The keys are {keys:?}."
+            );
+            assert!(found.into_iter().all(valid), "{key} has a different type.");
+        }
+        let index = parse_index(&text).unwrap();
+        assert_eq!(index.len(), values.len());
+        assert!(PackageIndex::new(index).entry("example").is_some());
+
+        let readme = run(packages.readme("preview", "example", "0.1.0")).unwrap();
+        assert!(readme.is_some_and(|text| !text.is_empty()));
+
+        let mut world = World::new(Arc::new(Fonts::embedded()), None)
+            .with_packages(vec![root.path().to_path_buf()])
+            .with_downloader(Some(Arc::new(packages)));
+        world.set_main_text("#import \"@preview/example:0.1.0\": add\n#add(2, 7)");
+        let compilation = compile(&world);
+
+        assert!(
+            compilation.document.is_some(),
+            "{:?}",
+            compilation.diagnostics
+        );
+        assert!(
+            root.path()
+                .join("preview/example/0.1.0/typst.toml")
+                .is_file()
+        );
     }
 
     #[test]
