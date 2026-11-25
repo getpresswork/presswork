@@ -122,6 +122,9 @@ mod tests {
         )];
         let preflight_problems = output.preflight_profiles(&profiles).len();
         let preflight_time = start.elapsed();
+        let start = Instant::now();
+        let points = analysis.jump_from_cursor(text.len() / 2).len();
+        let cursor_time = start.elapsed();
 
         let middle = text[..text.len() / 2].rfind(' ').unwrap_or(0);
         let mut changed = text.clone();
@@ -147,6 +150,7 @@ mod tests {
         eprintln!(
             "baseline grid: {grid_time:?}, preflight of the PDF profile: {preflight_time:?} ({preflight_problems} problems)"
         );
+        eprintln!("page point of the cursor in the middle: {cursor_time:?} ({points} points)");
         eprintln!("hot compile after one word: {hot_time:?}");
         eprintln!(
             "pages changed by the word: {} (keys of all pages compared in {compare_time:?}), drawn again in {redraw:?}",
