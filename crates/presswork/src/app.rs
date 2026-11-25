@@ -190,6 +190,7 @@ pub(crate) enum Message {
         error: String,
     },
     Preview(presswork_preview::Action),
+    PagesRendered(presswork_preview::Rendered),
     Outline(outline_panel::Message),
     Files(file_panel::Message),
     Find(find_bar::Message),
@@ -861,26 +862,26 @@ impl App {
     }
 
     fn preview_action(&mut self, action: presswork_preview::Action) -> Task<Message> {
-        match action {
-            presswork_preview::Action::ShowProblem => self.show_problem(),
-            presswork_preview::Action::Click(point) => return self.jump_to_source(point),
-            presswork_preview::Action::GoToPage(page) => return self.preview.go_to_page(page),
-            presswork_preview::Action::Guides => {
-                self.preview.perform(action);
-                if self.compiler.set_bleed(self.preview.guides()) {
-                    return self.request_compile();
-                }
+        let task = match action {
+            presswork_preview::Action::ShowProblem => {
+                self.show_problem();
+                Task::none()
             }
+            presswork_preview::Action::Click(point) => self.jump_to_source(point),
+            presswork_preview::Action::GoToPage(page) => self.preview.go_to_page(page),
             presswork_preview::Action::Scrolled(viewport) => {
-                return self.preview.scrolled(viewport, Instant::now());
+                self.preview.scrolled(viewport, Instant::now())
             }
             presswork_preview::Action::Detach => return self.detach_preview(),
             presswork_preview::Action::Attach => {
                 return self.preview_window.map_or_else(Task::none, window::close);
             }
-            action => self.preview.perform(action),
-        }
-        Task::none()
+            action => {
+                self.preview.perform(action);
+                Task::none()
+            }
+        };
+        Task::batch([task, self.preview.render(Message::PagesRendered)])
     }
 
     fn key(&mut self, event: keyboard::Event) -> Task<Message> {
@@ -2004,6 +2005,12 @@ impl App {
             map,
             files,
         ));
+        self.preview.render_now();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn render_pages_now(&mut self) {
+        self.preview.render_now();
     }
 
     fn show_output(
@@ -2026,8 +2033,9 @@ impl App {
             "Compiled"
         );
         self.preview.show(&output, compiler::SCALE);
+        let pages = self.preview.render(Message::PagesRendered);
         self.preview.set_problem(self.problem(&output));
-        if output.pages.is_some() {
+        if output.has_pages() {
             self.pages_analysis.clone_from(&output.analysis);
             self.pages_map.clone_from(&self.compiled_map);
             self.outline.set_headings(
@@ -2049,16 +2057,16 @@ impl App {
             let marks = self.problem_marks(&output);
             self.preview.set_problem_marks(marks);
         }
-        let proofread = if output.pages.is_some() {
+        let proofread = if output.has_pages() {
             self.proofread()
         } else {
             Task::none()
         };
         self.compiled = Some(output);
         if self.compiler.finish() {
-            return Task::batch([proofread, self.start_compile()]);
+            return Task::batch([pages, proofread, self.start_compile()]);
         }
-        proofread
+        Task::batch([pages, proofread])
     }
 
     fn typeset_settings(&self) -> TypesetSettings {
@@ -2297,6 +2305,10 @@ impl App {
                 );
             }
             Message::Preview(action) => return self.preview_action(action),
+            Message::PagesRendered(rendered) => {
+                self.preview.rendered(rendered);
+                return self.preview.render(Message::PagesRendered);
+            }
             Message::Outline(message) => return self.outline_message(message),
             Message::Files(message) => return self.file_message(message),
             Message::Find(message) => return self.find_message(message),
@@ -3246,16 +3258,16 @@ mod tests {
     }
 
     #[test]
-    fn the_guides_compile_the_pages_again_with_the_bleed() {
+    fn the_guides_draw_the_pages_again_with_the_bleed() {
         let text = "#set page(width: 100pt, height: 50pt, bleed: 5pt)\nText.";
         let mut app = compiled_app(text);
+        let generation = app.compiler.generation();
 
         let task = app.update(Message::Preview(presswork_preview::Action::Guides));
 
         assert!(app.preview.guides());
         assert!(task.units() > 0);
-        let page = &app.compiler.run_now(text).unwrap().pages.unwrap()[0];
-        assert_eq!(page.width, 220);
+        assert_eq!(app.compiler.generation(), generation);
     }
 
     #[test]

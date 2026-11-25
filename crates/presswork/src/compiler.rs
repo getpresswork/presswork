@@ -69,7 +69,6 @@ pub(crate) struct Compiler {
     scheduler: Scheduler,
     generation: u64,
     stop: Stop,
-    bleed: bool,
 }
 
 impl Compiler {
@@ -82,7 +81,6 @@ impl Compiler {
             scheduler: Scheduler::default(),
             generation: 0,
             stop: Stop::new(PROGRAM_TIME_LIMIT),
-            bleed: false,
         }
     }
 
@@ -104,12 +102,6 @@ impl Compiler {
 
     pub(crate) fn backend(&self) -> &Backend {
         &self.backend
-    }
-
-    pub(crate) fn set_bleed(&mut self, bleed: bool) -> bool {
-        let changed = self.bleed != bleed;
-        self.bleed = bleed;
-        changed
     }
 
     pub(crate) fn set_file(&mut self, path: &Path, text: &str) {
@@ -231,11 +223,10 @@ impl Compiler {
         let root = self.root.clone().unwrap_or_default();
         let backend = self.backend.clone();
         let stop = self.stop.clone();
-        let bleed = self.bleed;
         move |sources| match backend {
             Backend::Embedded => {
                 set_files(&engine, &sources.files);
-                Ok(presswork_typst::run(&engine, &sources.main, SCALE, bleed))
+                Ok(presswork_typst::analyze(&engine, &sources.main))
             }
             Backend::Program(program) => program
                 .run(&root, &sources.main, &stop)
@@ -275,7 +266,8 @@ mod tests {
 
         let output = futures::executor::block_on(compiler.job(Sources::main("Hello."))).unwrap();
 
-        assert_eq!(output.pages.map(|pages| pages.len()), Some(1));
+        assert!(output.has_pages());
+        assert_eq!(output.pages, None);
     }
 
     fn project_compiler() -> (Compiler, tempfile::TempDir) {
@@ -404,18 +396,6 @@ mod tests {
     }
 
     #[test]
-    fn the_bleed_setting_renders_the_bleed_of_the_pages() {
-        let mut compiler = Compiler::new();
-        let text = "#set page(width: 100pt, height: 50pt, bleed: 5pt)\nText.";
-
-        assert!(compiler.set_bleed(true));
-        assert!(!compiler.set_bleed(true));
-        let output = compiler.run_now(text).unwrap();
-
-        assert_eq!(output.pages.unwrap()[0].width, 220);
-    }
-
-    #[test]
     fn an_unavailable_backend_starts_no_compilation() {
         let mut compiler = Compiler::new();
         compiler.set_backend(Backend::Unavailable);
@@ -462,7 +442,7 @@ mod tests {
         assert_eq!(compiler.root, None);
         assert!(compiler.generation() > generation);
         let output = compiler.run_now("Hello.").unwrap();
-        assert_eq!(output.pages.map(|pages| pages.len()), Some(1));
+        assert!(output.has_pages());
     }
 
     #[test]

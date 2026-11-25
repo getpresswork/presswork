@@ -1,13 +1,20 @@
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+use std::sync::Arc;
 use std::time::Instant;
 
 use iced::alignment::{Horizontal, Vertical};
+use iced::futures::channel::oneshot;
 use iced::widget::scrollable::{AbsoluteOffset, Direction, Scrollbar};
 use iced::widget::{
     button, column, container, image, operation, pin, responsive, row, rule, scrollable, space,
     stack, text, tooltip,
 };
 use iced::{Border, Color, Element, Fill, Point, Rectangle, Size, Task};
-use presswork_typst::{Grid, Insets, Output, PagePoint, Severity};
+use presswork_typst::{
+    Analysis, Grid, Insets, Output, PagePoint, PagedDocument, Severity, page_key, page_sizes,
+    render_page,
+};
 use presswork_ui::color::LIGHT;
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
@@ -37,6 +44,10 @@ const TIP_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 const KEEP_TIME: std::time::Duration = std::time::Duration::from_millis(500);
 const GRID_LINE: f32 = 1.0;
 const GRID_SPACING: f32 = 2.0;
+const NEAR_SCREENS: f32 = 1.0;
+const FIRST_PAGES: usize = 3;
+const KEPT_IMAGES: usize = 32;
+const KEPT_AROUND: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProblemMark {
@@ -117,10 +128,16 @@ impl From<scrollable::Viewport> for Viewport {
 
 #[derive(Debug, Clone)]
 struct Page {
-    handle: image::Handle,
+    image: Option<image::Handle>,
     width: f32,
     height: f32,
     bleed: Insets,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Rendered {
+    keys: Vec<u128>,
+    images: Vec<(u128, presswork_typst::PageImage)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -132,6 +149,10 @@ struct Frame {
 #[derive(Debug, Clone, Default)]
 pub struct Preview {
     pages: Vec<Page>,
+    document: Option<Arc<PagedDocument>>,
+    images: HashMap<u128, image::Handle>,
+    pending: HashSet<u128>,
+    pixel_per_pt: f32,
     zoom: Zoom,
     arrangement: Arrangement,
     thumbnails: bool,
@@ -299,17 +320,185 @@ impl Preview {
     }
 
     pub fn show(&mut self, output: &Output, pixel_per_pt: f32) {
+        self.pixel_per_pt = pixel_per_pt;
         if let Some(pages) = &output.pages {
+            self.document = None;
+            self.images.clear();
+            self.pending.clear();
             self.pages = pages
                 .iter()
                 .map(|page| Page {
-                    handle: image::Handle::from_rgba(page.width, page.height, page.rgba.clone()),
+                    image: Some(image::Handle::from_rgba(
+                        page.width,
+                        page.height,
+                        page.rgba.clone(),
+                    )),
                     width: pixels(page.width) / pixel_per_pt,
                     height: pixels(page.height) / pixel_per_pt,
                     bleed: page.bleed,
                 })
                 .collect();
+        } else if let Some(document) = output.analysis.as_ref().and_then(Analysis::shared_document)
+        {
+            self.document = Some(Arc::clone(document));
+            self.layout_pages();
         }
+    }
+
+    fn layout_pages(&mut self) {
+        let Some(document) = &self.document else {
+            return;
+        };
+        self.pages = page_sizes(document, self.guides)
+            .into_iter()
+            .map(|size| Page {
+                image: None,
+                width: size.width,
+                height: size.height,
+                bleed: size.bleed,
+            })
+            .collect();
+    }
+
+    fn near_pages(&self) -> Range<usize> {
+        let count = self.pages.len();
+        let Some(viewport) = self.viewport else {
+            return 0..count.min(FIRST_PAGES);
+        };
+        let Frame { scale, .. } = self.frame(viewport.width);
+        let above = viewport.top - viewport.height * NEAR_SCREENS;
+        let below = viewport.top + viewport.height * (1.0 + NEAR_SCREENS);
+        let mut top = PADDING;
+        let mut near: Option<Range<usize>> = None;
+        for row in self.rows() {
+            if top > below {
+                break;
+            }
+            let height = self.row_height(&row) * PX_PER_PT * scale + PAGE_GAP;
+            if top + height >= above {
+                near = Some(near.map_or(row.clone(), |near| near.start..row.end));
+            }
+            top += height;
+        }
+        near.unwrap_or(0..0)
+    }
+
+    fn wanted(&self) -> Vec<(usize, u128)> {
+        let Some(document) = &self.document else {
+            return Vec::new();
+        };
+        self.near_pages()
+            .filter_map(|index| {
+                let key = page_key(document, index, self.guides)?;
+                (!self.images.contains_key(&key) && !self.pending.contains(&key))
+                    .then_some((index, key))
+            })
+            .collect()
+    }
+
+    pub fn render<T: Send + 'static>(
+        &mut self,
+        on_rendered: impl FnOnce(Rendered) -> T + Send + 'static,
+    ) -> Task<T> {
+        let wanted = self.wanted();
+        let Some(document) = self.document.clone().filter(|_| !wanted.is_empty()) else {
+            return Task::none();
+        };
+        let keys: Vec<u128> = wanted.iter().map(|(_, key)| *key).collect();
+        self.pending.extend(keys.iter().copied());
+        let (bleed, pixel_per_pt) = (self.guides, self.pixel_per_pt);
+        let (sender, receiver) = oneshot::channel();
+        let spawned = std::thread::Builder::new()
+            .name("page-images".to_owned())
+            .spawn(move || {
+                let _ = sender.send(draw(&document, &wanted, pixel_per_pt, bleed));
+            });
+        if spawned.is_err() {
+            for key in &keys {
+                self.pending.remove(key);
+            }
+            return Task::none();
+        }
+        Task::perform(
+            async move {
+                receiver.await.unwrap_or(Rendered {
+                    keys,
+                    images: Vec::new(),
+                })
+            },
+            on_rendered,
+        )
+    }
+
+    pub fn rendered(&mut self, rendered: Rendered) {
+        for key in &rendered.keys {
+            self.pending.remove(key);
+        }
+        for (key, page) in rendered.images {
+            self.images.insert(
+                key,
+                image::Handle::from_rgba(page.width, page.height, page.rgba),
+            );
+        }
+        self.evict();
+    }
+
+    pub fn render_now(&mut self) -> usize {
+        let wanted = self.wanted();
+        let Some(document) = self.document.clone() else {
+            return 0;
+        };
+        let rendered = draw(&document, &wanted, self.pixel_per_pt, self.guides);
+        let count = rendered.images.len();
+        self.rendered(rendered);
+        count
+    }
+
+    fn evict(&mut self) {
+        let Some(document) = &self.document else {
+            return;
+        };
+        if self.images.len() <= KEPT_IMAGES {
+            return;
+        }
+        let near = self.near_pages();
+        let kept = near.start.saturating_sub(KEPT_AROUND)..(near.end + KEPT_AROUND);
+        let keys: HashSet<u128> = kept
+            .filter_map(|index| page_key(document, index, self.guides))
+            .collect();
+        self.images.retain(|key, _| keys.contains(key));
+    }
+
+    fn picture<'a, Message: 'a>(
+        &self,
+        index: usize,
+        near: bool,
+        width: f32,
+        height: f32,
+    ) -> Element<'a, Message> {
+        let handle = if near {
+            self.page_image(index)
+        } else {
+            self.pages.get(index).and_then(|page| page.image.clone())
+        };
+        match handle {
+            Some(handle) => image(handle).width(width).height(height).into(),
+            None => space().width(width).height(height).into(),
+        }
+    }
+
+    fn page_image(&self, index: usize) -> Option<image::Handle> {
+        let page = self.pages.get(index)?;
+        if let Some(image) = &page.image {
+            return Some(image.clone());
+        }
+        let key = page_key(self.document.as_ref()?, index, self.guides)?;
+        self.images.get(&key).cloned()
+    }
+
+    #[cfg(test)]
+    fn drawn(&self) -> usize {
+        self.images.len()
     }
 
     pub fn set_problem(&mut self, problem: Option<String>) {
@@ -456,6 +645,7 @@ impl Preview {
             }
             Action::Guides => {
                 self.guides = !self.guides;
+                self.layout_pages();
                 return;
             }
             Action::ProblemMarks => {
@@ -624,12 +814,17 @@ impl Preview {
         .align_y(Vertical::Center)
         .padding([gap::XS, gap::S]);
         let slot = self.pages.iter().map(|page| page.width).fold(0.0, f32::max) * PX_PER_PT * scale;
+        let near = self.near_pages();
         let rows = self.rows().into_iter().map(|shown| match self.arrangement {
-            Arrangement::Pages => self.page_view(shown.start, scale, on_action),
+            Arrangement::Pages => {
+                self.page_view(shown.start, scale, near.contains(&shown.start), on_action)
+            }
             Arrangement::Spreads => {
                 let half = |index: Option<usize>, align: Horizontal| -> Element<'a, Message> {
                     let content = match index {
-                        Some(index) => self.page_view(index, scale, on_action),
+                        Some(index) => {
+                            self.page_view(index, scale, near.contains(&index), on_action)
+                        }
                         None => space().into(),
                     };
                     container(content).width(slot).align_x(align).into()
@@ -669,14 +864,12 @@ impl Preview {
         on_action: impl Fn(Action) -> Message + Copy + 'a,
     ) -> Element<'a, Message> {
         let current = self.current_page();
+        let near = self.near_pages();
         let items = self.pages.iter().enumerate().map(|(index, page)| {
             let height = page.height / page.width.max(1.0) * THUMBNAIL_WIDTH;
-            let picture = container(
-                image(page.handle.clone())
-                    .width(THUMBNAIL_WIDTH)
-                    .height(height),
-            )
-            .style(style::paper);
+            let picture =
+                container(self.picture(index, near.contains(&index), THUMBNAIL_WIDTH, height))
+                    .style(style::paper);
             let number = text((index + 1).to_string())
                 .size(font_size::CAPTION)
                 .font(font::MONO);
@@ -712,14 +905,16 @@ impl Preview {
         &'a self,
         index: usize,
         scale: f32,
+        near: bool,
         on_action: impl Fn(Action) -> Message + Copy + 'a,
     ) -> Element<'a, Message> {
         let page = &self.pages[index];
-        let content = container(
-            image(page.handle.clone())
-                .width(page.width * PX_PER_PT * scale)
-                .height(page.height * PX_PER_PT * scale),
-        )
+        let content = container(self.picture(
+            index,
+            near,
+            page.width * PX_PER_PT * scale,
+            page.height * PX_PER_PT * scale,
+        ))
         .style(style::paper)
         .id(format!("page-{index}"));
         let marks = self.problem_marks_on(index, scale);
@@ -769,6 +964,23 @@ fn pixels(value: u32) -> f32 {
 )]
 fn to_f32(value: f64) -> f32 {
     value as f32
+}
+
+fn draw(
+    document: &PagedDocument,
+    wanted: &[(usize, u128)],
+    pixel_per_pt: f32,
+    bleed: bool,
+) -> Rendered {
+    Rendered {
+        keys: wanted.iter().map(|(_, key)| *key).collect(),
+        images: wanted
+            .iter()
+            .filter_map(|&(index, key)| {
+                render_page(document, index, pixel_per_pt, bleed).map(|page| (key, page))
+            })
+            .collect(),
+    }
 }
 
 fn scroll_task<T>(top: f32) -> Task<T> {
@@ -875,6 +1087,87 @@ mod tests {
             ),
             ..Output::default()
         }
+    }
+
+    fn compiled(text: &str) -> Output {
+        let world = std::sync::Mutex::new(presswork_typst::World::new(
+            std::sync::Arc::new(presswork_typst::Fonts::embedded()),
+            None,
+        ));
+        presswork_typst::analyze(&world, text)
+    }
+
+    fn small_pages(texts: &[&str]) -> Output {
+        let body = texts.join("\n#pagebreak()\n");
+        compiled(&format!(
+            "#set page(width: 100pt, height: 50pt, bleed: 5pt)\n{body}"
+        ))
+    }
+
+    #[test]
+    fn pages_of_a_document_have_their_size_before_they_are_drawn() {
+        let mut preview = Preview::default();
+
+        preview.show(&small_pages(&["One.", "Two."]), 2.0);
+
+        assert_eq!(preview.page_count(), 2);
+        assert_eq!(
+            (preview.pages[1].width, preview.pages[1].height),
+            (100.0, 50.0)
+        );
+        assert_eq!(preview.drawn(), 0);
+    }
+
+    #[test]
+    fn render_now_draws_only_the_pages_near_the_view() {
+        let texts = vec!["Page."; 40];
+        let mut preview = Preview::default();
+        preview.show(&small_pages(&texts), 2.0);
+        preview.perform(Action::Scrolled(Viewport::new(0.0, 200.0, 400.0)));
+
+        let drawn = preview.render_now();
+
+        assert!(drawn > 0 && drawn < 40, "{drawn} pages drawn");
+        assert!(preview.page_image(0).is_some());
+        assert!(preview.page_image(39).is_none());
+    }
+
+    #[test]
+    fn a_new_document_draws_only_the_pages_that_changed() {
+        let mut preview = Preview::default();
+        preview.show(&small_pages(&["One.", "Two.", "Three."]), 2.0);
+        assert_eq!(preview.render_now(), 3);
+
+        preview.show(&small_pages(&["One.", "Two.", "Four."]), 2.0);
+
+        assert_eq!(preview.render_now(), 1);
+        assert!(preview.page_image(2).is_some());
+    }
+
+    #[test]
+    fn the_guides_show_the_pages_with_their_bleed() {
+        let mut preview = Preview::default();
+        preview.show(&small_pages(&["One."]), 2.0);
+
+        preview.perform(Action::Guides);
+
+        assert_eq!(
+            (preview.pages[0].width, preview.pages[0].height),
+            (110.0, 60.0)
+        );
+        assert_eq!(preview.render_now(), 1);
+    }
+
+    #[test]
+    fn a_page_that_is_being_drawn_is_not_asked_for_again() {
+        let mut preview = Preview::default();
+        preview.show(&small_pages(&["One."]), 2.0);
+
+        let first = preview.render(|_| ());
+        let second = preview.render(|_| ());
+
+        assert!(first.units() > 0);
+        assert_eq!(second.units(), 0);
     }
 
     #[test]

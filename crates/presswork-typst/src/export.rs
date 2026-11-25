@@ -207,7 +207,7 @@ mod tests {
     fn analysis(text: &str) -> crate::Analysis {
         let today = Datetime::from_ymd(2026, 11, 20);
         let world = std::sync::Mutex::new(World::new(Arc::new(Fonts::embedded()), today));
-        crate::job::run(&world, text, 1.0, false).analysis.unwrap()
+        crate::job::analyze(&world, text).analysis.unwrap()
     }
 
     #[test]

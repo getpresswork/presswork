@@ -209,7 +209,7 @@ mod tests {
 
     use super::*;
     use crate::fonts::Fonts;
-    use crate::job::run;
+    use crate::job::analyze;
 
     const TWO_PAGES: &str = "First page.\n#pagebreak()\nSecond page.";
 
@@ -219,7 +219,7 @@ mod tests {
 
     fn analysis(text: &str) -> Analysis {
         let world = Mutex::new(World::new(Arc::new(Fonts::embedded()), today()));
-        run(&world, text, 1.0, false).analysis.unwrap()
+        analyze(&world, text).analysis.unwrap()
     }
 
     fn start_of(text: &str, word: &str) -> usize {
@@ -348,7 +348,7 @@ mod tests {
             Path::new("main.typ"),
         ));
         let text = fs::read_to_string(folder.path().join("main.typ")).unwrap();
-        let analysis = run(&world, &text, 1.0, false).analysis.unwrap();
+        let analysis = analyze(&world, &text).analysis.unwrap();
         let source = analysis
             .world
             .source(crate::world::file_id(Path::new("part.typ")).unwrap())

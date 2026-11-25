@@ -78,6 +78,7 @@ fn render_scene(
 ) {
     let directory = directory();
     std::fs::create_dir_all(&directory).unwrap();
+    app.render_pages_now();
     for (label, mode) in [("light", Mode::Light), ("dark", Mode::Dark)] {
         send(app, Message::SystemTheme(mode));
         let theme = app.theme();

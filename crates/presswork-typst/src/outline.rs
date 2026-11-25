@@ -171,7 +171,7 @@ mod tests {
 
     use super::*;
     use crate::fonts::Fonts;
-    use crate::job::run;
+    use crate::job::analyze;
     use crate::world::World;
 
     fn today() -> Option<Datetime> {
@@ -180,7 +180,7 @@ mod tests {
 
     fn analysis(text: &str) -> Analysis {
         let world = Mutex::new(World::new(Arc::new(Fonts::embedded()), today()));
-        run(&world, text, 1.0, false).analysis.unwrap()
+        analyze(&world, text).analysis.unwrap()
     }
 
     #[test]
@@ -265,7 +265,7 @@ mod tests {
             Path::new("main.typ"),
         ));
 
-        let headings = run(&world, main, 1.0, false).analysis.unwrap().outline();
+        let headings = analyze(&world, main).analysis.unwrap().outline();
 
         assert_eq!(
             headings[1].source,

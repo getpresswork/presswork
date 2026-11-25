@@ -410,7 +410,7 @@ mod tests {
 
     use super::*;
     use crate::fonts::Fonts;
-    use crate::job::run;
+    use crate::job::analyze;
     use crate::world::World;
 
     fn png(width: u32, height: u32) -> Vec<u8> {
@@ -435,7 +435,7 @@ mod tests {
             folder.path().to_path_buf(),
             Path::new("main.typ"),
         ));
-        (run(&world, text, 1.0, false), folder)
+        (analyze(&world, text), folder)
     }
 
     fn problems(text: &str, rules: Rules) -> Vec<Problem> {
