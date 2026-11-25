@@ -62,6 +62,12 @@ impl World {
         }
     }
 
+    pub fn remove_text(&mut self, path: &Path) {
+        if let Some(id) = file_id(path) {
+            self.overlays.remove(&id);
+        }
+    }
+
     fn read(&self, id: FileId) -> FileResult<Vec<u8>> {
         let rooted = id.get();
         let root = match rooted.root() {
@@ -245,6 +251,18 @@ mod tests {
         let mut world = project(folder.path());
 
         world.set_text(Path::new("part.typ"), "#panic()");
+
+        assert_eq!(errors(&world).len(), 1);
+    }
+
+    #[test]
+    fn a_removed_overlay_gives_the_file_on_disk_again() {
+        let folder = folder(&[("main.typ", "#include \"part.typ\"")]);
+        let mut world = project(folder.path());
+        world.set_text(Path::new("part.typ"), "Unsaved.");
+        assert_eq!(errors(&world), Vec::<String>::new());
+
+        world.remove_text(Path::new("part.typ"));
 
         assert_eq!(errors(&world).len(), 1);
     }

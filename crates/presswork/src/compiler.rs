@@ -28,14 +28,12 @@ pub(crate) enum ExportFailure {
 pub(crate) struct Sources {
     pub(crate) main: String,
     pub(crate) files: Vec<(PathBuf, String)>,
+    pub(crate) removed: Vec<PathBuf>,
 }
 
 impl Sources {
     pub(crate) fn main(text: &str) -> Self {
-        Self {
-            main: text.to_owned(),
-            files: Vec::new(),
-        }
+        Self::from(text.to_owned())
     }
 }
 
@@ -49,7 +47,7 @@ impl From<String> for Sources {
     fn from(main: String) -> Self {
         Self {
             main,
-            files: Vec::new(),
+            ..Self::default()
         }
     }
 }
@@ -212,7 +210,7 @@ impl Compiler {
             if let Some(path) = profile.outside(&main) {
                 return Err(ExportFailure::Outside(path));
             }
-            set_files(&engine, &sources.files);
+            set_files(&engine, sources);
             Ok(presswork_typst::analyze(&engine, &sources.main)
                 .export_profile(&profile, &root, &main)?)
         }
@@ -225,7 +223,7 @@ impl Compiler {
         let stop = self.stop.clone();
         move |sources| match backend {
             Backend::Embedded => {
-                set_files(&engine, &sources.files);
+                set_files(&engine, sources);
                 Ok(presswork_typst::analyze(&engine, &sources.main))
             }
             Backend::Program(program) => program
@@ -236,9 +234,14 @@ impl Compiler {
     }
 }
 
-fn set_files(engine: &Mutex<World>, files: &[(PathBuf, String)]) {
+fn set_files(engine: &Mutex<World>, sources: &Sources) {
     let mut world = engine.lock().unwrap_or_else(PoisonError::into_inner);
-    for (path, text) in files {
+    for path in &sources.removed {
+        if !sources.files.iter().any(|(open, _)| open == path) {
+            world.remove_text(path);
+        }
+    }
+    for (path, text) in &sources.files {
         world.set_text(path, text);
     }
 }
@@ -284,6 +287,7 @@ mod tests {
         let sources = Sources {
             main: "#include \"chapter.typ\"".to_owned(),
             files: vec![(PathBuf::from("chapter.typ"), "= Unsaved".to_owned())],
+            removed: Vec::new(),
         };
 
         let output = futures::executor::block_on(compiler.job(sources)).unwrap();
@@ -296,6 +300,46 @@ mod tests {
             .map(|heading| heading.title)
             .collect();
         assert_eq!(titles, ["Unsaved"]);
+    }
+
+    fn error_count(output: &Output) -> usize {
+        output
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == presswork_typst::Severity::Error)
+            .count()
+    }
+
+    #[test]
+    fn a_removed_file_no_longer_uses_its_unsaved_text() {
+        let (compiler, _folder) = project_compiler();
+        let main = "#include \"gone.typ\"".to_owned();
+        let open = Sources {
+            main: main.clone(),
+            files: vec![(PathBuf::from("gone.typ"), "Unsaved.".to_owned())],
+            removed: Vec::new(),
+        };
+        assert_eq!(error_count(&compiler.run_now(open).unwrap()), 0);
+
+        let removed = Sources {
+            main,
+            files: Vec::new(),
+            removed: vec![PathBuf::from("gone.typ")],
+        };
+
+        assert_eq!(error_count(&compiler.run_now(removed).unwrap()), 1);
+    }
+
+    #[test]
+    fn a_removed_file_that_is_open_again_keeps_its_text() {
+        let (compiler, _folder) = project_compiler();
+        let sources = Sources {
+            main: "#include \"back.typ\"".to_owned(),
+            files: vec![(PathBuf::from("back.typ"), "Unsaved.".to_owned())],
+            removed: vec![PathBuf::from("back.typ")],
+        };
+
+        assert_eq!(error_count(&compiler.run_now(sources).unwrap()), 0);
     }
 
     fn profile(format: ExportFormat, output: Option<&str>) -> ExportProfile {

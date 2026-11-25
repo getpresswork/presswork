@@ -84,6 +84,7 @@ pub(crate) struct App {
     file_panel: FilePanel,
     file: Option<PathBuf>,
     others: BTreeMap<PathBuf, OpenFile>,
+    removed_files: Vec<PathBuf>,
     find: FindBar,
     publish: PublishView,
     quality: Vec<Problem>,
@@ -261,6 +262,7 @@ impl App {
             file_panel: FilePanel::default(),
             file: None,
             others: BTreeMap::new(),
+            removed_files: Vec::new(),
             find: FindBar::default(),
             publish: PublishView::default(),
             quality: Vec::new(),
@@ -400,6 +402,7 @@ impl App {
         let main = self.main_editor();
         let map = removed(main, kind);
         let mut sources = Sources::from(map.text(&main.document().buffer().to_string()));
+        sources.removed.clone_from(&self.removed_files);
         let mut snapshots = Vec::new();
         let main_path = self
             .project
@@ -568,6 +571,8 @@ impl App {
                 self.editor = editor;
                 self.file = Some(main.clone());
                 self.others.clear();
+                self.removed_files.clear();
+                self.file_panel.cancel();
                 self.apply_suggesting();
                 self.saved = self.editor.revision();
                 self.proofreader.close_project();
@@ -637,6 +642,8 @@ impl App {
         self.editor = Editor::new("");
         self.file = None;
         self.others.clear();
+        self.removed_files.clear();
+        self.file_panel.cancel();
         self.apply_suggesting();
         self.saved = self.editor.revision();
         self.project = None;
@@ -656,8 +663,139 @@ impl App {
                     return operation::focus(EDITOR);
                 }
             }
+            file_panel::Message::New => {
+                let folder = self
+                    .file
+                    .as_deref()
+                    .and_then(Path::parent)
+                    .filter(|folder| !folder.as_os_str().is_empty())
+                    .map_or_else(String::new, |folder| {
+                        format!("{}/", files::display_path(folder))
+                    });
+                self.file_panel.start(file_panel::Editing::New, folder);
+                return operation::focus(file_panel::NAME_INPUT);
+            }
+            file_panel::Message::Rename(path) => {
+                if !self.is_fixed(&path) {
+                    let name = files::display_path(&path);
+                    self.file_panel
+                        .start(file_panel::Editing::Rename(path), name);
+                    return operation::focus(file_panel::NAME_INPUT);
+                }
+            }
+            file_panel::Message::Delete(path) => {
+                if !self.is_fixed(&path) {
+                    self.file_panel.ask_delete(path);
+                }
+            }
+            file_panel::Message::Name(name) => self.file_panel.set_name(name),
+            file_panel::Message::Submit => return self.submit_file_name(),
+            file_panel::Message::ConfirmDelete => {
+                if let Some(path) = self.file_panel.take_deleting() {
+                    return self.delete_file(&path);
+                }
+            }
+            file_panel::Message::Cancel => self.file_panel.cancel(),
         }
         Task::none()
+    }
+
+    fn is_fixed(&self, path: &Path) -> bool {
+        self.project
+            .as_ref()
+            .is_none_or(|project| file_panel::is_fixed(path, &project.manifest().main))
+    }
+
+    fn submit_file_name(&mut self) -> Task<Message> {
+        let Some(root) = self
+            .project
+            .as_ref()
+            .map(|project| project.root().to_path_buf())
+        else {
+            return Task::none();
+        };
+        let Some((editing, name)) = self
+            .file_panel
+            .editing()
+            .map(|(editing, name)| (editing.clone(), name.trim().to_owned()))
+        else {
+            return Task::none();
+        };
+        if name.is_empty() {
+            self.file_panel.cancel();
+            return Task::none();
+        }
+        let result = files::project_path(&name).and_then(|path| {
+            match &editing {
+                file_panel::Editing::New => files::make_file(&root, &path),
+                file_panel::Editing::Rename(old) if *old == path => Ok(()),
+                file_panel::Editing::Rename(old) => files::rename_file(&root, old, &path),
+            }
+            .map(|()| path)
+        });
+        let path = match result {
+            Ok(path) => path,
+            Err(error) => {
+                tracing::info!(?error, "The file name was not used");
+                self.file_panel
+                    .fail(files::file_error_text(&self.localizer, error, &name));
+                return Task::none();
+            }
+        };
+        self.file_panel.cancel();
+        self.refresh_files();
+        match editing {
+            file_panel::Editing::New => {
+                tracing::info!(path = %path.display(), "File made");
+                self.open_file(&path);
+            }
+            file_panel::Editing::Rename(old) if old != path => self.renamed(&old, &path),
+            file_panel::Editing::Rename(_) => {}
+        }
+        Task::batch([self.request_compile(), operation::focus(EDITOR)])
+    }
+
+    fn renamed(&mut self, old: &Path, new: &Path) {
+        tracing::info!(old = %old.display(), new = %new.display(), "File renamed");
+        if self.file.as_deref() == Some(old) {
+            self.file = Some(new.to_path_buf());
+        } else if let Some(open) = self.others.remove(old) {
+            self.others.insert(new.to_path_buf(), open);
+        }
+        self.removed_files.push(old.to_path_buf());
+    }
+
+    fn delete_file(&mut self, path: &Path) -> Task<Message> {
+        let Some((root, main)) = self.project.as_ref().map(|project| {
+            (
+                project.root().to_path_buf(),
+                project.manifest().main.clone(),
+            )
+        }) else {
+            return Task::none();
+        };
+        if let Err(error) = files::delete_file(&root, path) {
+            tracing::warn!(path = %path.display(), "The file was not deleted");
+            let file = files::display_path(path);
+            self.notice = Some(files::file_error_text(&self.localizer, error, &file));
+            return Task::none();
+        }
+        tracing::info!(path = %path.display(), "File deleted");
+        if self.file.as_deref() == Some(path) {
+            self.open_file(&main);
+        }
+        self.others.remove(path);
+        self.removed_files.push(path.to_path_buf());
+        self.refresh_files();
+        self.request_compile()
+    }
+
+    fn refresh_files(&mut self) {
+        if let Some(project) = &mut self.project
+            && let Err(error) = project.refresh_files()
+        {
+            tracing::warn!(%error, "The file list was not read again");
+        }
     }
 
     fn open_file(&mut self, path: &Path) -> bool {
@@ -2416,6 +2554,8 @@ impl App {
             event::listen_with(unsaved::dialog_key)
         } else if self.server_dialog.is_open() {
             event::listen_with(server_key)
+        } else if self.file_panel.is_busy() {
+            event::listen_with(file_panel::panel_key).map(Message::Files)
         } else {
             Subscription::none()
         };
@@ -2426,6 +2566,7 @@ impl App {
             && !self.menu_open
             && self.pending.is_none()
             && !self.server_dialog.is_open()
+            && !self.file_panel.is_busy()
         {
             event::listen_with(find_key)
         } else {
@@ -2566,6 +2707,10 @@ impl App {
                 .collect();
             layers = layers.push(unsaved::view(&self.localizer, &files.join(", ")));
         }
+        if let Some(path) = self.file_panel.deleting() {
+            layers =
+                layers.push(file_panel::delete_view(&self.localizer, path).map(Message::Files));
+        }
         chrome::window(self.frame(self.main_window), layers)
     }
 
@@ -2680,13 +2825,15 @@ impl App {
         let mut open = false;
         if let Some(project) = self.project.as_ref().filter(|_| self.file_panel.is_open()) {
             side = side.push(
-                file_panel::view(
-                    &self.localizer,
-                    project.files(),
-                    self.file.as_deref(),
-                    &self.changed_files(),
-                )
-                .map(Message::Files),
+                self.file_panel
+                    .view(
+                        &self.localizer,
+                        project.files(),
+                        &project.manifest().main,
+                        self.file.as_deref(),
+                        &self.changed_files(),
+                    )
+                    .map(Message::Files),
             );
             open = true;
         }
@@ -4932,6 +5079,186 @@ mod tests {
                 .is_some_and(|notice| notice.contains("cover.png")),
             "{:?}",
             app.notice
+        );
+    }
+
+    fn files_message(app: &mut App, message: file_panel::Message) {
+        send(app, Message::Files(message));
+    }
+
+    fn name_file(app: &mut App, name: &str) {
+        files_message(app, file_panel::Message::Name(name.to_owned()));
+        files_message(app, file_panel::Message::Submit);
+    }
+
+    fn field_text(app: &App) -> Option<String> {
+        app.file_panel.editing().map(|(_, name)| name.to_owned())
+    }
+
+    fn error_count(app: &App) -> usize {
+        app.compiled.as_ref().map_or(0, |output| {
+            output
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.severity == Severity::Error)
+                .count()
+        })
+    }
+
+    #[test]
+    fn a_new_file_is_made_in_the_folder_of_the_open_file_and_opens() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        open_file(&mut app, "chapters/one.typ");
+
+        files_message(&mut app, file_panel::Message::New);
+        assert_eq!(field_text(&app).as_deref(), Some("chapters/"));
+        name_file(&mut app, "chapters/two.typ");
+
+        let made = folder.path().join("chapters").join("two.typ");
+        assert_eq!(fs::read_to_string(made).unwrap(), "");
+        assert_eq!(editor_text(&app), "");
+        assert_eq!(field_text(&app), None);
+        let mut ui = simulator(app.view());
+        assert!(ui.find("Field Notes · chapters/two.typ").is_ok());
+        assert!(ui.find("two.typ").is_ok());
+    }
+
+    #[test]
+    fn a_new_file_does_not_replace_a_file() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+
+        files_message(&mut app, file_panel::Message::New);
+        name_file(&mut app, "chapters/one.typ");
+
+        assert_eq!(
+            fs::read_to_string(folder.path().join("chapters").join("one.typ")).unwrap(),
+            CHAPTER
+        );
+        assert_eq!(editor_text(&app), CHAPTERED_MAIN);
+        assert!(
+            simulator(app.view())
+                .find("A file with the name chapters/one.typ is already in the project.")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_renamed_file_keeps_its_changes() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        open_file(&mut app, "chapters/one.typ");
+        send(&mut app, insert("Now. "));
+
+        files_message(
+            &mut app,
+            file_panel::Message::Rename(PathBuf::from("chapters/one.typ")),
+        );
+        assert_eq!(field_text(&app).as_deref(), Some("chapters/one.typ"));
+        name_file(&mut app, "chapters/first.typ");
+
+        let chapters = folder.path().join("chapters");
+        assert!(!chapters.join("one.typ").exists());
+        assert_eq!(
+            fs::read_to_string(chapters.join("first.typ")).unwrap(),
+            CHAPTER
+        );
+        assert_eq!(editor_text(&app), format!("Now. {CHAPTER}"));
+        assert!(
+            simulator(app.view())
+                .find("Field Notes · chapters/first.typ")
+                .is_ok()
+        );
+        send(&mut app, Message::Save);
+        assert_eq!(
+            fs::read_to_string(chapters.join("first.typ")).unwrap(),
+            format!("Now. {CHAPTER}")
+        );
+    }
+
+    #[test]
+    fn the_main_file_no_longer_finds_a_renamed_file() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        open_file(&mut app, "chapters/one.typ");
+        app.compile_now();
+        assert_eq!(error_count(&app), 0);
+
+        files_message(
+            &mut app,
+            file_panel::Message::Rename(PathBuf::from("chapters/one.typ")),
+        );
+        name_file(&mut app, "chapters/first.typ");
+        app.compile_now();
+
+        assert_eq!(error_count(&app), 1);
+    }
+
+    #[test]
+    fn the_main_file_and_the_manifest_cannot_be_renamed_or_deleted() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+
+        for file in ["main.typ", "presswork.toml"] {
+            files_message(&mut app, file_panel::Message::Rename(PathBuf::from(file)));
+            assert_eq!(field_text(&app), None, "{file}");
+            files_message(&mut app, file_panel::Message::Delete(PathBuf::from(file)));
+            files_message(&mut app, file_panel::Message::ConfirmDelete);
+            assert!(folder.path().join(file).is_file(), "{file}");
+        }
+    }
+
+    #[test]
+    fn a_file_is_deleted_only_after_a_question() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        open_file(&mut app, "chapters/one.typ");
+        send(&mut app, insert("Now. "));
+        let path = PathBuf::from("chapters/one.typ");
+
+        files_message(&mut app, file_panel::Message::Delete(path.clone()));
+        assert!(
+            simulator(app.view())
+                .find("Delete chapters/one.typ?")
+                .is_ok()
+        );
+        assert!(folder.path().join(&path).is_file());
+        files_message(&mut app, file_panel::Message::ConfirmDelete);
+
+        assert!(!folder.path().join(&path).exists());
+        assert_eq!(editor_text(&app), CHAPTERED_MAIN);
+        assert!(app.is_saved());
+        assert!(!app.project.as_ref().unwrap().files().contains(&path));
+    }
+
+    #[test]
+    fn cancel_keeps_the_file_that_was_to_be_deleted() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        open_file(&mut app, "chapters/one.typ");
+        let path = PathBuf::from("chapters/one.typ");
+        files_message(&mut app, file_panel::Message::Delete(path.clone()));
+        assert!(
+            simulator(app.view())
+                .find("Delete chapters/one.typ?")
+                .is_ok()
+        );
+
+        files_message(&mut app, file_panel::Message::Cancel);
+
+        assert!(folder.path().join(&path).is_file());
+        assert!(
+            simulator(app.view())
+                .find("Delete chapters/one.typ?")
+                .is_err()
         );
     }
 

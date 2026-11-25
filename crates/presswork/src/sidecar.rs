@@ -81,13 +81,10 @@ pub(crate) fn save(
     text: &str,
     suggestions: &[Suggestion],
 ) -> io::Result<()> {
-    let path = path(root, file);
     if suggestions.is_empty() {
-        return match fs::remove_file(&path) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-            _ => Ok(()),
-        };
+        return remove(root, file);
     }
+    let path = path(root, file);
     if let Some(folder) = path.parent() {
         fs::create_dir_all(folder)?;
     }
@@ -109,6 +106,25 @@ pub(crate) fn save(
             .collect(),
     };
     fs::write(&path, serde_json::to_string_pretty(&sidecar)?)
+}
+
+pub(crate) fn rename(root: &Path, old: &Path, new: &Path) -> io::Result<()> {
+    let from = path(root, old);
+    if !from.is_file() {
+        return Ok(());
+    }
+    let to = path(root, new);
+    if let Some(folder) = to.parent() {
+        fs::create_dir_all(folder)?;
+    }
+    fs::rename(from, to)
+}
+
+pub(crate) fn remove(root: &Path, file: &Path) -> io::Result<()> {
+    match fs::remove_file(path(root, file)) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
 }
 
 pub(crate) fn load(root: &Path, file: &Path, file_text: &str) -> io::Result<Loaded> {
@@ -227,6 +243,46 @@ mod tests {
         assert_eq!(loaded, Loaded::Moved(moved.clone()));
         assert!(moved.is_file());
         assert!(!path(folder.path(), file).exists());
+    }
+
+    #[test]
+    fn the_suggestions_move_with_a_renamed_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let old = Path::new("one.typ");
+        let new = Path::new("chapters/first.typ");
+        save(folder.path(), old, TEXT, &replaced()).unwrap();
+
+        rename(folder.path(), old, new).unwrap();
+
+        assert!(!path(folder.path(), old).exists());
+        assert_eq!(
+            load(folder.path(), new, "The cat sat.").unwrap(),
+            Loaded::Restored {
+                text: TEXT.to_owned(),
+                suggestions: replaced()
+            }
+        );
+    }
+
+    #[test]
+    fn a_file_without_suggestions_renames_without_an_error() {
+        let folder = tempfile::tempdir().unwrap();
+
+        rename(folder.path(), Path::new("one.typ"), Path::new("two.typ")).unwrap();
+
+        assert!(!path(folder.path(), Path::new("two.typ")).exists());
+    }
+
+    #[test]
+    fn remove_takes_away_the_suggestions_of_a_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = Path::new("main.typ");
+        save(folder.path(), file, TEXT, &replaced()).unwrap();
+
+        remove(folder.path(), file).unwrap();
+
+        assert!(!path(folder.path(), file).exists());
+        remove(folder.path(), file).unwrap();
     }
 
     #[test]

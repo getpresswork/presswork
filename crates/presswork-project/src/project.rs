@@ -34,13 +34,10 @@ impl Project {
         if !root.join(&manifest.main).is_file() {
             return Err(ProjectError::MainMissing(manifest.main));
         }
-        let mut files = Vec::new();
-        list(root, Path::new(""), &mut files)?;
-        files.sort();
         Ok(Self {
             root: root.to_path_buf(),
             manifest,
-            files,
+            files: project_files(root)?,
         })
     }
 
@@ -78,6 +75,11 @@ impl Project {
     #[must_use]
     pub fn files(&self) -> &[PathBuf] {
         &self.files
+    }
+
+    pub fn refresh_files(&mut self) -> Result<(), ProjectError> {
+        self.files = project_files(&self.root)?;
+        Ok(())
     }
 
     pub fn set_pin(&mut self, pin: &str) -> Result<(), ProjectError> {
@@ -125,6 +127,13 @@ fn markup_text(text: &str) -> String {
 pub(crate) fn is_inside(path: &Path) -> bool {
     path.components()
         .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+}
+
+fn project_files(root: &Path) -> Result<Vec<PathBuf>, ProjectError> {
+    let mut files = Vec::new();
+    list(root, Path::new(""), &mut files)?;
+    files.sort();
+    Ok(files)
 }
 
 fn list(root: &Path, relative: &Path, files: &mut Vec<PathBuf>) -> Result<(), ProjectError> {
@@ -296,6 +305,24 @@ mod tests {
         let manifest = Manifest::parse(&manifest_text(name.to_owned())).unwrap();
 
         assert_eq!(manifest.name, name);
+    }
+
+    #[test]
+    fn refresh_files_finds_the_files_that_changed() {
+        let folder = folder(&[(MANIFEST, "[project]\nname = \"A\"\n"), ("main.typ", "")]);
+        let mut project = Project::open(folder.path()).unwrap();
+        fs::write(folder.path().join("part.typ"), "").unwrap();
+
+        project.refresh_files().unwrap();
+
+        assert_eq!(
+            project.files(),
+            [
+                PathBuf::from("main.typ"),
+                PathBuf::from("part.typ"),
+                PathBuf::from(MANIFEST)
+            ]
+        );
     }
 
     #[test]
