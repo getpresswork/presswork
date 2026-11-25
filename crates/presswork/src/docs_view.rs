@@ -2,13 +2,14 @@ use iced::alignment::Vertical;
 use iced::widget::{
     button, column, container, markdown, row, rule, scrollable, text, text_input, tooltip,
 };
-use iced::{Element, Fill, Theme};
-use presswork_typst::{DOCS_LINK, DocKind, DocPage, DocParam, ParamFlag, reference};
+use iced::{Element, Fill, Task, Theme};
+use presswork_typst::{DOCS_LINK, DocExample, DocKind, DocPage, DocParam, ParamFlag, reference};
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::{font, font_size, size, space as gap};
 
 use crate::chrome;
+use crate::examples::{self, Examples};
 use crate::i18n::{FluentArgs, Localizer};
 
 pub(crate) const SEARCH_INPUT: &str = "docs-search";
@@ -22,6 +23,7 @@ pub(crate) enum Message {
     Forward,
     Contents,
     Link(markdown::Uri),
+    Rendered(examples::Rendered),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +37,7 @@ pub(crate) struct DocsView {
     shown: Option<Shown>,
     back: Vec<String>,
     forward: Vec<String>,
+    examples: Examples,
 }
 
 #[derive(Debug)]
@@ -86,8 +89,29 @@ impl DocsView {
                 }
                 None => return Some(Request::Open(url)),
             },
+            Message::Rendered(rendered) => {
+                let keep = self.page_examples();
+                self.examples.rendered(rendered, keep);
+            }
         }
         None
+    }
+
+    pub(crate) fn render(&mut self) -> Task<Message> {
+        let wanted = self.page_examples();
+        self.examples.render(wanted).map(Message::Rendered)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn render_now(&mut self) -> usize {
+        let wanted = self.page_examples();
+        self.examples.render_now(wanted)
+    }
+
+    fn page_examples(&self) -> &'static [DocExample] {
+        self.current()
+            .and_then(|path| reference().page(path))
+            .map_or(&[], |page| page.examples.as_slice())
     }
 
     fn step(&mut self, back: bool) {
@@ -135,7 +159,7 @@ impl DocsView {
         let body = if !self.query.trim().is_empty() {
             results(&self.query, localizer)
         } else if let Some(shown) = &self.shown {
-            page_view(shown, localizer, theme)
+            page_view(shown, &self.examples, localizer, theme)
         } else {
             contents(localizer)
         };
@@ -211,7 +235,12 @@ fn contents<'a>(localizer: &Localizer) -> Element<'a, Message> {
     sections.into()
 }
 
-fn page_view<'a>(shown: &'a Shown, localizer: &Localizer, theme: &Theme) -> Element<'a, Message> {
+fn page_view<'a>(
+    shown: &'a Shown,
+    examples: &'a Examples,
+    localizer: &Localizer,
+    theme: &Theme,
+) -> Element<'a, Message> {
     let Some(page) = reference().page(&shown.path) else {
         return column![].into();
     };
@@ -236,12 +265,15 @@ fn page_view<'a>(shown: &'a Shown, localizer: &Localizer, theme: &Theme) -> Elem
     ]
     .spacing(gap::S);
     if !page.docs.is_empty() {
-        content = content.push(crate::markdown::view(shown.docs.items(), theme).map(Message::Link));
+        content = content.push(
+            crate::markdown::view_with_examples(shown.docs.items(), theme, examples)
+                .map(Message::Link),
+        );
     }
     if !page.params.is_empty() {
         content = content.push(heading(localizer.text("docs-parameters")));
         for (param, docs) in page.params.iter().zip(&shown.params) {
-            content = content.push(param_view(param, docs, localizer, theme));
+            content = content.push(param_view(param, docs, examples, localizer, theme));
         }
     }
     if let Some(returns) = &page.returns {
@@ -271,6 +303,7 @@ fn page_view<'a>(shown: &'a Shown, localizer: &Localizer, theme: &Theme) -> Elem
 fn param_view<'a>(
     param: &'static DocParam,
     docs: &'a markdown::Content,
+    examples: &'a Examples,
     localizer: &Localizer,
     theme: &Theme,
 ) -> Element<'a, Message> {
@@ -305,7 +338,9 @@ fn param_view<'a>(
     }
     column![
         hairline(),
-        block.push(crate::markdown::view(docs.items(), theme).map(Message::Link))
+        block.push(
+            crate::markdown::view_with_examples(docs.items(), theme, examples).map(Message::Link)
+        )
     ]
     .spacing(gap::S)
     .into()
@@ -473,6 +508,30 @@ mod tests {
 
         assert!(!view.open("nothing.here"));
         assert_eq!(view.current(), None);
+    }
+
+    #[test]
+    fn the_examples_of_a_page_show_their_result_below_their_code() {
+        let mut view = DocsView::default();
+        view.open("calc.pow");
+
+        assert!(view.render_now() > 0);
+
+        let id = reference().page("calc.pow").unwrap().examples[0].id;
+        let mut ui = simulate(&view);
+        assert!(
+            ui.find(iced_test::selector::id(crate::markdown::example_widget(id)))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_new_page_asks_for_the_images_of_its_examples_one_time() {
+        let mut view = DocsView::default();
+        view.open("calc.pow");
+
+        assert!(view.render().units() > 0);
+        assert_eq!(view.render().units(), 0);
     }
 
     #[test]

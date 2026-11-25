@@ -5,6 +5,7 @@ mod chrome;
 mod compiler;
 mod dictionary_list;
 mod docs_view;
+mod examples;
 mod file_panel;
 mod files;
 mod find_bar;

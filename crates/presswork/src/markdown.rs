@@ -1,14 +1,37 @@
 use iced::widget::markdown::{self, Highlight, Item, Settings, Style, Text, Uri};
-use iced::widget::{container, rich_text, text};
+use iced::widget::{Id, column, container, image, rich_text, text};
 use iced::{Element, Fill, Theme, border, padding};
+use presswork_typst::example_id;
 use presswork_ui::theme as ui_theme;
 use presswork_ui::{font, font_size, space as gap, style};
 
+use crate::examples::{ExamplePage, Examples};
+
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Viewer;
+pub(crate) struct Viewer<'a> {
+    examples: Option<&'a Examples>,
+}
 
 pub(crate) fn view<'a>(items: &'a [Item], theme: &Theme) -> Element<'a, Uri> {
-    markdown::view_with(items, settings(theme), &Viewer)
+    markdown::view_with(items, settings(theme), &Viewer { examples: None })
+}
+
+pub(crate) fn view_with_examples<'a>(
+    items: &'a [Item],
+    theme: &Theme,
+    examples: &'a Examples,
+) -> Element<'a, Uri> {
+    markdown::view_with(
+        items,
+        settings(theme),
+        &Viewer {
+            examples: Some(examples),
+        },
+    )
+}
+
+pub(crate) fn example_widget(id: u128) -> Id {
+    Id::from(format!("docs-example-{id:032x}"))
 }
 
 fn settings(theme: &Theme) -> Settings {
@@ -38,7 +61,22 @@ fn settings(theme: &Theme) -> Settings {
     }
 }
 
-impl<'a> markdown::Viewer<'a, Uri> for Viewer {
+fn example_view<'a>(id: u128, pages: &[ExamplePage]) -> Element<'a, Uri> {
+    container(
+        column(pages.iter().map(|page| {
+            container(image(page.handle.clone()).width(Fill))
+                .padding(1)
+                .max_width(page.width + 2.0)
+                .style(style::outline)
+                .into()
+        }))
+        .spacing(gap::XS),
+    )
+    .id(example_widget(id))
+    .into()
+}
+
+impl<'a> markdown::Viewer<'a, Uri> for Viewer<'a> {
     fn on_link_click(url: Uri) -> Uri {
         url
     }
@@ -59,18 +97,26 @@ impl<'a> markdown::Viewer<'a, Uri> for Viewer {
     fn code_block(
         &self,
         settings: Settings,
-        _language: Option<&'a str>,
+        language: Option<&'a str>,
         code: &'a str,
         _lines: &'a [Text],
     ) -> Element<'a, Uri> {
-        container(
+        let block = container(
             text(code.trim_end_matches('\n'))
                 .font(settings.style.code_block_font)
                 .size(settings.code_size),
         )
         .padding(gap::S)
         .width(Fill)
-        .style(style::code_block)
-        .into()
+        .style(style::code_block);
+        let example = language
+            .and_then(example_id)
+            .and_then(|id| Some((id, self.examples?.pages(id)?)));
+        match example {
+            Some((id, pages)) if !pages.is_empty() => column![block, example_view(id, pages)]
+                .spacing(gap::XS)
+                .into(),
+            _ => block.into(),
+        }
     }
 }

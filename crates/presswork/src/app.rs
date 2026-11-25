@@ -782,10 +782,11 @@ impl App {
         Task::batch([shown, operation::focus(search)])
     }
 
-    fn docs_message(&mut self, message: docs_view::Message) {
+    fn docs_message(&mut self, message: docs_view::Message) -> Task<Message> {
         if let Some(docs_view::Request::Open(url)) = self.docs_view.update(message) {
             links::open(&url);
         }
+        self.docs_view.render().map(Message::Docs)
     }
 
     fn packages_message(&mut self, message: packages_view::Message) -> Task<Message> {
@@ -1567,7 +1568,8 @@ impl App {
             }
             Some(presswork_typst::Definition::Library(name)) => {
                 if self.docs_view.open(&name) {
-                    return self.show_pane(Pane::Docs);
+                    let pane = self.show_pane(Pane::Docs);
+                    return Task::batch([pane, self.docs_view.render().map(Message::Docs)]);
                 }
                 let mut args = FluentArgs::new();
                 args.set("name", name);
@@ -2321,6 +2323,7 @@ impl App {
     #[cfg(test)]
     pub(crate) fn render_pages_now(&mut self) {
         self.preview.render_now();
+        self.docs_view.render_now();
     }
 
     fn show_output(
@@ -2650,7 +2653,7 @@ impl App {
             Message::Outline(message) => return self.outline_message(message),
             Message::Files(message) => return self.file_message(message),
             Message::Pane(pane) => return self.open_pane(pane),
-            Message::Docs(message) => self.docs_message(message),
+            Message::Docs(message) => return self.docs_message(message),
             Message::Packages(message) => return self.packages_message(message),
             Message::Find(message) => return self.find_message(message),
             Message::Publish(message) => return self.publish_message(message),
@@ -5047,6 +5050,7 @@ mod tests {
         assert_eq!(app.pane, Pane::Docs);
         assert_eq!(app.docs_view.current(), Some("calc.pow"));
         assert_eq!(app.notice, None);
+        assert_eq!(app.docs_view.render().units(), 0);
     }
 
     #[test]
