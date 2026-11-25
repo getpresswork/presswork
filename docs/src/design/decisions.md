@@ -1643,7 +1643,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D207. Markdown and the reference of the embedded engine
 
-- **Status:** Accepted, 2026-11-24. **Origin:** Project owner.
+- **Status:** Accepted, 2026-11-24. Extended by D209. **Origin:** Project owner.
 - **Decision:**
   - Presswork shows Markdown with the `markdown` feature of iced, which uses the `pulldown-cmark` crate. Package READMEs and the documentation use it. `pulldown-cmark` 0.12.2 (MIT) adds four crates: `pulldown-cmark`, `pulldown-cmark-escape`, `unicase`, and `getopts`. `cargo deny` accepts them.
   - The documentation is the reference of the embedded Typst version, made at run time from its library: each function, type, and module with its description, its parameters, and its definitions. Presswork does not copy the guides and the tutorial of Typst. Links to them open typst.app.
@@ -1663,3 +1663,16 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The package list shows up to 100 results.
 - **Reason:** A person who writes Typst looks up functions and packages while the document is open. The right pane keeps the editor visible.
 - **Other options:** A separate window for the documentation. A panel at the left like the outline. The documentation and the packages in the Research workspace. Renders of the examples.
+
+## D209. Results of the documentation examples
+
+- **Status:** Accepted, 2026-11-25. **Origin:** Default, from a requirement of the project owner.
+- **Decision:**
+  - The Docs tab shows the result of each example below its code. The embedded engine compiles the examples of the open page on a separate thread, one example at a time. Each result shows when it is ready.
+  - The examples use the page setup of the Typst documentation: a page 240 pt wide, with an automatic height and margins of 15 pt. The engine compiles the hidden lines (`>>>`) and not the lines that only show (`<<<`).
+  - The images have the scale of the preview at 100 %: the engine draws 2 pixels for each point, and the Docs tab shows 96 / 72 pixels for each point. An example shows up to 4 pages.
+  - An example cannot read files, because its world has no project folder. In Typst 0.15.1, 33 of 552 examples need a file that only the Typst documentation has, for example an image, a bibliography, or a data file. These examples show only their code.
+  - Presswork keeps the images of up to 48 examples. It removes the oldest images first, but not the images of the open page. When you open another page, the thread stops after its current example.
+  - The compilation of an example does not remove old entries from the cache of Typst, so that the cache of the open document stays.
+- **Reason:** A person who looks up a function sees what the code makes, as in the Typst documentation, also without the network.
+- **Other options:** Images from typst.app (this needs the network). The example files of the Typst repository (they are not in a published crate). A result only after a click.

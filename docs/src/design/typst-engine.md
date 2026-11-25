@@ -90,7 +90,7 @@ In milestone 2, the engine does these things:
 
 - The world reads packages from the package folders of Typst (D203): first the data folder, for example `%APPDATA%\typst\packages` on Windows, then the cache folder, for example `%LOCALAPPDATA%\typst\packages`.
 - If a `@preview` package is in neither folder, the toolchain manager downloads it from Typst Universe into the cache folder (D206). The Typst command-line tool uses the same folder. Presswork does not download packages of other namespaces.
-- The engine makes the reference for the Docs tab from its own library (D207).
+- The engine makes the reference for the Docs tab from its own library (D207). It also compiles the examples of the reference, on pages 240 pt wide, as the Typst documentation does (D209). After an update of Typst, run the ignored test `each_example_that_does_not_render_needs_a_file` in `presswork-typst`. It makes sure that each example that does not compile needs a file that Presswork does not have.
 - The compilation makes no page images. The preview draws only the pages near its visible part, on a separate thread, at 2 pixels for each point (D202).
 - The preview keeps each page image by a hash of the page and of the bleed setting. After a change, it draws again only the pages with a different hash. It keeps up to 32 images.
 - The QA report, the baseline grid, and the preflight checks run on a separate thread after each compilation. The results of an older compilation are not used.

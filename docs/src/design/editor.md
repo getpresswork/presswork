@@ -257,6 +257,7 @@ The Docs tab shows the reference of the Typst version in Presswork (D207). Press
 - The contents show the functions, the types, and the modules of each category, for example Text and Layout.
 - Type in the search field to find a page by its name, its title, its keywords, or the words of its summary.
 - A page shows the description, the examples as Typst code, the parameters with their types, their default values, and their properties (Required, Positional, Variadic, Settable), the type of the result, and the definitions of the item, for example the methods of a type.
+- Below the code of each example, the page shows its result, as in the Typst documentation. Presswork compiles the examples with the embedded engine when you open the page. An example that needs a file, for example an image or a bibliography, shows only its code (D209).
 - A link to another page of the reference opens that page. The arrows go back and forward. A link to the guides or the tutorial opens typst.app in your web browser.
 - F12 on a function or a type of the Typst library opens its page.
 
