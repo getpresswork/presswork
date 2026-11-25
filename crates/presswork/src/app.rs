@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -458,16 +459,31 @@ impl App {
         }
     }
 
+    fn active_file(&self) -> Option<&Path> {
+        if self.main_active() {
+            None
+        } else {
+            self.file.as_deref()
+        }
+    }
+
+    fn pages_map_of_active(&self) -> Cow<'_, SourceMap> {
+        if self.main_active() {
+            Cow::Borrowed(&self.pages_map)
+        } else {
+            Cow::Owned(self.preview_map())
+        }
+    }
+
     pub(crate) fn marks(&self) -> Vec<Mark> {
         let mut marks = self.diagnostic_marks();
-        if self.main_active() {
-            marks.extend(
-                self.proofreader
-                    .marks(self.editor.revision())
-                    .into_iter()
-                    .map(|mark| Self::mapped_mark(&self.pages_map, &mark)),
-            );
-        }
+        let map = self.pages_map_of_active();
+        marks.extend(
+            self.proofreader
+                .marks(self.active_file(), self.editor.revision())
+                .into_iter()
+                .map(|mark| Self::mapped_mark(&map, &mark)),
+        );
         if self.find.is_open() {
             marks.extend(self.find.matches().iter().map(|found| Mark {
                 range: Position::new(found.start)..Position::new(found.end),
@@ -1370,13 +1386,14 @@ impl App {
     }
 
     fn find_definition(&self, position: Position) -> Task<Message> {
-        let Some(analysis) = self.assist_analysis().filter(|_| self.main_active()) else {
+        let Some(analysis) = self.assist_analysis() else {
             return Task::none();
         };
         let (text, map) = self.compile_text();
         let revision = self.editor.revision();
+        let file = self.active_file().map(Path::to_path_buf);
         Task::perform(
-            assist::definition(analysis, text, map.to_compiled(position.offset())),
+            assist::definition(analysis, file, text, map.to_compiled(position.offset())),
             move |definition| Message::DefinitionFound {
                 revision,
                 definition,
@@ -1394,8 +1411,16 @@ impl App {
         }
         match definition {
             Some(presswork_typst::Definition::Main(range)) => {
+                let moved = !self.main_active();
+                if !self.open_source(None) {
+                    return Task::none();
+                }
                 let range = self.preview_map().range_to_editor(range);
-                self.select_range(range.start, range.end)
+                let select = self.select_range(range.start, range.end);
+                if moved {
+                    return Task::batch([select, operation::focus(EDITOR)]);
+                }
+                select
             }
             Some(presswork_typst::Definition::File(path, range)) => {
                 if self.project.is_none() {
@@ -1452,13 +1477,12 @@ impl App {
     }
 
     fn correction_here(&self, revision: u64) -> Option<Correction> {
-        if !self.main_active() {
-            return None;
-        }
-        let map = &self.pages_map;
-        let correction = self
-            .proofreader
-            .correction_at(revision, map.to_compiled(self.cursor().offset()))?;
+        let map = self.pages_map_of_active();
+        let correction = self.proofreader.correction_at(
+            self.active_file(),
+            revision,
+            map.to_compiled(self.cursor().offset()),
+        )?;
         Some(match correction {
             Correction::Replacement { range, text } => Correction::Replacement {
                 range: map.range_to_editor(range),
@@ -1674,14 +1698,15 @@ impl App {
     }
 
     fn request_completions(&self, explicit: bool) -> Task<Message> {
-        let Some(analysis) = self.assist_analysis().filter(|_| self.main_active()) else {
+        let Some(analysis) = self.assist_analysis() else {
             return Task::none();
         };
         let (text, map) = self.compile_text();
         let revision = self.editor.revision();
         let offset = self.cursor().offset();
+        let file = self.active_file().map(Path::to_path_buf);
         Task::perform(
-            assist::completions(analysis, text, map.to_compiled(offset), explicit),
+            assist::completions(analysis, file, text, map.to_compiled(offset), explicit),
             move |completions| Message::CompletionsFound {
                 revision,
                 offset,
@@ -1753,13 +1778,11 @@ impl App {
             });
             return Task::none();
         }
-        if !self.main_active() {
-            return Task::none();
-        }
         if let Some(text) = self.proofreader.tooltip(
             &self.localizer,
+            self.active_file(),
             self.editor.revision(),
-            self.pages_map.to_compiled(position.offset()),
+            self.pages_map_of_active().to_compiled(position.offset()),
         ) {
             self.tooltip = Some(presswork_editor::Tooltip {
                 position,
@@ -1773,8 +1796,9 @@ impl App {
         };
         let (text, map) = self.compile_text();
         let revision = self.editor.revision();
+        let file = self.active_file().map(Path::to_path_buf);
         Task::perform(
-            assist::tooltip(analysis, text, map.to_compiled(position.offset())),
+            assist::tooltip(analysis, file, text, map.to_compiled(position.offset())),
             move |tooltip| Message::TooltipFound {
                 position,
                 revision,
@@ -1837,14 +1861,15 @@ impl App {
     }
 
     fn follow_cursor(&mut self) -> Task<Message> {
-        if !self.main_active() {
-            return Task::none();
-        }
-        let offset = self.pages_map.to_compiled(self.cursor().offset());
-        let point = self
-            .pages_analysis
-            .as_ref()
-            .and_then(|analysis| analysis.jump_from_cursor(offset).first().copied());
+        let offset = self
+            .pages_map_of_active()
+            .to_compiled(self.cursor().offset());
+        let point = self.pages_analysis.as_ref().and_then(|analysis| {
+            analysis
+                .jump_from_cursor(self.active_file(), offset)
+                .first()
+                .copied()
+        });
         match point {
             Some(point) => self.preview.show_point(point, Instant::now()),
             None => Task::none(),
@@ -2317,14 +2342,24 @@ impl App {
 
     fn proofread(&mut self) -> Task<Message> {
         self.read_project_files();
-        let (Some(analysis), Some(revision)) =
-            (self.pages_analysis.clone(), self.compiled_revision)
+        let (Some(analysis), Some(revisions)) = (self.pages_analysis.clone(), self.revisions())
         else {
             return Task::none();
         };
         self.proofreader
-            .check(analysis, revision)
+            .check(analysis, revisions)
             .map(Message::Proofreading)
+    }
+
+    fn revisions(&self) -> Option<proofreading::Revisions> {
+        Some(proofreading::Revisions {
+            main: self.compiled_revision?,
+            files: self
+                .compiled_files
+                .iter()
+                .map(|snapshot| (snapshot.path.clone(), snapshot.revision))
+                .collect(),
+        })
     }
 
     fn proofreading_message(&mut self, message: proofreading::Message) -> Task<Message> {
@@ -2374,10 +2409,8 @@ impl App {
     #[cfg(test)]
     pub(crate) fn proofread_now(&mut self) {
         self.read_project_files();
-        if let (Some(analysis), Some(revision)) =
-            (self.pages_analysis.clone(), self.compiled_revision)
-        {
-            self.proofreader.check_now(&analysis, revision);
+        if let (Some(analysis), Some(revisions)) = (self.pages_analysis.clone(), self.revisions()) {
+            self.proofreader.check_now(&analysis, revisions);
         }
     }
 
@@ -3471,7 +3504,7 @@ mod tests {
             .pages_analysis
             .as_ref()
             .unwrap()
-            .jump_from_cursor(offset)[0];
+            .jump_from_cursor(None, offset)[0];
         PagePoint {
             x: point.x + 0.5,
             ..point
@@ -5260,6 +5293,100 @@ mod tests {
                 .find("Delete chapters/one.typ?")
                 .is_err()
         );
+    }
+
+    fn chapter_app(chapter: &str) -> (App, tempfile::TempDir) {
+        let folder = chaptered();
+        fs::write(folder.path().join("chapters").join("one.typ"), chapter).unwrap();
+        let mut app = app();
+        open(&mut app, &folder);
+        open_file(&mut app, "chapters/one.typ");
+        app.compile_now();
+        (app, folder)
+    }
+
+    fn proofread_chapter() -> (App, tempfile::TempDir) {
+        let (mut app, folder) = chapter_app(STYLE_BOOK);
+        send(&mut app, english_dictionary());
+        app.proofread_now();
+        (app, folder)
+    }
+
+    #[test]
+    fn misspelled_words_of_another_file_have_marks() {
+        let (mut app, _folder) = proofread_chapter();
+
+        assert_eq!(spelling_marks(&app), [Position::new(19)..Position::new(22)]);
+        send(&mut app, insert("x"));
+        assert_eq!(spelling_marks(&app), []);
+    }
+
+    #[test]
+    fn resting_on_a_misspelled_word_of_another_file_shows_its_problem() {
+        let (mut app, _folder) = proofread_chapter();
+
+        let task = app.update(hover_at(20));
+
+        assert_eq!(task.units(), 0);
+        assert!(
+            app.tooltip
+                .as_ref()
+                .is_some_and(|tooltip| tooltip.text.contains("“mta”")),
+            "{:?}",
+            app.tooltip
+        );
+    }
+
+    #[test]
+    fn the_corrections_of_a_misspelled_word_of_another_file_offer_the_word_list() {
+        let (mut app, _folder) = proofread_chapter();
+        send(&mut app, move_to(20));
+
+        app.correct_now();
+
+        assert_eq!(
+            labels(&app).last().map(String::as_str),
+            Some("Add “mta” to the word list")
+        );
+    }
+
+    #[test]
+    fn the_editor_help_asks_the_engine_also_in_another_file() {
+        let (mut app, _folder) = chapter_app("#let gap = 10pt\n#gap");
+
+        assert!(app.update(hover_at(13)).units() > 0);
+        assert!(app.update(Message::Definition(Position::new(18))).units() > 0);
+        send(&mut app, move_to(20));
+        assert!(
+            app.update(Message::Complete(CompletionEvent::Request))
+                .units()
+                > 0
+        );
+    }
+
+    #[test]
+    fn a_definition_in_the_main_file_opens_the_main_file() {
+        let (mut app, _folder) = chapter_app(CHAPTER);
+
+        let found = definition_found(&app, presswork_typst::Definition::Main(2..6));
+        send(&mut app, found);
+
+        assert_eq!(editor_text(&app), CHAPTERED_MAIN);
+        let selection = app.editor.document().selection().primary();
+        assert_eq!(
+            (selection.anchor, selection.head),
+            (Position::new(2), Position::new(6))
+        );
+    }
+
+    #[test]
+    fn the_preview_marks_the_place_of_the_cursor_in_another_file() {
+        let (mut app, _folder) = chapter_app(CHAPTER);
+        assert_eq!(app.preview.marked(), None);
+
+        send(&mut app, move_to(CHAPTER.find("press").unwrap() + 1));
+
+        assert!(app.preview.marked().is_some());
     }
 
     #[test]

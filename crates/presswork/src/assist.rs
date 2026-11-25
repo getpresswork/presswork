@@ -1,29 +1,34 @@
+use std::path::PathBuf;
+
 use futures::channel::oneshot;
 use presswork_typst::{Analysis, Completions, Definition, Tooltip};
 
 pub(crate) fn definition(
     analysis: Analysis,
+    file: Option<PathBuf>,
     text: String,
     offset: usize,
 ) -> impl Future<Output = Option<Definition>> + Send + 'static {
-    run(move || analysis.definition(&text, offset))
+    run(move || analysis.definition(file.as_deref(), &text, offset))
 }
 
 pub(crate) fn tooltip(
     analysis: Analysis,
+    file: Option<PathBuf>,
     text: String,
     offset: usize,
 ) -> impl Future<Output = Option<Tooltip>> + Send + 'static {
-    run(move || analysis.tooltip(&text, offset))
+    run(move || analysis.tooltip(file.as_deref(), &text, offset))
 }
 
 pub(crate) fn completions(
     analysis: Analysis,
+    file: Option<PathBuf>,
     text: String,
     offset: usize,
     explicit: bool,
 ) -> impl Future<Output = Option<Completions>> + Send + 'static {
-    run(move || analysis.completions(&text, offset, explicit))
+    run(move || analysis.completions(file.as_deref(), &text, offset, explicit))
 }
 
 fn run<T: Send + 'static>(
@@ -56,6 +61,7 @@ mod tests {
 
         let tooltip = futures::executor::block_on(tooltip(
             analysis(text),
+            None,
             text.to_owned(),
             text.find("10pt").unwrap() + 1,
         ));
@@ -72,6 +78,7 @@ mod tests {
 
         let definition = futures::executor::block_on(definition(
             analysis(text),
+            None,
             text.to_owned(),
             text.rfind("gap").unwrap() + 1,
         ));
@@ -85,6 +92,7 @@ mod tests {
 
         let completions = futures::executor::block_on(completions(
             analysis(text),
+            None,
             text.to_owned(),
             text.len(),
             false,

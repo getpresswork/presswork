@@ -123,7 +123,7 @@ mod tests {
         let preflight_problems = output.preflight_profiles(&profiles).len();
         let preflight_time = start.elapsed();
         let start = Instant::now();
-        let points = analysis.jump_from_cursor(text.len() / 2).len();
+        let points = analysis.jump_from_cursor(None, text.len() / 2).len();
         let cursor_time = start.elapsed();
 
         let middle = text[..text.len() / 2].rfind(' ').unwrap_or(0);

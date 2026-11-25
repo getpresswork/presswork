@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use typst::foundations::Repr;
 use typst::syntax::Side;
@@ -54,9 +54,8 @@ pub enum Definition {
 
 impl Analysis {
     #[must_use]
-    pub fn tooltip(&self, text: &str, offset: usize) -> Option<Tooltip> {
-        let world = self.world_with(text);
-        let source = world.source(world.main()).ok()?;
+    pub fn tooltip(&self, file: Option<&Path>, text: &str, offset: usize) -> Option<Tooltip> {
+        let (world, source) = self.source_with(file, text)?;
         match typst_ide::tooltip(&world, self.document(), &source, offset, Side::After)? {
             typst_ide::Tooltip::Text(text) => Some(Tooltip::Text(text.to_string())),
             typst_ide::Tooltip::Code(code) => Some(Tooltip::Code(code.to_string())),
@@ -64,9 +63,14 @@ impl Analysis {
     }
 
     #[must_use]
-    pub fn completions(&self, text: &str, offset: usize, explicit: bool) -> Option<Completions> {
-        let world = self.world_with(text);
-        let source = world.source(world.main()).ok()?;
+    pub fn completions(
+        &self,
+        file: Option<&Path>,
+        text: &str,
+        offset: usize,
+        explicit: bool,
+    ) -> Option<Completions> {
+        let (world, source) = self.source_with(file, text)?;
         let (from, items) =
             typst_ide::autocomplete(&world, self.document(), &source, offset, explicit)?;
         if items.is_empty() {
@@ -99,9 +103,8 @@ impl Analysis {
     }
 
     #[must_use]
-    pub fn definition(&self, text: &str, offset: usize) -> Option<Definition> {
-        let world = self.world_with(text);
-        let source = world.source(world.main()).ok()?;
+    pub fn definition(&self, file: Option<&Path>, text: &str, offset: usize) -> Option<Definition> {
+        let (world, source) = self.source_with(file, text)?;
         let found = typst_ide::definition(&world, self.document(), &source, offset, Side::After)
             .or_else(|| {
                 typst_ide::definition(&world, self.document(), &source, offset, Side::Before)
@@ -196,7 +199,7 @@ mod tests {
     fn a_tooltip_tells_about_a_function() {
         let text = "#text(fill: red)[Hi]";
 
-        let tooltip = analysis(text).tooltip(text, inside(text, "text"));
+        let tooltip = analysis(text).tooltip(None, text, inside(text, "text"));
 
         assert!(
             matches!(&tooltip, Some(Tooltip::Text(about)) if !about.is_empty()),
@@ -208,7 +211,7 @@ mod tests {
     fn a_tooltip_converts_a_length() {
         let text = "#let gap = 10pt";
 
-        let tooltip = analysis(text).tooltip(text, inside(text, "10pt"));
+        let tooltip = analysis(text).tooltip(None, text, inside(text, "10pt"));
 
         assert!(
             matches!(&tooltip, Some(Tooltip::Code(code)) if code.starts_with("10pt =")),
@@ -220,7 +223,7 @@ mod tests {
     fn a_tooltip_uses_the_text_of_the_editor() {
         let newer = "#let gap = 2cm";
 
-        let tooltip = analysis("Hello.").tooltip(newer, inside(newer, "2cm"));
+        let tooltip = analysis("Hello.").tooltip(None, newer, inside(newer, "2cm"));
 
         assert!(
             matches!(&tooltip, Some(Tooltip::Code(code)) if code.contains("20mm")),
@@ -232,14 +235,16 @@ mod tests {
     fn plain_text_has_no_tooltip() {
         let text = "Hello world.";
 
-        assert_eq!(analysis(text).tooltip(text, 3), None);
+        assert_eq!(analysis(text).tooltip(None, text, 3), None);
     }
 
     #[test]
     fn completions_after_a_hash_offer_functions() {
         let text = "#te";
 
-        let completions = analysis(text).completions(text, text.len(), false).unwrap();
+        let completions = analysis(text)
+            .completions(None, text, text.len(), false)
+            .unwrap();
 
         assert_eq!(completions.from, 1);
         assert!(
@@ -255,14 +260,17 @@ mod tests {
     fn plain_text_gives_no_completions_without_a_request() {
         let text = "Hello";
 
-        assert_eq!(analysis(text).completions(text, text.len(), false), None);
+        assert_eq!(
+            analysis(text).completions(None, text, text.len(), false),
+            None
+        );
     }
 
     #[test]
     fn a_request_in_plain_text_gives_completions() {
         let text = "Hello ";
 
-        let completions = analysis(text).completions(text, text.len(), true);
+        let completions = analysis(text).completions(None, text, text.len(), true);
 
         assert!(
             completions.is_some_and(|completions| !completions.items.is_empty()),
@@ -276,7 +284,7 @@ mod tests {
         let typed = "= Start <start>\n#pagebreak()\n= End <end>\nSee @";
 
         let completions = analysis(compiled)
-            .completions(typed, typed.len(), false)
+            .completions(None, typed, typed.len(), false)
             .unwrap();
 
         let end = completions
@@ -296,7 +304,9 @@ mod tests {
     fn other_completions_have_no_label_target() {
         let text = "#te";
 
-        let completions = analysis(text).completions(text, text.len(), false).unwrap();
+        let completions = analysis(text)
+            .completions(None, text, text.len(), false)
+            .unwrap();
 
         assert!(completions.items.iter().all(|item| item.target.is_none()));
     }
@@ -306,7 +316,7 @@ mod tests {
         let text = "#let gap = 1pt\n#gap";
         let used = text.rfind("gap").unwrap() + 1;
 
-        let definition = analysis(text).definition(text, used);
+        let definition = analysis(text).definition(None, text, used);
 
         assert!(
             matches!(&definition, Some(Definition::Main(range)) if &text[range.clone()] == "gap" && range.start < used),
@@ -318,7 +328,7 @@ mod tests {
     fn the_end_of_a_name_also_finds_its_definition() {
         let text = "#let gap = 1pt\n#gap";
 
-        let definition = analysis(text).definition(text, text.len());
+        let definition = analysis(text).definition(None, text, text.len());
 
         assert!(
             matches!(&definition, Some(Definition::Main(range)) if &text[range.clone()] == "gap"),
@@ -330,7 +340,7 @@ mod tests {
     fn the_definition_of_a_reference_is_the_labeled_element() {
         let text = "#set heading(numbering: \"1.\")\n= Start <start>\nSee @start.";
 
-        let definition = analysis(text).definition(text, text.rfind("start").unwrap() + 1);
+        let definition = analysis(text).definition(None, text, text.rfind("start").unwrap() + 1);
 
         assert!(
             matches!(&definition, Some(Definition::Main(range)) if text[range.clone()].starts_with("= Start")),
@@ -342,7 +352,7 @@ mod tests {
     fn a_function_of_the_library_is_in_the_library() {
         let text = "#text[Hi]";
 
-        let definition = analysis(text).definition(text, inside(text, "text"));
+        let definition = analysis(text).definition(None, text, inside(text, "text"));
 
         assert_eq!(definition, Some(Definition::Library("text".to_owned())));
     }
@@ -361,7 +371,7 @@ mod tests {
         ));
         let analysis = analyze(&world, text).analysis.unwrap();
 
-        let definition = analysis.definition(text, inside(text, "part"));
+        let definition = analysis.definition(None, text, inside(text, "part"));
 
         assert_eq!(
             definition,
@@ -370,10 +380,37 @@ mod tests {
     }
 
     #[test]
+    fn the_definition_of_a_name_in_another_file_is_in_that_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let main = "#include \"part.typ\"";
+        let part = "#let gap = 1pt\n#gap";
+        std::fs::write(folder.path().join("main.typ"), main).unwrap();
+        std::fs::write(folder.path().join("part.typ"), part).unwrap();
+        let world = Mutex::new(World::open(
+            Arc::new(Fonts::embedded()),
+            None,
+            folder.path().to_path_buf(),
+            Path::new("main.typ"),
+        ));
+        let analysis = analyze(&world, main).analysis.unwrap();
+
+        let definition = analysis.definition(
+            Some(Path::new("part.typ")),
+            part,
+            part.rfind("gap").unwrap() + 1,
+        );
+
+        assert_eq!(
+            definition,
+            Some(Definition::File(PathBuf::from("part.typ"), Some(5..8)))
+        );
+    }
+
+    #[test]
     fn plain_text_has_no_definition() {
         let text = "Hello world.";
 
-        assert_eq!(analysis(text).definition(text, 3), None);
+        assert_eq!(analysis(text).definition(None, text, 3), None);
     }
 
     #[test]

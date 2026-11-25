@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use typst::World as _;
@@ -8,7 +8,7 @@ use typst::syntax::{FileId, LinkedNode, Side, Source, Span, SyntaxKind, VirtualR
 use typst_ide::IdeWorld;
 use typst_layout::PagedDocument;
 
-use crate::world::World;
+use crate::world::{World, file_id};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PagePoint {
@@ -53,10 +53,20 @@ impl Analysis {
         self.document.as_ref()
     }
 
-    pub(crate) fn world_with(&self, text: &str) -> World {
+    pub(crate) fn source_with(&self, file: Option<&Path>, text: &str) -> Option<(World, Source)> {
         let mut world = (*self.world).clone();
-        world.set_main_text(text);
-        world
+        let id = match file {
+            None => {
+                world.set_main_text(text);
+                world.main()
+            }
+            Some(path) => {
+                world.set_text(path, text);
+                file_id(path)?
+            }
+        };
+        let source = world.source(id).ok()?;
+        Some((world, source))
     }
 
     pub(crate) fn world(&self) -> &World {
@@ -92,10 +102,14 @@ impl Analysis {
     }
 
     #[must_use]
-    pub fn jump_from_cursor(&self, offset: usize) -> Vec<PagePoint> {
-        match self.world.source(self.world.main()) {
-            Ok(source) => self.points(&source, offset),
-            Err(_) => Vec::new(),
+    pub fn jump_from_cursor(&self, file: Option<&Path>, offset: usize) -> Vec<PagePoint> {
+        let id = match file {
+            None => Some(self.world.main()),
+            Some(path) => file_id(path),
+        };
+        match id.map(|id| self.world.source(id)) {
+            Some(Ok(source)) => self.points(&source, offset),
+            _ => Vec::new(),
         }
     }
 
@@ -235,7 +249,7 @@ mod tests {
 
     #[test]
     fn the_cursor_in_the_text_of_the_second_page_is_on_the_second_page() {
-        let points = analysis(TWO_PAGES).jump_from_cursor(start_of(TWO_PAGES, "Second") + 2);
+        let points = analysis(TWO_PAGES).jump_from_cursor(None, start_of(TWO_PAGES, "Second") + 2);
 
         assert_eq!(
             points.iter().map(|point| point.page).collect::<Vec<_>>(),
@@ -247,7 +261,7 @@ mod tests {
     fn a_cursor_outside_of_text_has_no_page_position() {
         let text = "#let name = 1\nText.";
 
-        assert_eq!(analysis(text).jump_from_cursor(2), []);
+        assert_eq!(analysis(text).jump_from_cursor(None, 2), []);
     }
 
     #[test]
@@ -255,8 +269,8 @@ mod tests {
         let text = "Some words in one line.";
         let analysis = analysis(text);
 
-        let first = analysis.jump_from_cursor(start_of(text, "Some"))[0];
-        let later = analysis.jump_from_cursor(start_of(text, "one"))[0];
+        let first = analysis.jump_from_cursor(None, start_of(text, "Some"))[0];
+        let later = analysis.jump_from_cursor(None, start_of(text, "one"))[0];
 
         assert!(later.x > first.x + 20.0, "{first:?} {later:?}");
         assert!((later.y - first.y).abs() < 0.01, "{first:?} {later:?}");
@@ -269,7 +283,7 @@ mod tests {
             "word ".repeat(200)
         );
 
-        let points = analysis(&text).jump_from_cursor(text.len() - 3);
+        let points = analysis(&text).jump_from_cursor(None, text.len() - 3);
 
         assert_eq!(points.len(), 1, "{points:?}");
         assert!(points[0].page > 0, "{points:?}");
@@ -279,7 +293,7 @@ mod tests {
     fn a_click_on_a_word_gives_its_position_in_the_main_file() {
         let analysis = analysis(TWO_PAGES);
         let offset = start_of(TWO_PAGES, "Second") + 2;
-        let point = analysis.jump_from_cursor(offset)[0];
+        let point = analysis.jump_from_cursor(None, offset)[0];
 
         assert_eq!(
             analysis.jump_from_click(inside(point)),
@@ -314,7 +328,7 @@ mod tests {
         let text = "#link(\"https://typst.app\")[Typst]";
         let analysis = analysis(text);
         let offset = start_of(text, "Typst]") + 1;
-        let point = analysis.jump_from_cursor(offset)[0];
+        let point = analysis.jump_from_cursor(None, offset)[0];
 
         assert_eq!(
             analysis.jump_from_click(inside(point)),
@@ -326,7 +340,7 @@ mod tests {
     fn a_click_on_a_link_to_a_label_gives_the_page_of_the_label() {
         let text = "#link(<end>)[Go]\n#pagebreak()\n= The end <end>";
         let analysis = analysis(text);
-        let point = analysis.jump_from_cursor(start_of(text, "Go") + 1)[0];
+        let point = analysis.jump_from_cursor(None, start_of(text, "Go") + 1)[0];
         let jump = analysis.jump_from_click(inside(point));
 
         assert!(
@@ -359,6 +373,30 @@ mod tests {
         assert_eq!(
             analysis.jump_from_click(inside(point)),
             Some(Jump::File(PathBuf::from("part.typ"), offset))
+        );
+    }
+
+    #[test]
+    fn the_cursor_in_an_included_file_is_on_the_page_of_its_text() {
+        let folder = tempfile::tempdir().unwrap();
+        let main = "First page.\n#pagebreak()\n#include \"part.typ\"";
+        let part = "Included words.";
+        fs::write(folder.path().join("main.typ"), main).unwrap();
+        fs::write(folder.path().join("part.typ"), part).unwrap();
+        let world = Mutex::new(World::open(
+            Arc::new(Fonts::embedded()),
+            today(),
+            folder.path().to_path_buf(),
+            Path::new("main.typ"),
+        ));
+        let analysis = analyze(&world, main).analysis.unwrap();
+
+        let points =
+            analysis.jump_from_cursor(Some(Path::new("part.typ")), start_of(part, "words"));
+
+        assert_eq!(
+            points.iter().map(|point| point.page).collect::<Vec<_>>(),
+            [1]
         );
     }
 }

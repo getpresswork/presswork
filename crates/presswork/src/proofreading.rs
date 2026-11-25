@@ -21,9 +21,37 @@ const PERSONAL_WORDS: &str = "personal-words.txt";
 pub(crate) enum Message {
     Loaded(Arc<Dictionaries>),
     Checked {
-        revision: u64,
+        revisions: Revisions,
         findings: Arc<Findings>,
     },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Revisions {
+    pub(crate) main: u64,
+    pub(crate) files: Vec<(PathBuf, u64)>,
+}
+
+impl From<u64> for Revisions {
+    fn from(main: u64) -> Self {
+        Self {
+            main,
+            files: Vec::new(),
+        }
+    }
+}
+
+impl Revisions {
+    fn of(&self, file: Option<&Path>) -> Option<u64> {
+        match file {
+            None => Some(self.main),
+            Some(file) => self
+                .files
+                .iter()
+                .find(|(path, _)| path == file)
+                .map(|(_, revision)| *revision),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -58,9 +86,9 @@ pub(crate) struct Proofreader {
     words_text: String,
     style: Arc<HouseStyle>,
     style_text: String,
-    checked: Option<(u64, Arc<Findings>)>,
+    checked: Option<(Revisions, Arc<Findings>)>,
     running: bool,
-    queued: Option<(Analysis, u64)>,
+    queued: Option<(Analysis, Revisions)>,
     personal_path: Option<PathBuf>,
     personal: WordList,
     personal_text: String,
@@ -139,12 +167,12 @@ impl Proofreader {
         self.checked = None;
     }
 
-    pub(crate) fn check(&mut self, analysis: Analysis, revision: u64) -> Task<Message> {
+    pub(crate) fn check(&mut self, analysis: Analysis, revisions: Revisions) -> Task<Message> {
         if self.dictionaries.is_empty() && self.style.is_empty() {
             return Task::none();
         }
         if self.running {
-            self.queued = Some((analysis, revision));
+            self.queued = Some((analysis, revisions));
             return Task::none();
         }
         self.running = true;
@@ -153,7 +181,7 @@ impl Proofreader {
         Task::perform(
             background(move || findings(&analysis, &dictionaries, style)),
             move |findings| Message::Checked {
-                revision,
+                revisions,
                 findings: Arc::new(findings.unwrap_or_default()),
             },
         )
@@ -166,19 +194,22 @@ impl Proofreader {
                 self.checked = None;
                 Task::none()
             }
-            Message::Checked { revision, findings } => {
+            Message::Checked {
+                revisions,
+                findings,
+            } => {
                 self.running = false;
-                self.checked = Some((revision, findings));
+                self.checked = Some((revisions, findings));
                 match self.queued.take() {
-                    Some((analysis, revision)) => self.check(analysis, revision),
+                    Some((analysis, revisions)) => self.check(analysis, revisions),
                     None => Task::none(),
                 }
             }
         }
     }
 
-    pub(crate) fn marks(&self, revision: u64) -> Vec<Mark> {
-        self.found(revision)
+    pub(crate) fn marks(&self, file: Option<&Path>, revision: u64) -> Vec<Mark> {
+        self.found(file, revision)
             .map(|(range, finding)| Mark {
                 range: Position::new(range.start)..Position::new(range.end),
                 kind: match finding {
@@ -192,23 +223,29 @@ impl Proofreader {
     pub(crate) fn tooltip(
         &self,
         localizer: &Localizer,
+        file: Option<&Path>,
         revision: u64,
         offset: usize,
     ) -> Option<String> {
         let (_, findings) = self
             .checked
             .as_ref()
-            .filter(|(checked, _)| *checked == revision)?;
+            .filter(|(checked, _)| checked.of(file) == Some(revision))?;
         let texts: Vec<String> = self
-            .found(revision)
+            .found(file, revision)
             .filter(|(range, _)| range.contains(&offset))
             .map(|(_, finding)| finding_text(localizer, findings, &finding))
             .collect();
         (!texts.is_empty()).then(|| texts.join("\n"))
     }
 
-    pub(crate) fn correction_at(&self, revision: u64, offset: usize) -> Option<Correction> {
-        self.found(revision)
+    pub(crate) fn correction_at(
+        &self,
+        file: Option<&Path>,
+        revision: u64,
+        offset: usize,
+    ) -> Option<Correction> {
+        self.found(file, revision)
             .filter(|(range, _)| range.start <= offset && offset <= range.end)
             .find_map(|(range, finding)| match finding {
                 Finding::Spelling(misspelling) => Some(Correction::Spelling {
@@ -227,11 +264,15 @@ impl Proofreader {
         Arc::clone(&self.dictionaries)
     }
 
-    fn found(&self, revision: u64) -> impl Iterator<Item = (Range<usize>, Finding<'_>)> {
+    fn found(
+        &self,
+        file: Option<&Path>,
+        revision: u64,
+    ) -> impl Iterator<Item = (Range<usize>, Finding<'_>)> {
         let findings = self
             .checked
             .as_ref()
-            .filter(|(checked, _)| *checked == revision)
+            .filter(|(checked, _)| checked.of(file) == Some(revision))
             .map(|(_, findings)| findings.as_ref());
         let misspellings = findings
             .into_iter()
@@ -240,24 +281,26 @@ impl Proofreader {
                 !self.words.contains(&misspelling.word)
                     && !self.personal.contains(&misspelling.word)
             })
-            .filter_map(|misspelling| {
+            .filter_map(move |misspelling| {
                 Some((
-                    main_range(&misspelling.source)?,
+                    range_in(&misspelling.source, file)?,
                     Finding::Spelling(misspelling),
                 ))
             });
         let style = findings
             .into_iter()
             .flat_map(|findings| &findings.style)
-            .filter_map(|problem| Some((main_range(&problem.source)?, Finding::Style(problem))));
+            .filter_map(move |problem| {
+                Some((range_in(&problem.source, file)?, Finding::Style(problem)))
+            });
         misspellings.chain(style)
     }
 
     #[cfg(test)]
-    pub(crate) fn check_now(&mut self, analysis: &Analysis, revision: u64) {
+    pub(crate) fn check_now(&mut self, analysis: &Analysis, revisions: impl Into<Revisions>) {
         let findings = findings(analysis, &self.dictionaries, Arc::clone(&self.style));
         let _ = self.update(Message::Checked {
-            revision,
+            revisions: revisions.into(),
             findings: Arc::new(findings),
         });
     }
@@ -350,10 +393,11 @@ fn finding_text(localizer: &Localizer, findings: &Findings, finding: &Finding<'_
     }
 }
 
-fn main_range(source: &SourceRange) -> Option<Range<usize>> {
-    match source {
-        SourceRange::Main(range) => Some(range.clone()),
-        SourceRange::File(..) => None,
+fn range_in(source: &SourceRange, file: Option<&Path>) -> Option<Range<usize>> {
+    match (source, file) {
+        (SourceRange::Main(range), None) => Some(range.clone()),
+        (SourceRange::File(path, range), Some(file)) if path == file => Some(range.clone()),
+        _ => None,
     }
 }
 
@@ -477,18 +521,57 @@ mod tests {
 
         proofreader.check_now(&analysis(TEXT), 7);
 
-        assert_eq!(proofreader.marks(7), [mark(19..22, MarkKind::Spelling)]);
-        assert_eq!(proofreader.marks(8), []);
         assert_eq!(
-            proofreader.tooltip(&localizer, 7, 21),
+            proofreader.marks(None, 7),
+            [mark(19..22, MarkKind::Spelling)]
+        );
+        assert_eq!(proofreader.marks(None, 8), []);
+        assert_eq!(
+            proofreader.tooltip(&localizer, None, 7, 21),
             Some(format!(
                 "The word “mta” is not in the dictionary for en.\n\
                  Push {} to show the corrections.",
                 shortcut(&localizer, '.')
             ))
         );
-        assert_eq!(proofreader.tooltip(&localizer, 7, 22), None);
-        assert_eq!(proofreader.tooltip(&localizer, 8, 21), None);
+        assert_eq!(proofreader.tooltip(&localizer, None, 7, 22), None);
+        assert_eq!(proofreader.tooltip(&localizer, None, 8, 21), None);
+    }
+
+    #[test]
+    fn a_misspelled_word_of_another_file_has_a_mark_only_in_that_file() {
+        let main = "#include \"part.typ\"";
+        let folder = project(&[("main.typ", main), ("part.typ", TEXT)]);
+        let mut proofreader = proofreader(&folder, english());
+        let world = Mutex::new(World::open(
+            Arc::new(Fonts::embedded()),
+            None,
+            folder.path().to_path_buf(),
+            Path::new("main.typ"),
+        ));
+        let analysis = analyze(&world, main).analysis.unwrap();
+        let part = Path::new("part.typ");
+
+        proofreader.check_now(
+            &analysis,
+            Revisions {
+                main: 7,
+                files: vec![(part.to_path_buf(), 3)],
+            },
+        );
+
+        assert_eq!(
+            proofreader.marks(Some(part), 3),
+            [mark(19..22, MarkKind::Spelling)]
+        );
+        assert_eq!(proofreader.marks(Some(part), 4), []);
+        assert_eq!(proofreader.marks(None, 7), []);
+        assert!(
+            proofreader
+                .tooltip(&Localizer::english(), Some(part), 3, 20)
+                .is_some()
+        );
+        assert!(proofreader.correction_at(Some(part), 3, 20).is_some());
     }
 
     #[test]
@@ -504,12 +587,12 @@ mod tests {
             range: 19..22,
             text: "mat".to_owned(),
         });
-        assert_eq!(style.correction_at(7, 20), replacement);
-        assert_eq!(style.correction_at(7, 22), replacement);
-        assert_eq!(style.correction_at(7, 5), None);
-        assert_eq!(style.correction_at(8, 20), None);
+        assert_eq!(style.correction_at(None, 7, 20), replacement);
+        assert_eq!(style.correction_at(None, 7, 22), replacement);
+        assert_eq!(style.correction_at(None, 7, 5), None);
+        assert_eq!(style.correction_at(None, 8, 20), None);
         assert_eq!(
-            spelling.correction_at(7, 19),
+            spelling.correction_at(None, 7, 19),
             Some(Correction::Spelling {
                 range: 19..22,
                 word: "mta".to_owned(),
@@ -542,7 +625,7 @@ mod tests {
         proofreader.read_personal();
         proofreader.check_now(&analysis(TEXT), 7);
 
-        assert_eq!(proofreader.marks(7), []);
+        assert_eq!(proofreader.marks(None, 7), []);
     }
 
     #[test]
@@ -556,7 +639,7 @@ mod tests {
         proofreader.add_personal_word("mta").unwrap();
 
         assert_eq!(fs::read_to_string(&path).unwrap(), "mta\n");
-        assert_eq!(proofreader.marks(7), []);
+        assert_eq!(proofreader.marks(None, 7), []);
         assert!(!folder.path().join(WORD_LIST).exists());
     }
 
@@ -580,7 +663,7 @@ mod tests {
             fs::read_to_string(folder.path().join(WORD_LIST)).unwrap(),
             "mta\n"
         );
-        assert_eq!(proofreader.marks(7), []);
+        assert_eq!(proofreader.marks(None, 7), []);
         assert_eq!(proofreader.read_project(folder.path()), None);
     }
 
@@ -604,7 +687,7 @@ mod tests {
 
         proofreader.check_now(&analysis(TEXT), 7);
 
-        assert_eq!(proofreader.marks(7), []);
+        assert_eq!(proofreader.marks(None, 7), []);
     }
 
     const STYLE: &str = "[[rule]]\ntext = \"cat\"\nmessage = \"Name the animal.\"\n\n\
@@ -619,15 +702,15 @@ mod tests {
         proofreader.check_now(&analysis(TEXT), 7);
 
         assert_eq!(
-            proofreader.marks(7),
+            proofreader.marks(None, 7),
             [mark(4..7, MarkKind::Style), mark(19..22, MarkKind::Style)]
         );
         assert_eq!(
-            proofreader.tooltip(&localizer, 7, 4).as_deref(),
+            proofreader.tooltip(&localizer, None, 7, 4).as_deref(),
             Some("Name the animal.")
         );
         assert_eq!(
-            proofreader.tooltip(&localizer, 7, 19),
+            proofreader.tooltip(&localizer, None, 7, 19),
             Some(format!(
                 "The house style does not permit “mta”.\n\
                  Push {} to change the text to “mat”.",
@@ -645,7 +728,7 @@ mod tests {
         fs::write(&file, "[[rule]]\ntext = \"sat\"\n").unwrap();
         assert_eq!(proofreader.read_project(folder.path()), None);
         proofreader.check_now(&analysis(TEXT), 7);
-        assert_eq!(proofreader.marks(7), [mark(8..11, MarkKind::Style)]);
+        assert_eq!(proofreader.marks(None, 7), [mark(8..11, MarkKind::Style)]);
 
         fs::write(&file, "[[rule]]\nmessage = \"No.\"\n").unwrap();
         assert_eq!(
@@ -656,7 +739,7 @@ mod tests {
             })
         );
         assert_eq!(proofreader.read_project(folder.path()), None);
-        assert_eq!(proofreader.marks(7), []);
+        assert_eq!(proofreader.marks(None, 7), []);
     }
 
     #[test]
