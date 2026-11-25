@@ -119,6 +119,7 @@ pub(crate) struct App {
 enum Pending {
     Quit,
     Project(PathBuf),
+    NewProject(PathBuf),
     Server(Document),
 }
 
@@ -211,6 +212,7 @@ pub(crate) enum Message {
     Proofreading(proofreading::Message),
     OpenFolder,
     FolderPicked(Option<PathBuf>),
+    NewProjectPicked(Option<PathBuf>),
     Save,
     ToggleSuggesting,
     Key(keyboard::Event),
@@ -2375,7 +2377,10 @@ impl App {
             }
             Message::Save => self.save(),
             Message::Key(event) => return self.key(event),
-            Message::FolderPicked(None) => {}
+            Message::NewProjectPicked(Some(root)) => {
+                return self.after_question(Pending::NewProject(root));
+            }
+            Message::FolderPicked(None) | Message::NewProjectPicked(None) => {}
             Message::DismissNotice => self.notice = None,
         }
         Task::none()
@@ -2462,6 +2467,14 @@ impl App {
         match pending {
             Pending::Quit => iced::exit(),
             Pending::Project(root) => self.open_project(&root),
+            Pending::NewProject(root) => match Project::create(&root) {
+                Ok(_) => self.open_project(&root),
+                Err(error) => {
+                    tracing::warn!(%error, "The new project was not made");
+                    self.notice = Some(files::error_text(&self.localizer, &error));
+                    Task::none()
+                }
+            },
             Pending::Server(document) => self.open_server_document(document),
         }
     }
@@ -2486,6 +2499,10 @@ impl App {
 
     fn choose(&mut self, item: menu::Item) -> Task<Message> {
         match item {
+            menu::Item::NewProject => {
+                let title = self.localizer.text("new-project-title");
+                Task::perform(files::pick_folder(title), Message::NewProjectPicked)
+            }
             menu::Item::OpenFolder => self.open_folder(),
             menu::Item::Save => {
                 self.save();
@@ -4678,6 +4695,19 @@ mod tests {
 
     fn editor_text(app: &App) -> String {
         app.editor.document().buffer().to_string()
+    }
+
+    #[test]
+    fn a_new_project_makes_its_files_and_opens() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("Field Notes");
+        fs::create_dir(&root).unwrap();
+        let mut app = app();
+
+        send(&mut app, Message::NewProjectPicked(Some(root.clone())));
+
+        assert_eq!(editor_text(&app), "= Field Notes\n");
+        assert!(root.join("presswork.toml").is_file());
     }
 
     #[test]

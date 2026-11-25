@@ -15,6 +15,7 @@ const MENU: &str = "presswork-menu-items";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Item {
+    NewProject,
     OpenFolder,
     Save,
     Connect,
@@ -26,6 +27,7 @@ pub(crate) enum Item {
 impl Item {
     fn text_id(self) -> &'static str {
         match self {
+            Self::NewProject => "menu-new-project",
             Self::OpenFolder => "menu-open-folder",
             Self::Save => "menu-save",
             Self::Connect => "menu-connect",
@@ -37,6 +39,7 @@ impl Item {
 
     fn icon(self) -> Icon {
         match self {
+            Self::NewProject => Icon::FolderPlus,
             Self::OpenFolder => Icon::FolderOpen,
             Self::Save => Icon::Save,
             Self::Connect => Icon::Server,
@@ -51,7 +54,7 @@ impl Item {
             Self::OpenFolder => Some('O'),
             Self::Save => Some('S'),
             Self::Quit => Some('Q'),
-            Self::Connect | Self::Typst | Self::Logs => None,
+            Self::NewProject | Self::Connect | Self::Typst | Self::Logs => None,
         }
     }
 }
@@ -62,6 +65,7 @@ pub(crate) fn view<'a>(
     controls: Controls,
 ) -> Element<'a, Message> {
     let items = column![
+        entry(localizer, Item::NewProject, true),
         entry(localizer, Item::OpenFolder, true),
         entry(localizer, Item::Save, can_save),
         separator(),
@@ -143,7 +147,8 @@ mod tests {
     use crate::i18n::Localizer;
     use crate::testing::key_press;
 
-    const LABELS: [(&str, Item); 6] = [
+    const LABELS: [(&str, Item); 7] = [
+        ("New project…", Item::NewProject),
         ("Open folder…", Item::OpenFolder),
         ("Save", Item::Save),
         ("Connect to a server…", Item::Connect),

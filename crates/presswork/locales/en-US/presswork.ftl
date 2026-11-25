@@ -5,6 +5,7 @@ window-maximize = Maximize
 window-restore = Restore
 window-close = Close
 
+menu-new-project = New project…
 menu-open-folder = Open folder…
 menu-connect = Connect to a server…
 menu-save = Save
@@ -131,6 +132,7 @@ status-live-offline = { $path } · Offline
 
 open-folder = Open folder
 open-folder-title = Open a project folder
+new-project-title = Select or make a folder for the new project
 
 project-error-no-manifest = This folder is not a Presswork project. A project folder contains a presswork.toml file.
 project-error-invalid-manifest = The presswork.toml file is not correct: { $problem }

@@ -44,6 +44,22 @@ impl Project {
         })
     }
 
+    pub fn create(root: &Path) -> Result<Self, ProjectError> {
+        let manifest = root.join(MANIFEST);
+        if !manifest.exists() {
+            let name = root.file_name().map_or_else(
+                || "Project".to_owned(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+            let main = root.join("main.typ");
+            if !main.exists() {
+                write_new(&main, &format!("= {}\n", markup_text(&name)))?;
+            }
+            write_new(&manifest, &manifest_text(name))?;
+        }
+        Self::open(root)
+    }
+
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
@@ -78,6 +94,32 @@ impl Project {
         self.manifest = manifest;
         Ok(())
     }
+}
+
+fn manifest_text(name: String) -> String {
+    let quoted = toml::Value::String(name).to_string();
+    format!("[project]\nname = {quoted}\n")
+}
+
+fn write_new(path: &Path, text: &str) -> Result<(), ProjectError> {
+    fs::write(path, text).map_err(|source| ProjectError::Io {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn markup_text(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        if matches!(
+            character,
+            '\\' | '*' | '_' | '#' | '[' | ']' | '$' | '`' | '<' | '>' | '@'
+        ) {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
 }
 
 pub(crate) fn is_inside(path: &Path) -> bool {
@@ -183,6 +225,77 @@ mod tests {
                 .as_deref(),
             Some("0.14")
         );
+    }
+
+    #[test]
+    fn create_makes_a_manifest_and_a_main_file_in_an_empty_folder() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("Field Notes");
+        fs::create_dir(&root).unwrap();
+
+        let project = Project::create(&root).unwrap();
+
+        assert_eq!(project.manifest().name, "Field Notes");
+        assert_eq!(
+            fs::read_to_string(root.join("main.typ")).unwrap(),
+            "= Field Notes\n"
+        );
+        assert_eq!(Project::open(&root).unwrap().manifest().name, "Field Notes");
+    }
+
+    #[test]
+    fn create_keeps_an_existing_project() {
+        let folder = folder(&[
+            (MANIFEST, "[project]\nname = \"Kept\"\n"),
+            ("main.typ", "Old."),
+        ]);
+
+        let project = Project::create(folder.path()).unwrap();
+
+        assert_eq!(project.manifest().name, "Kept");
+        assert_eq!(
+            fs::read_to_string(folder.path().join("main.typ")).unwrap(),
+            "Old."
+        );
+    }
+
+    #[test]
+    fn create_keeps_an_existing_main_file() {
+        let folder = folder(&[("main.typ", "Old.")]);
+
+        let project = Project::create(folder.path()).unwrap();
+
+        assert_eq!(
+            project.files(),
+            [PathBuf::from("main.typ"), PathBuf::from(MANIFEST)]
+        );
+        assert_eq!(
+            fs::read_to_string(folder.path().join("main.typ")).unwrap(),
+            "Old."
+        );
+    }
+
+    #[test]
+    fn the_heading_of_a_new_main_file_escapes_markup() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = parent.path().join("My_Book #2");
+        fs::create_dir(&root).unwrap();
+
+        Project::create(&root).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(root.join("main.typ")).unwrap(),
+            "= My\\_Book \\#2\n"
+        );
+    }
+
+    #[test]
+    fn a_name_with_quotation_marks_gives_a_valid_manifest() {
+        let name = "The \"Last\" Proof \\ 2";
+
+        let manifest = Manifest::parse(&manifest_text(name.to_owned())).unwrap();
+
+        assert_eq!(manifest.name, name);
     }
 
     #[test]
