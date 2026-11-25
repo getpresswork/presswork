@@ -243,7 +243,8 @@ The files panel shows the files of the project above the outline (D204).
 - The **Files** button in the status bar opens or closes the panel.
 - To make a file, click **New file** (the plus icon) in the header of the panel. Type a path in the project folder, for example `chapters/two.typ`, and push Enter. Presswork makes an empty file and opens it. The field starts with the folder of the open file. Escape stops (D205).
 - The row of the open file has a **Rename** button and a **Delete** button. Rename moves the file to the path that you type, with its changes that are not saved and its suggestions. Delete asks first, then removes the file from the disk and opens the main file. You cannot undo a delete.
-- The main file and `presswork.toml` have no Rename or Delete button. Presswork does not change the `#include` and `#import` paths after a rename or a delete.
+- The main file and `presswork.toml` have no Rename or Delete button.
+- After a rename, Presswork changes the paths to the file in the Typst files of the project, for example in `#include`, `#import`, and `image` (D210). If the file moves to another folder, its own relative paths also change, so that they find the same files. An open file gets the change as one step that you can undo. A note tells how many files changed. Presswork does not change paths after a delete.
 
 ## Docs and packages
 

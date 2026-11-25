@@ -1614,7 +1614,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D205. New projects and file actions
 
-- **Status:** Accepted, 2026-11-24. **Origin:** Default.
+- **Status:** Accepted, 2026-11-24. The rule for paths after a rename is replaced by D210. **Origin:** Default.
 - **Decision:**
   - **New project…** in the Presswork menu asks for a folder. If the folder has no `presswork.toml`, Presswork writes one with the name of the folder. If the folder has no `main.typ`, Presswork writes one with the name of the folder as its heading. Other files in the folder stay. A folder that is a project opens as it is.
   - Before Presswork opens a different project, a new project, or a server document, it asks about the changes that are not saved, as it does before it closes.
@@ -1676,3 +1676,17 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The compilation of an example does not remove old entries from the cache of Typst, so that the cache of the open document stays.
 - **Reason:** A person who looks up a function sees what the code makes, as in the Typst documentation, also without the network.
 - **Other options:** Images from typst.app (this needs the network). The example files of the Typst repository (they are not in a published crate). A result only after a click.
+
+## D210. Paths after a rename
+
+- **Status:** Accepted, 2026-11-25. **Origin:** Default, from a requirement of the project owner.
+- **Decision:**
+  - After a rename in the files panel, Presswork changes the paths to the file in each `.typ` file of the project. It changes a path when it is a string in `#include`, in `#import`, or in the first argument of `image`, `read`, `json`, `csv`, `yaml`, `toml`, `xml`, `cbor`, `bibliography`, `plugin`, or `path`. In `bibliography`, it also changes each string in an array.
+  - A relative path stays relative, and an absolute path (`/chapters/one.typ`) stays absolute. A path that starts with `./` keeps it.
+  - If the renamed file moves to a different folder, Presswork also changes its own relative paths, so that they find the same files.
+  - Package imports, for example `@preview/cetz:0.3.4`, do not change. Presswork does not change a path that it cannot find in the text, for example a path in a variable.
+  - An open file gets the change as one step that you can undo. If the file had no unsaved changes, Presswork also saves it. A file with unsaved changes stays unsaved.
+  - A file that is not open changes on the disk. If the file has suggestions, Presswork also changes its suggestions file, so that the suggestions stay.
+  - A note tells how many files changed.
+- **Reason:** A book has many chapter files. A rename must not break the document.
+- **Other options:** A question before the change. A change only in the open files. A change of named path arguments, for example `style` of `bibliography` and `theme` of `raw`.
