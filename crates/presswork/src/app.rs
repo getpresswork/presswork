@@ -878,7 +878,7 @@ impl App {
     #[cfg(test)]
     pub(crate) fn export_now(&mut self, index: usize) {
         if let Some((run, text, profile)) = self.start_export(index) {
-            let result = self.compiler.export_now(&text, &profile);
+            let result = self.compiler.export_now(text.as_str(), &profile);
             send(
                 self,
                 Message::Publish(publish_view::Message::Exported { index, run, result }),
@@ -1744,7 +1744,7 @@ impl App {
     #[cfg(test)]
     pub(crate) fn compile_now(&mut self) {
         let (text, map) = self.compile_text();
-        let result = self.compiler.run_now(&text);
+        let result = self.compiler.run_now(text.as_str());
         let _ = self.update(compiled(
             self.compiler.generation(),
             self.editor.revision(),

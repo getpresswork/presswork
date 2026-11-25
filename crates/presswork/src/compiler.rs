@@ -24,6 +24,36 @@ pub(crate) enum ExportFailure {
     Write(PathBuf, String),
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Sources {
+    pub(crate) main: String,
+    pub(crate) files: Vec<(PathBuf, String)>,
+}
+
+impl Sources {
+    pub(crate) fn main(text: &str) -> Self {
+        Self {
+            main: text.to_owned(),
+            files: Vec::new(),
+        }
+    }
+}
+
+impl From<&str> for Sources {
+    fn from(text: &str) -> Self {
+        Self::main(text)
+    }
+}
+
+impl From<String> for Sources {
+    fn from(main: String) -> Self {
+        Self {
+            main,
+            files: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Backend {
     Embedded,
@@ -124,14 +154,15 @@ impl Compiler {
 
     pub(crate) fn job(
         &self,
-        text: String,
+        sources: impl Into<Sources>,
     ) -> impl Future<Output = Result<Output, String>> + Send + 'static {
+        let sources = sources.into();
         let compile = self.compile_fn();
         let (sender, receiver) = oneshot::channel();
         let spawned = std::thread::Builder::new()
             .name("typst".to_owned())
             .spawn(move || {
-                let _ = sender.send(compile(&text));
+                let _ = sender.send(compile(&sources));
             });
         if let Err(error) = spawned {
             tracing::error!(%error, "The compile thread did not start");
@@ -140,31 +171,32 @@ impl Compiler {
     }
 
     #[cfg(test)]
-    pub(crate) fn run_now(&self, text: &str) -> Result<Output, String> {
-        self.compile_fn()(text)
+    pub(crate) fn run_now(&self, sources: impl Into<Sources>) -> Result<Output, String> {
+        self.compile_fn()(&sources.into())
     }
 
     #[cfg(test)]
     pub(crate) fn export_now(
         &self,
-        text: &str,
+        sources: impl Into<Sources>,
         profile: &ExportProfile,
     ) -> Result<Export, ExportFailure> {
-        self.export_fn(profile.clone())(text)
+        self.export_fn(profile.clone())(&sources.into())
     }
 
     pub(crate) fn export_job(
         &self,
-        text: String,
+        sources: impl Into<Sources>,
         profile: ExportProfile,
     ) -> impl Future<Output = Result<Export, ExportFailure>> + Send + 'static {
+        let sources = sources.into();
         let export = self.export_fn(profile);
         async move {
             let (sender, receiver) = oneshot::channel();
             let spawned = std::thread::Builder::new()
                 .name("typst-export".to_owned())
                 .spawn(move || {
-                    let _ = sender.send(export(&text));
+                    let _ = sender.send(export(&sources));
                 });
             if let Err(error) = spawned {
                 tracing::error!(%error, "The export thread did not start");
@@ -176,35 +208,47 @@ impl Compiler {
     fn export_fn(
         &self,
         profile: ExportProfile,
-    ) -> impl FnOnce(&str) -> Result<Export, ExportFailure> + Send + 'static {
+    ) -> impl FnOnce(&Sources) -> Result<Export, ExportFailure> + Send + 'static {
         let engine = Arc::clone(&self.engine);
         let root = self.root.clone().unwrap_or_default();
         let main = self.main.clone();
         let embedded = self.backend == Backend::Embedded;
-        move |text| {
+        move |sources| {
             if !embedded {
                 return Err(ExportFailure::NeedsEngine);
             }
             if let Some(path) = profile.outside(&main) {
                 return Err(ExportFailure::Outside(path));
             }
-            Ok(presswork_typst::analyze(&engine, text).export_profile(&profile, &root, &main)?)
+            set_files(&engine, &sources.files);
+            Ok(presswork_typst::analyze(&engine, &sources.main)
+                .export_profile(&profile, &root, &main)?)
         }
     }
 
-    fn compile_fn(&self) -> impl FnOnce(&str) -> Result<Output, String> + Send + 'static {
+    fn compile_fn(&self) -> impl FnOnce(&Sources) -> Result<Output, String> + Send + 'static {
         let engine = Arc::clone(&self.engine);
         let root = self.root.clone().unwrap_or_default();
         let backend = self.backend.clone();
         let stop = self.stop.clone();
         let bleed = self.bleed;
-        move |text| match backend {
-            Backend::Embedded => Ok(presswork_typst::run(&engine, text, SCALE, bleed)),
+        move |sources| match backend {
+            Backend::Embedded => {
+                set_files(&engine, &sources.files);
+                Ok(presswork_typst::run(&engine, &sources.main, SCALE, bleed))
+            }
             Backend::Program(program) => program
-                .run(&root, text, &stop)
+                .run(&root, &sources.main, &stop)
                 .map_err(|error| error.to_string()),
             Backend::Unavailable => Ok(Output::default()),
         }
+    }
+}
+
+fn set_files(engine: &Mutex<World>, files: &[(PathBuf, String)]) {
+    let mut world = engine.lock().unwrap_or_else(PoisonError::into_inner);
+    for (path, text) in files {
+        world.set_text(path, text);
     }
 }
 
@@ -229,7 +273,7 @@ mod tests {
     fn a_job_compiles_the_text_on_another_thread() {
         let compiler = Compiler::new();
 
-        let output = futures::executor::block_on(compiler.job("Hello.".to_owned())).unwrap();
+        let output = futures::executor::block_on(compiler.job(Sources::main("Hello."))).unwrap();
 
         assert_eq!(output.pages.map(|pages| pages.len()), Some(1));
     }
@@ -239,6 +283,27 @@ mod tests {
         let mut compiler = Compiler::new();
         compiler.open(folder.path(), Path::new("main.typ"), Backend::Embedded);
         (compiler, folder)
+    }
+
+    #[test]
+    fn a_job_uses_the_unsaved_text_of_other_files() {
+        let (compiler, folder) = project_compiler();
+        std::fs::write(folder.path().join("chapter.typ"), "= Saved").unwrap();
+        let sources = Sources {
+            main: "#include \"chapter.typ\"".to_owned(),
+            files: vec![(PathBuf::from("chapter.typ"), "= Unsaved".to_owned())],
+        };
+
+        let output = futures::executor::block_on(compiler.job(sources)).unwrap();
+
+        let titles: Vec<String> = output
+            .analysis
+            .unwrap()
+            .outline()
+            .into_iter()
+            .map(|heading| heading.title)
+            .collect();
+        assert_eq!(titles, ["Unsaved"]);
     }
 
     fn profile(format: ExportFormat, output: Option<&str>) -> ExportProfile {
