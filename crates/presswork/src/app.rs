@@ -3104,7 +3104,7 @@ impl App {
             );
             open = true;
         }
-        open.then(|| side.into())
+        open.then(|| side.width(size::PANEL).into())
     }
 
     fn workspace_area(&self) -> Element<'_, Message> {
@@ -5584,6 +5584,21 @@ mod tests {
         assert!(!folder.path().join("cover.png").exists());
         assert_eq!(app.file_panel.selected(), None);
         assert_eq!(editor_text(&app), CHAPTERED_MAIN);
+    }
+
+    #[test]
+    fn the_side_panels_keep_their_width_when_both_show() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        assert!(app.file_panel.is_open() && app.outline.is_open());
+
+        let editor = simulator(app.view())
+            .find(iced::widget::Id::from(EDITOR))
+            .unwrap()
+            .bounds();
+
+        assert!(editor.x < size::PANEL + 10.0, "{editor:?}");
     }
 
     #[test]
