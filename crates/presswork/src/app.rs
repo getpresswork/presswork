@@ -36,6 +36,7 @@ use crate::assist;
 use crate::chat_panel::{self, ChatPanel};
 use crate::chrome::{self, Controls, Frame};
 use crate::compiler::{self, Backend, Compiler, Sources};
+use crate::docs_view::{self, DocsView};
 use crate::file_panel::{self, FilePanel};
 use crate::files;
 use crate::files::OpenFile;
@@ -86,6 +87,7 @@ pub(crate) struct App {
     outline: OutlinePanel,
     file_panel: FilePanel,
     pane: Pane,
+    docs_view: DocsView,
     packages_view: PackagesView,
     packages: Option<Packages>,
     file: Option<PathBuf>,
@@ -134,15 +136,17 @@ enum Pending {
 pub(crate) enum Pane {
     #[default]
     Preview,
+    Docs,
     Packages,
 }
 
 impl Pane {
-    const ALL: [Self; 2] = [Self::Preview, Self::Packages];
+    const ALL: [Self; 3] = [Self::Preview, Self::Docs, Self::Packages];
 
     fn text_id(self) -> &'static str {
         match self {
             Self::Preview => "pane-preview",
+            Self::Docs => "pane-docs",
             Self::Packages => "pane-packages",
         }
     }
@@ -232,6 +236,7 @@ pub(crate) enum Message {
     Outline(outline_panel::Message),
     Files(file_panel::Message),
     Pane(Pane),
+    Docs(docs_view::Message),
     Packages(packages_view::Message),
     Find(find_bar::Message),
     Publish(publish_view::Message),
@@ -293,6 +298,7 @@ impl App {
             outline: OutlinePanel::default(),
             file_panel: FilePanel::default(),
             pane: Pane::default(),
+            docs_view: DocsView::default(),
             packages_view: PackagesView::default(),
             packages: None,
             file: None,
@@ -757,15 +763,29 @@ impl App {
         self.pane = pane;
         let workspace = self.select_workspace(Workspace::Write);
         let shown = match pane {
-            Pane::Preview => Task::none(),
-            Pane::Packages => Task::batch([
-                self.packages_view
-                    .open(self.packages.as_ref())
-                    .map(Message::Packages),
-                operation::focus(packages_view::SEARCH_INPUT),
-            ]),
+            Pane::Preview | Pane::Docs => Task::none(),
+            Pane::Packages => self
+                .packages_view
+                .open(self.packages.as_ref())
+                .map(Message::Packages),
         };
         Task::batch([workspace, shown])
+    }
+
+    fn open_pane(&mut self, pane: Pane) -> Task<Message> {
+        let shown = self.show_pane(pane);
+        let search = match pane {
+            Pane::Preview => return shown,
+            Pane::Docs => docs_view::SEARCH_INPUT,
+            Pane::Packages => packages_view::SEARCH_INPUT,
+        };
+        Task::batch([shown, operation::focus(search)])
+    }
+
+    fn docs_message(&mut self, message: docs_view::Message) {
+        if let Some(docs_view::Request::Open(url)) = self.docs_view.update(message) {
+            links::open(&url);
+        }
     }
 
     fn packages_message(&mut self, message: packages_view::Message) -> Task<Message> {
@@ -1153,6 +1173,9 @@ impl App {
             }
             return Task::none();
         };
+        if key == keyboard::Key::Named(keyboard::key::Named::F1) {
+            return self.open_pane(Pane::Docs);
+        }
         if key == keyboard::Key::Named(keyboard::key::Named::F3) {
             return self.find_message(if modifiers.shift() {
                 find_bar::Message::Previous
@@ -1543,6 +1566,9 @@ impl App {
                 Task::batch([pane, shown])
             }
             Some(presswork_typst::Definition::Library(name)) => {
+                if self.docs_view.open(&name) {
+                    return self.show_pane(Pane::Docs);
+                }
                 let mut args = FluentArgs::new();
                 args.set("name", name);
                 self.notice = Some(self.localizer.format("definition-in-library", &args));
@@ -2623,7 +2649,8 @@ impl App {
             Message::Checked { run, checks } => self.apply_checks(run, checks),
             Message::Outline(message) => return self.outline_message(message),
             Message::Files(message) => return self.file_message(message),
-            Message::Pane(pane) => return self.show_pane(pane),
+            Message::Pane(pane) => return self.open_pane(pane),
+            Message::Docs(message) => self.docs_message(message),
             Message::Packages(message) => return self.packages_message(message),
             Message::Find(message) => return self.find_message(message),
             Message::Publish(message) => return self.publish_message(message),
@@ -2790,7 +2817,8 @@ impl App {
                 Task::none()
             }
             menu::Item::Typst => self.update(Message::Toolchains(toolchain_panel::Message::Toggle)),
-            menu::Item::Packages => self.show_pane(Pane::Packages),
+            menu::Item::Documentation => self.open_pane(Pane::Docs),
+            menu::Item::Packages => self.open_pane(Pane::Packages),
             menu::Item::Logs => self.update(Message::Logs(log_panel::Message::Toggle)),
             menu::Item::Quit => self.quit(),
         }
@@ -3093,6 +3121,10 @@ impl App {
                     .into()
             }
             Pane::Preview => self.preview.view(self.preview_text(), Message::Preview),
+            Pane::Docs => self
+                .docs_view
+                .view(&self.localizer, &self.theme())
+                .map(Message::Docs),
             Pane::Packages => self
                 .packages_view
                 .view(&self.localizer, &self.theme())
@@ -5003,21 +5035,56 @@ mod tests {
     }
 
     #[test]
-    fn a_definition_in_the_library_tells_its_name() {
+    fn a_definition_in_the_library_opens_its_documentation() {
         let mut app = typed_app(BINDING);
 
         let found = definition_found(
             &app,
-            presswork_typst::Definition::Library("text".to_owned()),
+            presswork_typst::Definition::Library("calc.pow".to_owned()),
         );
         send(&mut app, found);
 
+        assert_eq!(app.pane, Pane::Docs);
+        assert_eq!(app.docs_view.current(), Some("calc.pow"));
+        assert_eq!(app.notice, None);
+    }
+
+    #[test]
+    fn a_library_name_without_a_page_tells_its_name() {
+        let mut app = typed_app(BINDING);
+
+        let found = definition_found(
+            &app,
+            presswork_typst::Definition::Library("nothing".to_owned()),
+        );
+        send(&mut app, found);
+
+        assert_eq!(app.pane, Pane::Preview);
         assert!(
             app.notice
                 .as_deref()
-                .is_some_and(|notice| notice.contains("text")),
+                .is_some_and(|notice| notice.contains("nothing")),
             "{:?}",
             app.notice
+        );
+    }
+
+    #[test]
+    fn f1_and_the_menu_open_the_documentation() {
+        let mut app = app();
+        let iced::Event::Keyboard(f1) = crate::testing::key_press(keyboard::key::Named::F1) else {
+            panic!("not a key");
+        };
+
+        send(&mut app, Message::Key(f1));
+        assert_eq!(app.pane, Pane::Docs);
+        send(&mut app, Message::Pane(Pane::Preview));
+        send(&mut app, Message::MenuItem(menu::Item::Documentation));
+        assert_eq!(app.pane, Pane::Docs);
+        assert!(
+            simulator(app.view())
+                .find(iced_test::selector::id(docs_view::SEARCH_INPUT))
+                .is_ok()
         );
     }
 

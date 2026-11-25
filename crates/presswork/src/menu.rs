@@ -20,6 +20,7 @@ pub(crate) enum Item {
     Save,
     Connect,
     Typst,
+    Documentation,
     Packages,
     Logs,
     Quit,
@@ -33,6 +34,7 @@ impl Item {
             Self::Save => "menu-save",
             Self::Connect => "menu-connect",
             Self::Typst => "menu-typst",
+            Self::Documentation => "menu-docs",
             Self::Packages => "menu-packages",
             Self::Logs => "menu-logs",
             Self::Quit => "menu-quit",
@@ -46,6 +48,7 @@ impl Item {
             Self::Save => Icon::Save,
             Self::Connect => Icon::Server,
             Self::Typst => Icon::Package,
+            Self::Documentation => Icon::BookOpen,
             Self::Packages => Icon::PackageSearch,
             Self::Logs => Icon::ScrollText,
             Self::Quit => Icon::Power,
@@ -57,7 +60,12 @@ impl Item {
             Self::OpenFolder => Some('O'),
             Self::Save => Some('S'),
             Self::Quit => Some('Q'),
-            Self::NewProject | Self::Connect | Self::Typst | Self::Packages | Self::Logs => None,
+            Self::NewProject
+            | Self::Connect
+            | Self::Typst
+            | Self::Documentation
+            | Self::Packages
+            | Self::Logs => None,
         }
     }
 }
@@ -75,6 +83,7 @@ pub(crate) fn view<'a>(
         entry(localizer, Item::Connect, true),
         separator(),
         entry(localizer, Item::Typst, true),
+        entry(localizer, Item::Documentation, true),
         entry(localizer, Item::Packages, true),
         entry(localizer, Item::Logs, true),
         separator(),
@@ -151,12 +160,13 @@ mod tests {
     use crate::i18n::Localizer;
     use crate::testing::key_press;
 
-    const LABELS: [(&str, Item); 8] = [
+    const LABELS: [(&str, Item); 9] = [
         ("New project…", Item::NewProject),
         ("Open folder…", Item::OpenFolder),
         ("Save", Item::Save),
         ("Connect to a server…", Item::Connect),
         ("Typst versions", Item::Typst),
+        ("Typst documentation", Item::Documentation),
         ("Typst packages", Item::Packages),
         ("Logs", Item::Logs),
         ("Quit", Item::Quit),

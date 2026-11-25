@@ -27,6 +27,7 @@ use uuid::Uuid;
 
 use crate::app::{App, Message, Pane, send};
 use crate::chat_panel::Message as ChatPanelMessage;
+use crate::docs_view::Message as DocsMessage;
 use crate::find_bar::Message as FindMessage;
 use crate::library_view::{Message as LibraryMessage, PickedFile, Target};
 use crate::live_session::Event as LiveEvent;
@@ -347,6 +348,10 @@ fn render_packages(app: &mut App) {
         }),
     );
     render(app, "packages");
+    send(app, Message::Pane(Pane::Docs));
+    render(app, "docs-contents");
+    send(app, Message::Docs(DocsMessage::Open("text".to_owned())));
+    render(app, "docs-page");
     send(app, Message::Pane(Pane::Preview));
 }
 
