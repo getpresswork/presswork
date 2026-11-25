@@ -107,12 +107,19 @@ pub(crate) struct App {
     preview_window: Option<window::Id>,
     maximized: HashSet<window::Id>,
     menu_open: bool,
-    quitting: bool,
+    pending: Option<Pending>,
     server_dialog: ServerDialog,
     live: Option<LiveSession>,
     chat: ChatPanel,
     tasks: Option<TaskList>,
     library: Option<LibraryView>,
+}
+
+#[derive(Debug, Clone)]
+enum Pending {
+    Quit,
+    Project(PathBuf),
+    Server(Document),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -274,7 +281,7 @@ impl App {
             preview_window: None,
             maximized: HashSet::new(),
             menu_open: false,
-            quitting: false,
+            pending: None,
             server_dialog: ServerDialog::default(),
             live: None,
             chat: ChatPanel::default(),
@@ -1761,7 +1768,7 @@ impl App {
         };
         let dialog = self.server_dialog.update(message).map(Message::Server);
         match opened {
-            Some(document) => Task::batch([dialog, self.open_server_document(document)]),
+            Some(document) => Task::batch([dialog, self.after_question(Pending::Server(document))]),
             None => dialog,
         }
     }
@@ -2297,7 +2304,7 @@ impl App {
                 tracing::debug!(?mode, "System theme changed");
                 self.mode = mode;
             }
-            Message::Editor(_) if self.quitting => {}
+            Message::Editor(_) if self.pending.is_some() => {}
             Message::Editor(action) => return self.edit(action),
             Message::ToggleSuggesting => self.toggle_suggesting(),
             message @ (Message::Hover(_)
@@ -2358,6 +2365,24 @@ impl App {
                 return self.choose(item);
             }
             Message::Unsaved(answer) => return self.answer(answer),
+            message @ (Message::Window(..)
+            | Message::WindowResized(_)
+            | Message::Maximized(..)
+            | Message::WindowClosed(_)) => return self.window_message(&message),
+            Message::OpenFolder => return self.open_folder(),
+            Message::FolderPicked(Some(root)) => {
+                return self.after_question(Pending::Project(root));
+            }
+            Message::Save => self.save(),
+            Message::Key(event) => return self.key(event),
+            Message::FolderPicked(None) => {}
+            Message::DismissNotice => self.notice = None,
+        }
+        Task::none()
+    }
+
+    fn window_message(&mut self, message: &Message) -> Task<Message> {
+        match *message {
             Message::Window(id, chrome::Action::Close) => return self.close_window(id),
             Message::Window(id, action) => return chrome::perform(id, action),
             Message::WindowResized(id) => {
@@ -2370,17 +2395,8 @@ impl App {
             Message::Maximized(id, false) => {
                 self.maximized.remove(&id);
             }
-            Message::WindowClosed(id) => {
-                if self.window_closed(id) {
-                    return iced::exit();
-                }
-            }
-            Message::OpenFolder => return self.open_folder(),
-            Message::FolderPicked(Some(root)) => return self.open_project(&root),
-            Message::Save => self.save(),
-            Message::Key(event) => return self.key(event),
-            Message::FolderPicked(None) => {}
-            Message::DismissNotice => self.notice = None,
+            Message::WindowClosed(id) if self.window_closed(id) => return iced::exit(),
+            _ => {}
         }
         Task::none()
     }
@@ -2391,7 +2407,7 @@ impl App {
         } else {
             Subscription::none()
         };
-        let dialog = if self.quitting {
+        let dialog = if self.pending.is_some() {
             event::listen_with(unsaved::dialog_key)
         } else if self.server_dialog.is_open() {
             event::listen_with(server_key)
@@ -2403,7 +2419,7 @@ impl App {
         });
         let find = if self.find.is_open()
             && !self.menu_open
-            && !self.quitting
+            && self.pending.is_none()
             && !self.server_dialog.is_open()
         {
             event::listen_with(find_key)
@@ -2431,25 +2447,39 @@ impl App {
 
     fn quit(&mut self) -> Task<Message> {
         self.menu_open = false;
+        self.after_question(Pending::Quit)
+    }
+
+    fn after_question(&mut self, pending: Pending) -> Task<Message> {
         if self.is_saved() {
-            return iced::exit();
+            return self.continue_with(pending);
         }
-        self.quitting = true;
+        self.pending = Some(pending);
         Task::none()
     }
 
+    fn continue_with(&mut self, pending: Pending) -> Task<Message> {
+        match pending {
+            Pending::Quit => iced::exit(),
+            Pending::Project(root) => self.open_project(&root),
+            Pending::Server(document) => self.open_server_document(document),
+        }
+    }
+
     fn answer(&mut self, answer: unsaved::Answer) -> Task<Message> {
-        self.quitting = false;
+        let Some(pending) = self.pending.take() else {
+            return Task::none();
+        };
         match answer {
             unsaved::Answer::Save => {
                 self.save_all();
                 if self.is_saved() {
-                    iced::exit()
+                    self.continue_with(pending)
                 } else {
                     Task::none()
                 }
             }
-            unsaved::Answer::Discard => iced::exit(),
+            unsaved::Answer::Discard => self.continue_with(pending),
             unsaved::Answer::Cancel => Task::none(),
         }
     }
@@ -2511,7 +2541,7 @@ impl App {
                     .map(Message::Server),
             );
         }
-        if self.project.is_some() && self.quitting {
+        if self.project.is_some() && self.pending.is_some() {
             let files: Vec<String> = self
                 .changed_files()
                 .iter()
@@ -4648,6 +4678,82 @@ mod tests {
 
     fn editor_text(app: &App) -> String {
         app.editor.document().buffer().to_string()
+    }
+
+    #[test]
+    fn another_project_opens_only_after_a_question_about_the_changes() {
+        let folder = chaptered();
+        let other = book();
+        let mut app = app();
+        open(&mut app, &folder);
+        send(&mut app, insert("Late. "));
+
+        open(&mut app, &other);
+
+        assert_eq!(editor_text(&app), format!("Late. {CHAPTERED_MAIN}"));
+        assert!(
+            simulator(app.view())
+                .find("Save the changes to main.typ?")
+                .is_ok()
+        );
+        send(&mut app, Message::Unsaved(unsaved::Answer::Discard));
+        assert_eq!(editor_text(&app), "= Book");
+        assert_eq!(
+            fs::read_to_string(folder.path().join("main.typ")).unwrap(),
+            CHAPTERED_MAIN
+        );
+    }
+
+    #[test]
+    fn save_before_another_project_saves_the_changes_and_opens_it() {
+        let folder = chaptered();
+        let other = book();
+        let mut app = app();
+        open(&mut app, &folder);
+        send(&mut app, insert("Late. "));
+        open(&mut app, &other);
+
+        send(&mut app, Message::Unsaved(unsaved::Answer::Save));
+
+        assert_eq!(
+            fs::read_to_string(folder.path().join("main.typ")).unwrap(),
+            format!("Late. {CHAPTERED_MAIN}")
+        );
+        assert_eq!(editor_text(&app), "= Book");
+    }
+
+    #[test]
+    fn cancel_keeps_the_project_and_its_changes() {
+        let folder = chaptered();
+        let other = book();
+        let mut app = app();
+        open(&mut app, &folder);
+        send(&mut app, insert("Late. "));
+        open(&mut app, &other);
+
+        send(&mut app, Message::Unsaved(unsaved::Answer::Cancel));
+
+        assert_eq!(editor_text(&app), format!("Late. {CHAPTERED_MAIN}"));
+        assert!(simulator(app.view()).find("Field Notes · main.typ").is_ok());
+        assert!(
+            simulator(app.view())
+                .find("Save the changes to main.typ?")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_server_document_opens_only_after_a_question_about_the_changes() {
+        let folder = chaptered();
+        let mut app = app();
+        open(&mut app, &folder);
+        send(&mut app, insert("Late. "));
+
+        let _receiver = open_server_document(&mut app);
+
+        assert_eq!(editor_text(&app), format!("Late. {CHAPTERED_MAIN}"));
+        send(&mut app, Message::Unsaved(unsaved::Answer::Discard));
+        assert_eq!(editor_text(&app), "");
     }
 
     #[test]
