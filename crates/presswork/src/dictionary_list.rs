@@ -7,7 +7,7 @@ use iced::alignment::Vertical;
 use iced::futures::Stream;
 use iced::widget::{button, column, progress_bar, row, scrollable, space, text};
 use iced::{Element, Fill, Task};
-use presswork_toolchain::{Client, Dictionaries, DictionarySource, Progress};
+use presswork_toolchain::{Client, Dictionaries, DictionarySource};
 use presswork_ui::icon::{Icon, icon};
 use presswork_ui::style::{self, Tone};
 use presswork_ui::{font, font_size, size, space as gap};
@@ -62,6 +62,14 @@ impl DictionaryList {
             (Ok(catalog), None) => (catalog.sources, None),
             (Err(_), _) => (Vec::new(), None),
         };
+        Self::with(dictionaries, root, sources)
+    }
+
+    fn with(
+        dictionaries: Option<Dictionaries>,
+        root: Option<PathBuf>,
+        sources: Vec<DictionarySource>,
+    ) -> Self {
         let mut list = Self {
             dictionaries,
             root,
@@ -230,13 +238,6 @@ fn action<'a>(symbol: Icon, label: String, message: Option<Message>) -> Element<
     .into()
 }
 
-fn percent(progress: Progress) -> u8 {
-    let Some(total) = progress.total.filter(|total| *total > 0) else {
-        return 0;
-    };
-    u8::try_from(progress.received.min(total) * 100 / total).unwrap_or(100)
-}
-
 fn install(
     dictionaries: Dictionaries,
     client: Client,
@@ -250,7 +251,7 @@ fn install(
         let mut last = None;
         let result = dictionaries
             .install(&client, &source, move |progress| {
-                let percent = percent(progress);
+                let percent = crate::toolchain_panel::percent(progress);
                 if last != Some(percent) {
                     last = Some(percent);
                     let _ =
@@ -274,8 +275,50 @@ fn install(
 #[cfg(test)]
 mod tests {
     use iced_test::simulator;
+    use presswork_toolchain::{Digest, SourceFile};
 
     use super::*;
+    use crate::testing::{Route, collect, serve};
+
+    const FILES: [(&str, &[u8]); 3] = [
+        ("xx/xx.aff", b"SET UTF-8\n"),
+        ("xx/xx.dic", b"1\nword\n"),
+        ("xx/README.txt", b"The license."),
+    ];
+
+    fn source_file(path: &str, bytes: &[u8]) -> SourceFile {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("file");
+        std::fs::write(&file, bytes).unwrap();
+        SourceFile {
+            path: path.to_owned(),
+            size: bytes.len() as u64,
+            digest: Digest::of_file(&file).unwrap(),
+        }
+    }
+
+    fn source(dic: &[u8]) -> DictionarySource {
+        DictionarySource {
+            tag: "xx-XX".to_owned(),
+            license: "MIT".to_owned(),
+            aff: source_file(FILES[0].0, FILES[0].1),
+            dic: source_file(FILES[1].0, dic),
+            notice: source_file(FILES[2].0, FILES[2].1),
+        }
+    }
+
+    fn server() -> String {
+        serve(
+            FILES
+                .iter()
+                .map(|(path, bytes)| Route::new(&format!("GET /{path}"), *bytes))
+                .collect(),
+        )
+    }
+
+    fn client() -> Client {
+        Client::new("presswork-test").unwrap()
+    }
 
     fn installed(root: &std::path::Path, tag: &str) {
         let folder = root.join(tag);
@@ -360,5 +403,143 @@ mod tests {
         ] {
             assert_ne!(localizer.text(id), id);
         }
+    }
+
+    #[test]
+    fn only_an_installation_and_a_removal_change_the_dictionaries() {
+        let tag = || "de-DE".to_owned();
+
+        assert!(Message::Installed(tag(), Ok(())).changes_dictionaries());
+        assert!(Message::Remove(tag()).changes_dictionaries());
+        assert!(!Message::Installed(tag(), Err(String::new())).changes_dictionaries());
+        assert!(!Message::Install(tag()).changes_dictionaries());
+        assert!(!Message::Progress(tag(), 5).changes_dictionaries());
+    }
+
+    #[test]
+    fn the_list_keeps_its_folder() {
+        let root = tempfile::tempdir().unwrap();
+
+        let list = DictionaryList::new(Some(root.path().to_path_buf()));
+
+        assert_eq!(list.root(), Some(root.path().to_path_buf()));
+    }
+
+    #[test]
+    fn an_installation_without_a_client_shows_the_problem() {
+        let root = tempfile::tempdir().unwrap();
+        let mut list = DictionaryList::new(Some(root.path().to_path_buf()));
+
+        let _ = list.update(
+            Message::Install("de-DE".to_owned()),
+            Err("no connection".to_owned()),
+        );
+
+        assert_eq!(
+            list.problem,
+            Some(Problem::Install(
+                "de-DE".to_owned(),
+                "no connection".to_owned()
+            ))
+        );
+        assert!(list.installing.is_empty());
+    }
+
+    #[test]
+    fn an_installation_starts_at_zero_percent() {
+        let root = tempfile::tempdir().unwrap();
+        let mut list = DictionaryList::new(Some(root.path().to_path_buf()));
+
+        let _ = list.update(Message::Install("de-DE".to_owned()), Ok(client()));
+
+        assert_eq!(list.installing.get("de-DE"), Some(&0));
+        assert_eq!(list.problem, None);
+    }
+
+    #[test]
+    fn an_installation_needs_a_folder_and_a_known_language() {
+        let root = tempfile::tempdir().unwrap();
+        let mut without_folder = DictionaryList::new(None);
+        let mut with_folder = DictionaryList::new(Some(root.path().to_path_buf()));
+
+        let _ = without_folder.update(Message::Install("de-DE".to_owned()), Ok(client()));
+        let _ = with_folder.update(Message::Install("xx-XX".to_owned()), Ok(client()));
+
+        assert!(without_folder.installing.is_empty());
+        assert!(with_folder.installing.is_empty());
+    }
+
+    #[test]
+    fn the_installation_downloads_the_files_and_tells_the_progress() {
+        let root = tempfile::tempdir().unwrap();
+        let dictionaries = Dictionaries::with_base(root.path(), &server());
+
+        let messages = collect(install(dictionaries.clone(), client(), source(FILES[1].1)));
+
+        assert_eq!(
+            messages.last(),
+            Some(&Message::Installed("xx-XX".to_owned(), Ok(())))
+        );
+        assert!(messages.contains(&Message::Progress("xx-XX".to_owned(), 100)));
+        assert_eq!(dictionaries.installed(), ["xx-XX"]);
+    }
+
+    #[test]
+    fn a_file_with_a_different_digest_stops_the_installation() {
+        let root = tempfile::tempdir().unwrap();
+        let dictionaries = Dictionaries::with_base(root.path(), &server());
+
+        let messages = collect(install(
+            dictionaries.clone(),
+            client(),
+            source(b"other words"),
+        ));
+
+        assert!(matches!(
+            messages.last(),
+            Some(Message::Installed(tag, Err(_))) if tag == "xx-XX"
+        ));
+        assert_eq!(dictionaries.installed(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_list_shows_the_installed_and_the_installing_dictionaries() {
+        let root = tempfile::tempdir().unwrap();
+        installed(root.path(), "xx-XX");
+        let dictionaries = Dictionaries::with_base(root.path(), "http://127.0.0.1:9");
+        let mut list = DictionaryList::with(
+            Some(dictionaries),
+            Some(root.path().to_path_buf()),
+            vec![source(FILES[1].1), {
+                let mut other = source(FILES[1].1);
+                other.tag = "de-DE".to_owned();
+                other
+            }],
+        );
+        let localizer = Localizer::english();
+        let _ = list.update(
+            Message::Progress("de-DE".to_owned(), 40),
+            Err(String::new()),
+        );
+
+        let mut ui = simulator(list.view(&localizer));
+
+        assert!(ui.find("Remove").is_ok());
+        assert!(ui.find("Download").is_err());
+    }
+
+    #[test]
+    fn a_failed_removal_tells_the_language() {
+        let localizer = Localizer::english();
+
+        let text = problem_text(
+            &localizer,
+            &Problem::Remove("de-DE".to_owned(), "the folder is in use".to_owned()),
+        );
+
+        assert_eq!(
+            text,
+            "Presswork cannot remove the German (Germany) dictionary. The folder is in use."
+        );
     }
 }

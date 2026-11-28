@@ -593,7 +593,7 @@ pub(crate) fn sentence(text: &str) -> String {
     sentence
 }
 
-fn percent(progress: Progress) -> u8 {
+pub(crate) fn percent(progress: Progress) -> u8 {
     let Some(total) = progress.total.filter(|total| *total > 0) else {
         return 0;
     };
@@ -654,6 +654,7 @@ mod tests {
     use presswork_toolchain::{Digest, Platform, ReleaseFile};
 
     use super::*;
+    use crate::testing::{Route, collect, serve};
 
     fn version(text: &str) -> Version {
         Version::parse(text).unwrap()
@@ -906,5 +907,176 @@ mod tests {
         for id in TEXT_IDS {
             assert_ne!(localizer.text(id), id);
         }
+    }
+
+    #[test]
+    fn the_dictionaries_are_next_to_the_typst_versions() {
+        let root = tempfile::tempdir().unwrap();
+        let toolchains = root.path().join("toolchains");
+
+        let panel = panel(&toolchains);
+
+        assert_eq!(
+            panel.dictionary_root(),
+            Some(root.path().join(DICTIONARIES))
+        );
+    }
+
+    #[test]
+    fn close_closes_the_panel_and_use_changes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let mut panel = panel(root.path());
+        let _ = panel.update(Message::Toggle);
+
+        let _ = panel.update(Message::Use(version("0.15.1")));
+        assert!(panel.is_open());
+        let _ = panel.update(Message::Close);
+
+        assert!(!panel.is_open());
+    }
+
+    #[test]
+    fn reload_gets_the_list_again() {
+        let root = tempfile::tempdir().unwrap();
+        let mut panel = panel(root.path());
+        let _ = panel.update(Message::Loaded(Err("timeout".to_owned())));
+
+        let _ = panel.update(Message::Reload);
+
+        assert_eq!(panel.releases, Releases::Loading);
+        assert_eq!(panel.available(None).len(), 0);
+    }
+
+    #[test]
+    fn without_a_folder_no_version_installs_or_goes_away() {
+        let mut panel = ToolchainPanel::new(None, version("0.15.1"));
+        load(&mut panel, vec![release("0.15.0")]);
+
+        let _ = panel.update(Message::Install(version("0.15.0")));
+        assert_eq!(panel.problem, Some(Problem::NoFolder));
+        panel.problem = None;
+        let _ = panel.update(Message::Remove(version("0.15.0")));
+
+        assert_eq!(panel.problem, Some(Problem::NoFolder));
+        assert!(panel.installing.is_empty());
+        assert_eq!(panel.executable(&version("0.15.0")), None);
+        let mut ui = simulator(panel.view(&Localizer::english(), None));
+        assert!(
+            ui.find("Presswork cannot find a folder for the Typst versions.")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn an_installation_starts_only_for_a_version_of_the_list() {
+        let root = tempfile::tempdir().unwrap();
+        let mut panel = panel(root.path());
+        load(&mut panel, vec![release("0.15.0")]);
+
+        let _ = panel.update(Message::Install(version("0.14.0")));
+        assert!(panel.installing.is_empty());
+        let _ = panel.update(Message::Install(version("0.15.0")));
+
+        assert_eq!(panel.installing.get(&version("0.15.0")), Some(&0));
+        assert!(panel.client.is_some());
+    }
+
+    #[test]
+    fn a_failed_removal_shows_the_problem() {
+        let root = tempfile::tempdir().unwrap();
+        let mut panel = panel(root.path());
+
+        let _ = panel.update(Message::Remove(version("0.14.2")));
+
+        assert!(matches!(
+            &panel.problem,
+            Some(Problem::Remove(removed, _)) if *removed == version("0.14.2")
+        ));
+        let text = problem_text(
+            &Localizer::english(),
+            &Problem::Remove(version("0.14.2"), "the folder is in use".to_owned()),
+        );
+        assert_eq!(text, "Typst 0.14.2 is not removed. The folder is in use.");
+    }
+
+    #[test]
+    fn dictionary_messages_go_to_the_dictionary_list() {
+        let root = tempfile::tempdir().unwrap();
+        let mut panel = panel(&root.path().join("toolchains"));
+
+        let _ = panel.update(Message::Dictionaries(dictionary_list::Message::Installed(
+            "de-DE".to_owned(),
+            Err("the server answered with the HTTP status 404".to_owned()),
+        )));
+
+        let mut ui = simulator(panel.view(&Localizer::english(), None));
+        assert!(
+            ui.find("Presswork cannot download the German (Germany) dictionary. The server answered with the HTTP status 404.")
+                .is_ok()
+        );
+        assert!(panel.client.is_some());
+    }
+
+    #[test]
+    fn the_panel_tells_about_the_built_in_version_and_a_bad_pin() {
+        let root = tempfile::tempdir().unwrap();
+        let panel = panel(root.path());
+        let localizer = Localizer::english();
+
+        let built_in = panel.project_text(&localizer, Some(&Choice::Engine(Engine::Embedded)));
+        let invalid = panel.project_text(&localizer, Some(&Choice::InvalidPin("x".to_owned())));
+
+        assert_eq!(built_in, "This project uses the built-in Typst 0.15.1.");
+        assert_eq!(
+            invalid,
+            "The Typst pin \"x\" in presswork.toml is not valid."
+        );
+        let mut ui = simulator(panel.view(&localizer, Some(&Choice::Engine(Engine::Embedded))));
+        assert!(ui.find("In use").is_ok());
+    }
+
+    #[test]
+    fn a_sentence_starts_with_a_capital_and_ends_with_a_period() {
+        assert_eq!(sentence("the file is missing"), "The file is missing.");
+        assert_eq!(sentence("Done."), "Done.");
+        assert_eq!(sentence(""), "");
+    }
+
+    #[test]
+    fn the_percent_comes_from_the_received_bytes() {
+        let progress = |received, total| Progress { received, total };
+
+        assert_eq!(percent(progress(50, Some(200))), 25);
+        assert_eq!(percent(progress(300, Some(200))), 100);
+        assert_eq!(percent(progress(50, Some(0))), 0);
+        assert_eq!(percent(progress(50, None)), 0);
+    }
+
+    #[test]
+    fn an_archive_with_a_different_digest_is_not_installed() {
+        let root = tempfile::tempdir().unwrap();
+        let base = serve(vec![Route::new("GET /typst", vec![7; 2000])]);
+        let mut wrong = release("0.15.0");
+        wrong.files[0].url = format!("{base}/typst");
+        wrong.files[0].size = 2000;
+
+        let messages = collect(install(
+            Toolchains::new(root.path()),
+            Client::new("presswork-test").unwrap(),
+            wrong,
+        ));
+
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            Message::Progress(installing, 100) if *installing == version("0.15.0")
+        )));
+        assert!(matches!(
+            messages.last(),
+            Some(Message::Installed(installed, Err(_))) if *installed == version("0.15.0")
+        ));
+        assert_eq!(
+            Toolchains::new(root.path()).installed().unwrap(),
+            Vec::<Version>::new()
+        );
     }
 }
