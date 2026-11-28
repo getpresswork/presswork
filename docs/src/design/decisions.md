@@ -1732,3 +1732,14 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The list is in `recent-projects.json` in the local data folder. A project goes to the top of the list when it opens. A project with a missing folder stays in the list until you remove it, because the folder can be on a drive that is not connected.
 - **Reason:** A person who starts Presswork mostly opens one of a few projects. The list makes this one click.
 - **Other options:** A start page only without a project. The list in the roaming data folder. Automatic removal of missing folders.
+
+## D215. The scratchpad
+
+- **Status:** Accepted, 2026-11-28. **Origin:** Default, from a requirement of the project owner.
+- **Decision:**
+  - The scratchpad is the document of Presswork without a project and without a server document. Before this decision, this document was a sample that Presswork did not keep.
+  - Presswork writes the text to `scratchpad.typ` in the roaming data folder after each change of the editor. The text belongs to the person, as the personal dictionary does (D197). On start, Presswork reads the file. Without the file, it shows the sample.
+  - **Scratchpad** on the Home tab opens the scratchpad. It closes the project or the server document after the question about the changes that are not saved.
+  - The tests use a scratchpad without a file, so that they do not change the file of the user.
+- **Reason:** A person who tests an idea must find it again after a restart.
+- **Other options:** A scratchpad next to the open project. More than one scratchpad. A save only when Presswork closes.

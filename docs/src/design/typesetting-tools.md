@@ -118,3 +118,10 @@ Typst records the time of each step of a compilation. The compile profiler shows
 ## Scratchpad
 
 The scratchpad is a Typst document outside of projects, with an instant preview. You can test an idea there and then move the content into a project.
+
+In milestone 2, the scratchpad has these properties (D215):
+
+- **Scratchpad** on the Home tab opens it. It closes the open project or server document, and asks about the changes that are not saved first.
+- Presswork also starts with the scratchpad in the Write workspace, below the Home tab.
+- Presswork saves the text after each change, in the file `scratchpad.typ` in the data folder of Presswork. The first time, the scratchpad shows a sample document.
+- The scratchpad reads no other files, thus it cannot include files or show images from a folder.
