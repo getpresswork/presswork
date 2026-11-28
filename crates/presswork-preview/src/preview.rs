@@ -384,14 +384,20 @@ impl Preview {
     }
 
     fn wanted(&self) -> Vec<(usize, u128)> {
+        self.missing()
+            .into_iter()
+            .filter(|(_, key)| !self.pending.contains(key))
+            .collect()
+    }
+
+    fn missing(&self) -> Vec<(usize, u128)> {
         let Some(document) = &self.document else {
             return Vec::new();
         };
         self.near_pages()
             .filter_map(|index| {
                 let key = page_key(document, index, self.guides)?;
-                (!self.images.contains_key(&key) && !self.pending.contains(&key))
-                    .then_some((index, key))
+                (!self.images.contains_key(&key)).then_some((index, key))
             })
             .collect()
     }
@@ -444,7 +450,7 @@ impl Preview {
     }
 
     pub fn render_now(&mut self) -> usize {
-        let wanted = self.wanted();
+        let wanted = self.missing();
         let Some(document) = self.document.clone() else {
             return 0;
         };
@@ -1130,6 +1136,16 @@ mod tests {
         assert!(drawn > 0 && drawn < 40, "{drawn} pages drawn");
         assert!(preview.page_image(0).is_some());
         assert!(preview.page_image(39).is_none());
+    }
+
+    #[test]
+    fn render_now_also_draws_the_pages_of_a_render_that_did_not_finish() {
+        let mut preview = Preview::default();
+        preview.show(&small_pages(&["One.", "Two."]), 2.0);
+        drop(preview.render(|rendered| rendered));
+
+        assert_eq!(preview.render_now(), 2);
+        assert!(preview.page_image(0).is_some());
     }
 
     #[test]
