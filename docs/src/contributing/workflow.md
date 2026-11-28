@@ -34,13 +34,13 @@ The hooks run before each commit:
 
 ## Coverage
 
-The CI job "Coverage" measures the line coverage and fails below a floor (D216). To measure it on your computer, install `cargo-llvm-cov` and the `llvm-tools` component, then run:
+The CI job "Coverage" measures the line coverage and fails below 95 % (D216). A new function needs tests that keep the coverage at 95 % or more. To measure it on your computer, install `cargo-llvm-cov` and the `llvm-tools` component, then run:
 
 ```sh
 bash .github/scripts/coverage.sh
 ```
 
-Without the PostgreSQL URL and the OCR tools, the database tests and the OCR tests do not run. Thus the local value is lower than the CI value.
+Without the PostgreSQL URL and the OCR tools, the database tests and the OCR tests do not run. Thus the local value is lower than the CI value. Set `COVERAGE_FLOOR=0` to see the table without the floor.
 
 ## Commits
 
