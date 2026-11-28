@@ -1614,7 +1614,7 @@ Do not change what an accepted decision says. You can correct its language. To c
 
 ## D205. New projects and file actions
 
-- **Status:** Accepted, 2026-11-24. The rule for paths after a rename is replaced by D210. **Origin:** Default.
+- **Status:** Accepted, 2026-11-24. The rule for paths after a rename is replaced by D210. The delete to the disk is replaced by D213. **Origin:** Default.
 - **Decision:**
   - **New project…** in the Presswork menu asks for a folder. If the folder has no `presswork.toml`, Presswork writes one with the name of the folder. If the folder has no `main.typ`, Presswork writes one with the name of the folder as its heading. Other files in the folder stay. A folder that is a project opens as it is.
   - Before Presswork opens a different project, a new project, or a server document, it asks about the changes that are not saved, as it does before it closes.
@@ -1711,3 +1711,14 @@ Do not change what an accepted decision says. You can correct its language. To c
   - If Presswork has no data folder, or the system cannot open the file, a note tells the problem and names the file.
 - **Reason:** A person who adds a wrong word to the personal dictionary must be able to remove it. Before this decision, the person had to find the file in the data folder.
 - **Other options:** A list of the words in a Presswork panel, with a Remove button. The file in the Presswork editor (the editor shows only project files).
+
+## D213. Delete to the trash of the system
+
+- **Status:** Accepted, 2026-11-27. **Origin:** Project owner (the trash of the system and the `trash` crate); Default (the details).
+- **Decision:**
+  - **Delete** in the files panel moves the file to the trash of the system: the Recycle Bin on Windows, the Trash on macOS, and the freedesktop.org trash on Linux. The suggestions file of the file also goes to the trash, so that you can restore both.
+  - Presswork uses the `trash` crate 5.4.0 (MIT). It adds two crates, `trash` and `urlencoding`. `cargo deny` accepts them.
+  - If the trash does not take the file, for example on a network drive, the file stays in the project and a note tells the problem. Presswork does not delete the file permanently.
+  - The tests do not use the trash of the system. The test application deletes from the disk.
+- **Reason:** A delete in the files panel removes a chapter. A wrong click must not lose the work of days.
+- **Other options:** A permanent delete as before. A permanent delete when the trash does not take the file. A trash folder in the project.
