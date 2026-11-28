@@ -495,6 +495,7 @@ mod tests {
 
     use super::*;
     use crate::i18n::Localizer;
+    use crate::testing::{Route, run_task, serve};
 
     fn filled() -> ServerDialog {
         let mut dialog = ServerDialog::default();
@@ -745,5 +746,227 @@ mod tests {
         let name = device_name();
 
         assert!(name.starts_with("Presswork on "), "{name}");
+    }
+
+    fn json(value: impl serde::Serialize) -> serde_json::Value {
+        serde_json::to_value(value).unwrap()
+    }
+
+    fn server() -> String {
+        let session = presswork_api::Session {
+            id: Uuid::from_u128(5),
+            device: device_name(),
+            created_at: "2026-11-28T09:00:00Z".parse().unwrap(),
+            last_used_at: "2026-11-28T09:00:00Z".parse().unwrap(),
+            current: true,
+        };
+        let shelves = shelves();
+        serve(vec![
+            Route::json(
+                "POST /api/v1/sessions",
+                &json(presswork_api::SignedIn {
+                    token: "pws_ann".to_owned(),
+                    session,
+                    user_name: "Ann".to_owned(),
+                }),
+            ),
+            Route::json(
+                "GET /api/v1/organizations",
+                &json([presswork_api::Membership {
+                    organization_id: PRESS,
+                    name: "Field Press".to_owned(),
+                    role: presswork_api::Role::Member,
+                }]),
+            ),
+            Route::json(
+                &format!("GET /api/v1/organizations/{PRESS}/projects"),
+                &json([&shelves[0].project, &shelves[1].project]),
+            ),
+            Route::json(
+                &format!("GET /api/v1/projects/{NOTES}/documents"),
+                &json([main_document(NOTES)]),
+            ),
+            Route::json(
+                &format!("GET /api/v1/projects/{ATLAS}/documents"),
+                &json(Vec::<Document>::new()),
+            ),
+            Route::json(
+                &format!("POST /api/v1/projects/{ATLAS}/documents"),
+                &json(main_document(ATLAS)),
+            ),
+        ])
+    }
+
+    fn on(base: &str) -> ServerDialog {
+        let mut dialog = filled();
+        let _ = dialog.update(Message::Address(base.to_owned()));
+        dialog
+    }
+
+    fn closed_address() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://{}", listener.local_addr().unwrap())
+    }
+
+    #[test]
+    fn a_sign_in_on_a_server_lists_its_projects_and_documents() {
+        let base = server();
+        let mut dialog = on(&base);
+
+        let signed = run_task(dialog.update(Message::SignIn));
+        let [Message::SignedIn(Ok(connection))] = signed.as_slice() else {
+            panic!("{signed:?}");
+        };
+        let loaded = run_task(dialog.update(Message::SignedIn(Ok(connection.clone()))));
+
+        assert_eq!(connection.user_name, "Ann");
+        assert_eq!(connection.token, "pws_ann");
+        assert!(
+            matches!(loaded.as_slice(), [Message::Loaded(Ok(found))] if *found == shelves()),
+            "{loaded:?}"
+        );
+    }
+
+    #[test]
+    fn make_main_typ_asks_the_server_for_the_file() {
+        let base = server();
+        let mut dialog = on(&base);
+        let signed = run_task(dialog.update(Message::SignIn));
+        let [Message::SignedIn(Ok(connection))] = signed.as_slice() else {
+            panic!("{signed:?}");
+        };
+        let _ = dialog.update(Message::SignedIn(Ok(connection.clone())));
+        let _ = dialog.update(Message::Loaded(Ok(shelves())));
+
+        let made = run_task(dialog.update(Message::Make(ATLAS)));
+
+        assert!(
+            matches!(made.as_slice(), [Message::Made(Ok(document))] if *document == main_document(ATLAS)),
+            "{made:?}"
+        );
+    }
+
+    #[test]
+    fn a_refusal_gives_the_message_of_the_server() {
+        let base = serve(vec![
+            Route::json(
+                "POST /api/v1/sessions",
+                &serde_json::json!({
+                    "code": "unauthorized",
+                    "message": "The email address or the password is not correct."
+                }),
+            )
+            .status(401),
+        ]);
+        let mut dialog = on(&base);
+
+        let signed = run_task(dialog.update(Message::SignIn));
+
+        assert!(
+            matches!(
+                signed.as_slice(),
+                [Message::SignedIn(Err(Problem::Refused(message)))]
+                    if message == "The email address or the password is not correct."
+            ),
+            "{signed:?}"
+        );
+    }
+
+    #[test]
+    fn an_answer_without_a_message_gives_its_status() {
+        let base = serve(vec![
+            Route::new("POST /api/v1/sessions", "broken").status(500),
+        ]);
+        let mut dialog = on(&base);
+
+        let signed = run_task(dialog.update(Message::SignIn));
+        let _ = dialog.update(Message::SignedIn(Err(Problem::Status(500))));
+
+        assert!(
+            matches!(
+                signed.as_slice(),
+                [Message::SignedIn(Err(Problem::Status(500)))]
+            ),
+            "{signed:?}"
+        );
+        assert!(shows(&dialog, "The server answered with the status 500."));
+    }
+
+    #[test]
+    fn a_server_that_does_not_answer_is_unreachable() {
+        let mut dialog = on(&closed_address());
+
+        let signed = run_task(dialog.update(Message::SignIn));
+
+        assert!(
+            matches!(
+                signed.as_slice(),
+                [Message::SignedIn(Err(Problem::Unreachable))]
+            ),
+            "{signed:?}"
+        );
+    }
+
+    #[test]
+    fn a_failed_main_file_shows_the_problem() {
+        let mut dialog = browsing();
+        let _ = dialog.update(Message::Loaded(Ok(shelves())));
+
+        let _ = dialog.update(Message::Made(Err(Problem::Status(502))));
+
+        assert!(shows(&dialog, "The server answered with the status 502."));
+    }
+
+    #[test]
+    fn make_without_a_list_does_nothing() {
+        let mut dialog = filled();
+
+        let made = run_task(dialog.update(Message::Make(ATLAS)));
+
+        assert_eq!(made.len(), 0);
+    }
+
+    #[test]
+    fn a_sign_in_after_the_dialog_closed_does_not_list_projects() {
+        let mut dialog = filled();
+        let _ = dialog.update(Message::SignIn);
+        let _ = dialog.update(Message::Close);
+
+        let _ = dialog.update(Message::SignedIn(Ok(connection())));
+
+        dialog.open();
+        assert!(shows(&dialog, "Server address"));
+    }
+
+    #[test]
+    fn a_listed_project_gives_its_name() {
+        let mut dialog = browsing();
+        assert_eq!(dialog.project_name(NOTES), None);
+
+        let _ = dialog.update(Message::Loaded(Ok(shelves())));
+        let _ = dialog.update(Message::Made(Ok(main_document(Uuid::nil()))));
+
+        assert_eq!(dialog.project_name(NOTES), Some("Field Notes".to_owned()));
+        assert_eq!(dialog.project_name(Uuid::nil()), None);
+    }
+
+    #[test]
+    fn without_projects_the_dialog_tells_who_makes_them() {
+        let mut dialog = browsing();
+
+        let _ = dialog.update(Message::Loaded(Ok(Vec::new())));
+
+        assert!(shows(
+            &dialog,
+            "Your organizations have no projects. An administrator makes the projects."
+        ));
+    }
+
+    #[test]
+    fn the_debug_text_of_a_connection_hides_the_token() {
+        let text = format!("{:?}", connection());
+
+        assert!(!text.contains("pws_ann"), "{text}");
+        assert!(text.contains("[removed]"), "{text}");
     }
 }
