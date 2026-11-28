@@ -25,6 +25,7 @@ mod problems;
 mod proofreading;
 mod publish_view;
 mod recent;
+mod scratchpad;
 #[cfg(test)]
 mod screens;
 mod server_dialog;

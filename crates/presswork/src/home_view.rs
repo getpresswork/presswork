@@ -24,15 +24,26 @@ pub(crate) fn view<'a>(
             localizer,
             Icon::FolderOpen,
             "home-open-folder",
-            menu::Item::OpenFolder
+            Message::MenuItem(menu::Item::OpenFolder)
         ),
         action(
             localizer,
             Icon::FolderPlus,
             "home-new-project",
-            menu::Item::NewProject
+            Message::MenuItem(menu::Item::NewProject)
         ),
-        action(localizer, Icon::Server, "home-connect", menu::Item::Connect),
+        action(
+            localizer,
+            Icon::Server,
+            "home-connect",
+            Message::MenuItem(menu::Item::Connect)
+        ),
+        action(
+            localizer,
+            Icon::NotebookPen,
+            "home-scratchpad",
+            Message::OpenScratchpad
+        ),
     ]
     .spacing(gap::XS)
     .width(START_WIDTH);
@@ -66,7 +77,7 @@ fn action<'a>(
     localizer: &Localizer,
     shape: Icon,
     text_id: &str,
-    item: menu::Item,
+    message: Message,
 ) -> Element<'a, Message> {
     button(
         row![
@@ -79,7 +90,7 @@ fn action<'a>(
     .width(Fill)
     .padding([gap::XS + gap::XXS, gap::S])
     .style(style::secondary)
-    .on_press(Message::MenuItem(item))
+    .on_press(message)
     .into()
 }
 
@@ -209,6 +220,15 @@ mod tests {
                 "{label}"
             );
         }
+    }
+
+    #[test]
+    fn the_scratchpad_button_opens_the_scratchpad() {
+        let mut ui = simulator(view(&Localizer::english(), &[]));
+
+        ui.click("Scratchpad").unwrap();
+
+        assert!(matches!(messages(ui).as_slice(), [Message::OpenScratchpad]));
     }
 
     #[test]

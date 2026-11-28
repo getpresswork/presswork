@@ -53,6 +53,7 @@ use crate::problems::problem_sentence;
 use crate::proofreading::{self, Correction, Proofreader};
 use crate::publish_view::{self, PublishView};
 use crate::recent::RecentProjects;
+use crate::scratchpad::{self, Scratchpad};
 use crate::server_dialog::{self, ServerDialog};
 use crate::sidecar;
 use crate::source_map::SourceMap;
@@ -70,7 +71,6 @@ const DRAG_SPACE: f32 = 48.0;
 const DESCRIPTION_WIDTH: f32 = 380.0;
 const MAIN_WINDOW: Size = Size::new(1280.0, 800.0);
 const PREVIEW_WINDOW: Size = Size::new(720.0, 900.0);
-const SCRATCH: &str = include_str!("../samples/scratch.typ");
 const BIBLIOGRAPHY_FILE: &str = "library.yml";
 
 pub(crate) struct App {
@@ -96,6 +96,7 @@ pub(crate) struct App {
     removed_files: Vec<PathBuf>,
     discard: files::Discard,
     recent: RecentProjects,
+    scratchpad: Scratchpad,
     find: FindBar,
     publish: PublishView,
     quality: Vec<Problem>,
@@ -133,6 +134,7 @@ enum Pending {
     Project(PathBuf),
     NewProject(PathBuf),
     Server(Document),
+    Scratchpad,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -249,6 +251,7 @@ pub(crate) enum Message {
     FolderPicked(Option<PathBuf>),
     NewProjectPicked(Option<PathBuf>),
     OpenRecent(PathBuf),
+    OpenScratchpad,
     ForgetRecent(PathBuf),
     Save,
     ToggleSuggesting,
@@ -274,6 +277,9 @@ impl App {
         let mut app = Self::with_toolchains(store, toolchain_directory());
         app.discard = files::to_trash;
         app.recent = RecentProjects::load(crate::recent::recent_projects_file());
+        app.scratchpad = Scratchpad::new(scratchpad::scratchpad_file());
+        app.editor = Editor::new(&app.scratchpad.text());
+        app.saved = app.editor.revision();
         app.workspace = Workspace::Home;
         app.proofreader
             .set_personal_list(proofreading::personal_word_list());
@@ -287,7 +293,7 @@ impl App {
     }
 
     pub(crate) fn with_toolchains(store: LogStore, toolchains: Option<PathBuf>) -> Self {
-        let editor = Editor::new(SCRATCH);
+        let editor = Editor::new(scratchpad::SAMPLE);
         let embedded =
             Version::parse(presswork_typst::version()).unwrap_or_else(|_| Version::new(0, 0, 0));
         Self {
@@ -314,6 +320,7 @@ impl App {
             removed_files: Vec::new(),
             discard: files::remove,
             recent: RecentProjects::default(),
+            scratchpad: Scratchpad::default(),
             find: FindBar::default(),
             publish: PublishView::default(),
             quality: Vec::new(),
@@ -701,6 +708,17 @@ impl App {
         }
     }
 
+    fn open_scratchpad(&mut self) -> Task<Message> {
+        tracing::info!("Scratchpad opened");
+        if let Some(live) = &mut self.live {
+            live.close_document();
+        }
+        self.tasks = None;
+        self.library = None;
+        self.leave_project(Editor::new(&self.scratchpad.text()));
+        self.request_compile()
+    }
+
     fn open_server_document(&mut self, document: Document) -> Task<Message> {
         let organization = self.server_dialog.organization_of(&document);
         let project = document.project_id;
@@ -717,7 +735,12 @@ impl App {
         if let Some((organization, name)) = organization {
             live.join_chat(organization, name);
         }
-        self.editor = Editor::new("");
+        self.leave_project(Editor::new(""));
+        Task::batch([self.request_compile(), self.load_library()])
+    }
+
+    fn leave_project(&mut self, editor: Editor) {
+        self.editor = editor;
         self.file = None;
         self.others.clear();
         self.removed_files.clear();
@@ -731,7 +754,6 @@ impl App {
         self.clear_pages();
         self.notice = None;
         self.workspace = Workspace::Write;
-        Task::batch([self.request_compile(), self.load_library()])
     }
 
     fn file_message(&mut self, message: file_panel::Message) -> Task<Message> {
@@ -2717,7 +2739,18 @@ impl App {
     pub(crate) fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
         self.find.refresh(&self.editor);
+        if self.in_scratchpad() {
+            self.scratchpad.keep(&self.editor);
+        }
         task
+    }
+
+    fn in_scratchpad(&self) -> bool {
+        self.project.is_none()
+            && self
+                .live
+                .as_ref()
+                .is_none_or(|live| live.document().is_none())
     }
 
     fn handle(&mut self, message: Message) -> Task<Message> {
@@ -2815,6 +2848,7 @@ impl App {
             Message::FolderPicked(None) | Message::NewProjectPicked(None) => {}
             Message::OpenRecent(folder) => return self.open_recent(folder),
             Message::ForgetRecent(folder) => self.recent.remove(&folder),
+            Message::OpenScratchpad => return self.after_question(Pending::Scratchpad),
             Message::DismissNotice => self.notice = None,
         }
         Task::none()
@@ -2913,6 +2947,7 @@ impl App {
                 }
             },
             Pending::Server(document) => self.open_server_document(document),
+            Pending::Scratchpad => self.open_scratchpad(),
         }
     }
 
@@ -5674,6 +5709,45 @@ mod tests {
         assert!(!folder.path().join("cover.png").exists());
         assert_eq!(app.file_panel.selected(), None);
         assert_eq!(editor_text(&app), CHAPTERED_MAIN);
+    }
+
+    fn with_scratchpad(app: &mut App, folder: &tempfile::TempDir, text: &str) -> PathBuf {
+        let file = folder.path().join("scratchpad.typ");
+        fs::write(&file, text).unwrap();
+        app.scratchpad = Scratchpad::new(Some(file.clone()));
+        file
+    }
+
+    #[test]
+    fn the_scratchpad_opens_from_home_and_leaves_the_project() {
+        let data = tempfile::tempdir().unwrap();
+        let folder = chaptered();
+        let mut app = app();
+        with_scratchpad(&mut app, &data, "= Idea");
+        open(&mut app, &folder);
+        send(&mut app, Message::SelectWorkspace(Workspace::Home));
+
+        send(&mut app, Message::OpenScratchpad);
+
+        assert!(app.project.is_none());
+        assert_eq!(editor_text(&app), "= Idea");
+        assert_eq!(app.workspace, Workspace::Write);
+    }
+
+    #[test]
+    fn the_scratchpad_keeps_its_changes_but_a_project_does_not_change_it() {
+        let data = tempfile::tempdir().unwrap();
+        let folder = chaptered();
+        let mut app = app();
+        let file = with_scratchpad(&mut app, &data, "= Idea");
+        send(&mut app, Message::OpenScratchpad);
+
+        send(&mut app, insert("Now. "));
+        assert_eq!(fs::read_to_string(&file).unwrap(), "Now. = Idea");
+        open(&mut app, &folder);
+        send(&mut app, insert("Later. "));
+
+        assert_eq!(fs::read_to_string(&file).unwrap(), "Now. = Idea");
     }
 
     #[test]
