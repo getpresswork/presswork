@@ -123,12 +123,6 @@ impl Dictionaries {
             .map(|(_, dictionary)| dictionary)
     }
 
-    pub fn add(&mut self, word: &str) {
-        for (_, dictionary) in &mut self.entries {
-            dictionary.add(word);
-        }
-    }
-
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
