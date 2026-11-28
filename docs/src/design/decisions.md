@@ -1529,7 +1529,7 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The editor reads the file again before each check, thus a change in a text editor applies at the next check.
   - `presswork-cli check` does not use the personal dictionary, thus CI and all computers of the team give the same result.
 - **Reason:** A writer often uses names and terms that are correct for that person but that the team does not want in the project. One file in the user folder is simple to keep, to copy, and to edit.
-- **Other options:** A personal dictionary for each language. Personal words on the server for each account. A command to open the file. The personal dictionary also in `presswork-cli check`, with an option to switch it off.
+- **Other options:** A personal dictionary for each language. Personal words on the server for each account. A command to open the file (added by D212). The personal dictionary also in `presswork-cli check`, with an option to switch it off.
 
 ## D198. Suggestion mode for local projects
 
@@ -1701,3 +1701,13 @@ Do not change what an accepted decision says. You can correct its language. To c
   - Files with the extensions `avif`, `gif`, `jpeg`, `jpg`, `png`, `svg`, and `webp` have an image icon.
 - **Reason:** A book has images, and a person who renames or deletes an image does not want to use a different program for it.
 - **Other options:** Rename and Delete buttons on each row. A context menu. A preview of the image in the editor area.
+
+## D212. A command for the personal dictionary
+
+- **Status:** Accepted, 2026-11-27. **Origin:** Default.
+- **Decision:**
+  - The Presswork menu has the item **Personal dictionary**. It makes the folder and the file `personal-words.txt` if necessary, and opens the file with the program that the system uses for text files. A file that is there does not change.
+  - The editor reads the file again before each check, thus a change in the file applies to the next check.
+  - If Presswork has no data folder, or the system cannot open the file, a note tells the problem and names the file.
+- **Reason:** A person who adds a wrong word to the personal dictionary must be able to remove it. Before this decision, the person had to find the file in the data folder.
+- **Other options:** A list of the words in a Presswork panel, with a Remove button. The file in the Presswork editor (the editor shows only project files).

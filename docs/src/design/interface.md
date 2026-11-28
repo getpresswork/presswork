@@ -71,6 +71,7 @@ The window of the detached preview has its own top bar. It shows the title of th
 | Typst versions | | Opens or closes the Toolchains panel. |
 | Typst documentation | F1 | Shows the Typst documentation next to the editor (D208). |
 | Typst packages | | Shows the packages of Typst Universe next to the editor (D208). |
+| Personal dictionary | | Opens your personal dictionary in the text editor of the system (D212). |
 | Logs | | Opens or closes the log panel. |
 | Quit | Ctrl+Q | Closes Presswork. |
 
