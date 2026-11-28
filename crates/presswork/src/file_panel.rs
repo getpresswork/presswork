@@ -625,6 +625,13 @@ mod tests {
             ));
 
             assert!(ui.find("Delete chapters/one.typ?").is_ok());
+            assert!(
+                ui.find(
+                    "Presswork moves the file to the trash of the system. \
+                     You can restore it from there."
+                )
+                .is_ok()
+            );
             ui.click(label).unwrap();
 
             assert_eq!(messages(ui), [message], "{label}");

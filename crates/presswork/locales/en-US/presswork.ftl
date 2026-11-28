@@ -209,7 +209,7 @@ files-name-placeholder = Path, for example chapters/two.typ
 files-rename = Rename
 files-delete = Delete
 files-delete-title = Delete { $file }?
-files-delete-body = Presswork removes the file from the disk. You cannot undo this.
+files-delete-body = Presswork moves the file to the trash of the system. You can restore it from there.
 files-delete-confirm = Delete
 files-cancel = Cancel
 files-path-invalid = Presswork cannot use { $file } as a file name. Use a path in the project folder, for example chapters/two.typ.
@@ -220,7 +220,7 @@ files-paths-changed = Presswork changed the paths in { $count ->
     [one] 1 file
    *[other] { $count } files
 }.
-files-delete-error = Presswork cannot delete { $file }.
+files-delete-error = Presswork cannot move { $file } to the trash. The file stays in the project.
 
 pane-preview = Preview
 pane-docs = Docs

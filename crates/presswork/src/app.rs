@@ -93,6 +93,7 @@ pub(crate) struct App {
     file: Option<PathBuf>,
     others: BTreeMap<PathBuf, OpenFile>,
     removed_files: Vec<PathBuf>,
+    discard: files::Discard,
     find: FindBar,
     publish: PublishView,
     quality: Vec<Problem>,
@@ -267,6 +268,7 @@ pub(crate) enum Message {
 impl App {
     pub(crate) fn new(store: LogStore) -> Self {
         let mut app = Self::with_toolchains(store, toolchain_directory());
+        app.discard = files::to_trash;
         app.proofreader
             .set_personal_list(proofreading::personal_word_list());
         app.packages = Packages::in_typst_cache(&toolchain_panel::user_agent());
@@ -304,6 +306,7 @@ impl App {
             file: None,
             others: BTreeMap::new(),
             removed_files: Vec::new(),
+            discard: files::remove,
             find: FindBar::default(),
             publish: PublishView::default(),
             quality: Vec::new(),
@@ -976,7 +979,7 @@ impl App {
         }) else {
             return Task::none();
         };
-        if let Err(error) = files::delete_file(&root, path) {
+        if let Err(error) = files::delete_file(&root, path, self.discard) {
             tracing::warn!(path = %path.display(), "The file was not deleted");
             let file = files::display_path(path);
             self.notice = Some(files::file_error_text(&self.localizer, error, &file));
@@ -5607,6 +5610,27 @@ mod tests {
         assert_eq!(
             app.file_panel.selected(),
             Some(Path::new("images/cover.png"))
+        );
+    }
+
+    #[test]
+    fn a_file_that_cannot_go_to_the_trash_stays_and_a_note_tells_why() {
+        let folder = chaptered();
+        let mut app = app();
+        app.discard = |_| Err(std::io::Error::other("no trash"));
+        open(&mut app, &folder);
+        let path = PathBuf::from("chapters/one.typ");
+
+        files_message(&mut app, file_panel::Message::Delete(path.clone()));
+        files_message(&mut app, file_panel::Message::ConfirmDelete);
+
+        assert!(folder.path().join(&path).is_file());
+        assert!(
+            app.notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("to the trash")),
+            "{:?}",
+            app.notice
         );
     }
 

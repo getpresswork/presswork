@@ -83,9 +83,25 @@ pub(crate) fn rename_file(root: &Path, old: &Path, new: &Path) -> Result<(), Fil
     Ok(())
 }
 
-pub(crate) fn delete_file(root: &Path, path: &Path) -> Result<(), FileError> {
-    fs::remove_file(root.join(path)).map_err(|_| FileError::DeleteFailed)?;
-    if let Err(error) = sidecar::remove(root, path) {
+pub(crate) type Discard = fn(&Path) -> io::Result<()>;
+
+pub(crate) fn remove(path: &Path) -> io::Result<()> {
+    fs::remove_file(path)
+}
+
+pub(crate) fn to_trash(path: &Path) -> io::Result<()> {
+    trash::delete(path).map_err(io::Error::other)
+}
+
+pub(crate) fn delete_file(root: &Path, path: &Path, discard: Discard) -> Result<(), FileError> {
+    discard(&root.join(path)).map_err(|error| {
+        tracing::warn!(%error, path = %path.display(), "The file did not go to the trash");
+        FileError::DeleteFailed
+    })?;
+    let suggestions = sidecar::path(root, path);
+    if suggestions.is_file()
+        && let Err(error) = discard(&suggestions)
+    {
         tracing::warn!(%error, "The suggestions of the deleted file stay on the disk");
     }
     Ok(())
@@ -302,10 +318,24 @@ mod tests {
         fs::write(folder.path().join(file), "One.").unwrap();
         let suggestions = suggestions_of(folder.path(), file);
 
-        delete_file(folder.path(), file).unwrap();
+        delete_file(folder.path(), file, remove).unwrap();
 
         assert!(!folder.path().join(file).exists());
         assert!(!suggestions.exists());
+    }
+
+    #[test]
+    fn a_file_that_the_trash_does_not_take_stays_with_its_suggestions() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = Path::new("one.typ");
+        fs::write(folder.path().join(file), "One.").unwrap();
+        let suggestions = suggestions_of(folder.path(), file);
+
+        let result = delete_file(folder.path(), file, |_| Err(io::Error::other("no trash")));
+
+        assert_eq!(result, Err(FileError::DeleteFailed));
+        assert!(folder.path().join(file).is_file());
+        assert!(suggestions.is_file());
     }
 
     #[test]
