@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::Command;
 
 pub(crate) fn is_web_link(url: &str) -> bool {
@@ -20,6 +21,19 @@ pub(crate) fn open(url: &str) -> bool {
         Ok(_) => true,
         Err(error) => {
             tracing::warn!(%error, "The link did not open");
+            false
+        }
+    }
+}
+
+pub(crate) fn open_file(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    match opener().arg(path).spawn() {
+        Ok(_) => true,
+        Err(error) => {
+            tracing::warn!(%error, path = %path.display(), "The file did not open");
             false
         }
     }

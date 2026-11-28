@@ -2353,6 +2353,30 @@ impl App {
         }
     }
 
+    fn open_personal_words(&mut self) {
+        if !self.proofreader.has_personal_list() {
+            self.notice = Some(self.localizer.text("proofreading-personal-unavailable"));
+            return;
+        }
+        let mut args = FluentArgs::new();
+        match self.proofreader.personal_list_file() {
+            Ok(path) => {
+                if !links::open_file(&path) {
+                    args.set("path", path.display().to_string());
+                    self.notice = Some(
+                        self.localizer
+                            .format("proofreading-personal-open-error", &args),
+                    );
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "The personal dictionary was not made");
+                args.set("error", sentence(&error.to_string()));
+                self.notice = Some(self.localizer.format("proofreading-personal-error", &args));
+            }
+        }
+    }
+
     fn use_typst(&mut self, version: &Version) {
         let Some(project) = &mut self.project else {
             return;
@@ -2905,6 +2929,10 @@ impl App {
             menu::Item::Typst => self.update(Message::Toolchains(toolchain_panel::Message::Toggle)),
             menu::Item::Documentation => self.open_pane(Pane::Docs),
             menu::Item::Packages => self.open_pane(Pane::Packages),
+            menu::Item::PersonalWords => {
+                self.open_personal_words();
+                Task::none()
+            }
             menu::Item::Logs => self.update(Message::Logs(log_panel::Message::Toggle)),
             menu::Item::Quit => self.quit(),
         }
@@ -5121,6 +5149,21 @@ mod tests {
                 .is_ok()
         );
         assert!(ui.find("The list of packages is not available.").is_ok());
+    }
+
+    #[test]
+    fn the_personal_dictionary_without_a_folder_gives_a_note() {
+        let mut app = app();
+
+        send(&mut app, Message::MenuItem(menu::Item::PersonalWords));
+
+        assert!(
+            app.notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("personal dictionary")),
+            "{:?}",
+            app.notice
+        );
     }
 
     #[test]

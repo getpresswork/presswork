@@ -22,6 +22,7 @@ pub(crate) enum Item {
     Typst,
     Documentation,
     Packages,
+    PersonalWords,
     Logs,
     Quit,
 }
@@ -36,6 +37,7 @@ impl Item {
             Self::Typst => "menu-typst",
             Self::Documentation => "menu-docs",
             Self::Packages => "menu-packages",
+            Self::PersonalWords => "menu-personal-words",
             Self::Logs => "menu-logs",
             Self::Quit => "menu-quit",
         }
@@ -50,6 +52,7 @@ impl Item {
             Self::Typst => Icon::Package,
             Self::Documentation => Icon::BookOpen,
             Self::Packages => Icon::PackageSearch,
+            Self::PersonalWords => Icon::SpellCheck,
             Self::Logs => Icon::ScrollText,
             Self::Quit => Icon::Power,
         }
@@ -65,6 +68,7 @@ impl Item {
             | Self::Typst
             | Self::Documentation
             | Self::Packages
+            | Self::PersonalWords
             | Self::Logs => None,
         }
     }
@@ -85,6 +89,7 @@ pub(crate) fn view<'a>(
         entry(localizer, Item::Typst, true),
         entry(localizer, Item::Documentation, true),
         entry(localizer, Item::Packages, true),
+        entry(localizer, Item::PersonalWords, true),
         entry(localizer, Item::Logs, true),
         separator(),
         entry(localizer, Item::Quit, true),
@@ -160,7 +165,7 @@ mod tests {
     use crate::i18n::Localizer;
     use crate::testing::key_press;
 
-    const LABELS: [(&str, Item); 9] = [
+    const LABELS: [(&str, Item); 10] = [
         ("New project…", Item::NewProject),
         ("Open folder…", Item::OpenFolder),
         ("Save", Item::Save),
@@ -168,6 +173,7 @@ mod tests {
         ("Typst versions", Item::Typst),
         ("Typst documentation", Item::Documentation),
         ("Typst packages", Item::Packages),
+        ("Personal dictionary", Item::PersonalWords),
         ("Logs", Item::Logs),
         ("Quit", Item::Quit),
     ];

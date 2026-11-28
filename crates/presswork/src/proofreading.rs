@@ -114,6 +114,20 @@ impl Proofreader {
         }
     }
 
+    pub(crate) fn personal_list_file(&self) -> std::io::Result<PathBuf> {
+        let path = self.personal_path.clone().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "no personal dictionary")
+        })?;
+        if let Some(folder) = path.parent() {
+            fs::create_dir_all(folder)?;
+        }
+        fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&path)?;
+        Ok(path)
+    }
+
     pub(crate) fn add_personal_word(&mut self, word: &str) -> std::io::Result<()> {
         let path = self.personal_path.clone().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotFound, "no personal dictionary")
@@ -649,6 +663,21 @@ mod tests {
 
         assert!(proofreader.add_personal_word("mta").is_err());
         assert!(!proofreader.has_personal_list());
+        assert!(proofreader.personal_list_file().is_err());
+    }
+
+    #[test]
+    fn the_personal_list_file_is_made_only_when_it_is_missing() {
+        let folder = project(&[]);
+        let path = folder.path().join("data").join("personal-words.txt");
+        let mut proofreader = Proofreader::default();
+        proofreader.set_personal_list(Some(path.clone()));
+
+        assert_eq!(proofreader.personal_list_file().unwrap(), path);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "");
+        fs::write(&path, "mta\n").unwrap();
+        assert_eq!(proofreader.personal_list_file().unwrap(), path);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "mta\n");
     }
 
     #[test]
