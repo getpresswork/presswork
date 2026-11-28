@@ -287,4 +287,53 @@ mod tests {
                 .all(|pair| pair[0].received <= pair[1].received)
         );
     }
+
+    fn closed_server() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://{}", listener.local_addr().unwrap())
+    }
+
+    #[test]
+    fn a_server_that_does_not_answer_gives_a_network_error() {
+        let base = closed_server();
+        let client = Client::with_releases(AGENT, &format!("{base}/releases")).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let url = format!("{base}/file");
+
+        let results = [
+            run(client.releases()).map(|_| ()),
+            run(client.text(&url)).map(|_| ()),
+            run(client.bytes(&url, 10)).map(|_| ()),
+            run(client.download(&url, &folder.path().join("file"), |_| {})),
+        ];
+
+        for result in results {
+            assert!(
+                matches!(result, Err(ToolchainError::Network(_))),
+                "{result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_body_larger_than_the_limit_stops_the_download() {
+        let base = serve(|_| vec![Route::new("/big", vec![1; 100])]);
+        let client = Client::new(AGENT).unwrap();
+
+        let result = run(client.bytes(&format!("{base}/big"), 4));
+
+        assert!(matches!(result, Err(ToolchainError::TooLarge { limit: 4 })));
+    }
+
+    #[test]
+    fn a_download_into_a_missing_folder_is_a_file_error() {
+        let base = serve(|_| vec![Route::new("/file", "data")]);
+        let client = Client::new(AGENT).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let target = folder.path().join("missing").join("file");
+
+        let result = run(client.download(&format!("{base}/file"), &target, |_| {}));
+
+        assert!(matches!(result, Err(ToolchainError::Io { path, .. }) if path == target));
+    }
 }

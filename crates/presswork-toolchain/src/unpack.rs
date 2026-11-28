@@ -295,4 +295,70 @@ mod tests {
             Err(ToolchainError::UnsupportedArchive(name)) if name == "typst.7z"
         ));
     }
+
+    #[test]
+    fn a_zip_folder_entry_makes_the_folder_and_a_zip_link_stops_the_unpacking() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("links.zip");
+        let mut writer = zip::ZipWriter::new(File::create(&path).unwrap());
+        let options = zip::write::SimpleFileOptions::default();
+        writer.add_directory("empty/", options).unwrap();
+        writer.add_symlink("link", "/etc/passwd", options).unwrap();
+        writer.finish().unwrap();
+        let output = folder.path().join("output");
+
+        let result = unpack(&path, &output);
+
+        assert!(output.join("empty").is_dir());
+        assert!(matches!(result, Err(ToolchainError::UnsafeArchiveEntry(name)) if name == "link"));
+    }
+
+    #[test]
+    fn a_global_tar_header_is_skipped() {
+        let folder = tempfile::tempdir().unwrap();
+        let archive = tar_gz_file(
+            folder.path(),
+            "package.tar.gz",
+            &[
+                ("pax_global_header", tar::EntryType::XGlobalHeader, b""),
+                ("typst.toml", tar::EntryType::Regular, b"[package]"),
+            ],
+        );
+        let output = folder.path().join("output");
+
+        unpack(&archive, &output).unwrap();
+
+        assert!(output.join("typst.toml").is_file());
+        assert!(!output.join("pax_global_header").exists());
+    }
+
+    #[test]
+    fn a_missing_or_broken_archive_is_an_error() {
+        let folder = tempfile::tempdir().unwrap();
+        let broken_zip = folder.path().join("broken.zip");
+        std::fs::write(&broken_zip, "not a zip file").unwrap();
+
+        let missing = unpack(&folder.path().join("missing.zip"), folder.path());
+        let broken = unpack(&broken_zip, folder.path());
+
+        assert!(matches!(missing, Err(ToolchainError::Io { .. })));
+        assert!(matches!(broken, Err(ToolchainError::BrokenArchive(_))));
+    }
+
+    #[test]
+    fn a_file_in_the_place_of_a_folder_is_an_error() {
+        let folder = tempfile::tempdir().unwrap();
+        let archive = tar_gz_file(
+            folder.path(),
+            "package.tar.gz",
+            &[
+                ("src", tar::EntryType::Regular, b"file"),
+                ("src/lib.typ", tar::EntryType::Regular, b"#let x = 1"),
+            ],
+        );
+
+        let result = unpack(&archive, &folder.path().join("output"));
+
+        assert!(matches!(result, Err(ToolchainError::Io { .. })));
+    }
 }
