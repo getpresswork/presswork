@@ -217,9 +217,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn client_messages_survive_a_round_trip() {
-        for message in [
+    fn client_messages() -> [ClientMessage; 5] {
+        [
             ClientMessage::Hello {
                 protocol: PROTOCOL,
                 token: "pws_secret".to_owned(),
@@ -240,16 +239,11 @@ mod tests {
                 organization: document(),
                 text: "The proofs are ready.".to_owned(),
             },
-        ] {
-            let bytes = encode(&message).unwrap();
-
-            assert_eq!(decode::<ClientMessage>(&bytes).unwrap(), message);
-        }
+        ]
     }
 
-    #[test]
-    fn server_messages_survive_a_round_trip() {
-        for message in [
+    fn server_messages() -> [ServerMessage; 8] {
+        [
             ServerMessage::Welcome { user: document() },
             ServerMessage::Subscribed {
                 document: document(),
@@ -300,11 +294,59 @@ mod tests {
                     }],
                 }),
             },
-        ] {
+        ]
+    }
+
+    #[test]
+    fn client_messages_survive_a_round_trip() {
+        for message in client_messages() {
+            let bytes = encode(&message).unwrap();
+
+            assert_eq!(decode::<ClientMessage>(&bytes).unwrap(), message);
+        }
+    }
+
+    #[test]
+    fn server_messages_survive_a_round_trip() {
+        for message in server_messages() {
             let bytes = encode(&message).unwrap();
 
             assert_eq!(decode::<ServerMessage>(&bytes).unwrap(), message);
         }
+    }
+
+    #[test]
+    fn the_debug_text_gives_sizes_instead_of_the_content() {
+        let texts: Vec<String> = client_messages()
+            .iter()
+            .map(|message| format!("{message:?}"))
+            .chain(
+                server_messages()
+                    .iter()
+                    .map(|message| format!("{message:?}")),
+            )
+            .collect();
+
+        assert_eq!(
+            texts[1..],
+            [
+                format!("Subscribe {{ document: {}, version: 3 bytes }}", document()),
+                format!("Updates {{ document: {}, id: 7, data: 40 bytes }}", document()),
+                format!("Join {{ organization: {} }}", document()),
+                format!("Say {{ organization: {}, text: 21 characters }}", document()),
+                format!("Welcome {{ user: {} }}", document()),
+                format!(
+                    "Subscribed {{ document: {}, version: 1 bytes, data: 2 bytes }}",
+                    document()
+                ),
+                format!("Updates {{ document: {}, data: 2 bytes }}", document()),
+                format!("Ack {{ document: {}, id: 7 }}", document()),
+                "Error { code: \"forbidden\", message: \"You do not have the permission for this function.\" }".to_owned(),
+                format!("Joined {{ organization: {}, messages: 1 }}", document()),
+                format!("Said {{ message: {} }}", Uuid::from_u128(9)),
+                format!("WorkChanged {{ work: {} }}", Uuid::from_u128(10)),
+            ]
+        );
     }
 
     #[test]
