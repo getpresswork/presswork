@@ -512,4 +512,94 @@ mod tests {
         assert_eq!(failed.pages, None);
         assert_eq!(failed.diagnostics[0].severity, Severity::Error);
     }
+
+    fn fake_typst(folder: &Path, message: &str, exit: u8) -> Program {
+        let path = if cfg!(windows) {
+            let path = folder.join("typst.cmd");
+            let script = format!("@echo off\r\n1>&2 echo {message}\r\nexit /b {exit}\r\n");
+            std::fs::write(&path, script).unwrap();
+            path
+        } else {
+            let path = folder.join("typst");
+            std::fs::write(
+                &path,
+                format!("#!/bin/sh\necho '{message}' >&2\nexit {exit}\n"),
+            )
+            .unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            path
+        };
+        Program::new(path, Version::new(0, 14, 2))
+    }
+
+    fn run_fake(program: &Program, root: &Path) -> Output {
+        let stop = Stop::new(Duration::from_secs(60));
+        for _ in 0..20 {
+            match program.run(root, "Text.", &stop) {
+                Err(ProgramError::Start(error)) if error.raw_os_error() == Some(26) => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                result => return result.unwrap(),
+            }
+        }
+        panic!("the fake program did not start");
+    }
+
+    #[test]
+    fn a_program_that_succeeds_gives_its_pages_and_its_warnings() {
+        let folder = tempfile::tempdir().unwrap();
+        let program = fake_typst(folder.path(), "warning: unknown font family", 0);
+
+        let output = run_fake(&program, folder.path());
+
+        assert_eq!(program.version(), &Version::new(0, 14, 2));
+        assert_eq!(output.pages.map(|pages| pages.len()), Some(0));
+        assert_eq!(output.diagnostics[0].severity, Severity::Warning);
+        assert_eq!(output.diagnostics[0].message, "unknown font family");
+    }
+
+    #[test]
+    fn a_program_that_fails_gives_no_pages() {
+        let folder = tempfile::tempdir().unwrap();
+        let program = fake_typst(folder.path(), "error: the file is broken", 1);
+
+        let output = run_fake(&program, folder.path());
+
+        assert!(output.pages.is_none());
+        assert_eq!(output.diagnostics[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn a_missing_program_does_not_start() {
+        let folder = tempfile::tempdir().unwrap();
+        let program = Program::new(folder.path().join("no-typst"), Version::new(0, 14, 2));
+
+        let result = program.run(folder.path(), "Text.", &Stop::new(Duration::from_secs(5)));
+
+        assert!(matches!(result, Err(ProgramError::Start(_))));
+    }
+
+    #[test]
+    fn the_marked_token_ends_where_its_kind_ends() {
+        assert_eq!(token_length(""), 0);
+        assert_eq!(token_length("\nNext."), 0);
+        assert_eq!(token_length("\"open\nnext"), 5);
+        assert_eq!(token_length("\"open"), 5);
+        assert_eq!(token_length("#name"), 5);
+        assert_eq!(token_length("\u{2192} x"), 3);
+    }
+
+    #[test]
+    fn a_page_image_that_is_not_a_png_file_is_a_problem() {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join("page-1.png"), "not a picture").unwrap();
+
+        let result = read_pages(folder.path());
+
+        assert!(matches!(result, Err(ProgramError::Page { .. })));
+    }
 }
