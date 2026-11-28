@@ -252,3 +252,84 @@ fn sentence(text: &str) -> String {
     }
     sentence
 }
+
+#[cfg(test)]
+mod tests {
+    use http_body_util::BodyExt;
+
+    use super::*;
+
+    async fn expect(error: impl Into<HttpError>, status: StatusCode, code: &str) {
+        let response = error.into().into_response();
+        let found = response.status();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body: ApiError = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(
+            (found, body.code.as_str()),
+            (status, code),
+            "{}",
+            body.message
+        );
+        assert!(body.message.ends_with('.'), "{}", body.message);
+        assert!(
+            body.message.starts_with(char::is_uppercase),
+            "{}",
+            body.message
+        );
+    }
+
+    #[tokio::test]
+    async fn account_and_link_errors_have_their_status_and_code() {
+        let (invalid, conflict) = (StatusCode::BAD_REQUEST, StatusCode::CONFLICT);
+
+        expect(
+            AccountError::WrongCredentials,
+            StatusCode::UNAUTHORIZED,
+            "wrong_credentials",
+        )
+        .await;
+        expect(AccountError::EmailTaken, conflict, "conflict").await;
+        expect(SessionError::InvalidDevice, invalid, "invalid_request").await;
+        expect(AccessTokenError::PastExpiry, invalid, "invalid_request").await;
+        expect(AccessTokenError::TooMany, conflict, "conflict").await;
+        expect(LinkError::NotValid, StatusCode::GONE, "link_not_valid").await;
+        expect(LinkError::UnknownUser, StatusCode::NOT_FOUND, "not_found").await;
+        expect(LinkError::InvalidName, invalid, "invalid_request").await;
+        expect(
+            LinkError::Account(AccountError::ShortPassword),
+            invalid,
+            "invalid_request",
+        )
+        .await;
+        expect(
+            LinkError::Session(SessionError::InvalidDevice),
+            invalid,
+            "invalid_request",
+        )
+        .await;
+        expect(HttpError::Forbidden, StatusCode::FORBIDDEN, "forbidden").await;
+    }
+
+    #[tokio::test]
+    async fn document_work_and_library_errors_have_their_status_and_code() {
+        let (invalid, conflict) = (StatusCode::BAD_REQUEST, StatusCode::CONFLICT);
+        let (missing, internal) = (StatusCode::NOT_FOUND, StatusCode::INTERNAL_SERVER_ERROR);
+
+        expect(DocumentError::InvalidPath, invalid, "invalid_request").await;
+        expect(DocumentError::PathTaken, conflict, "conflict").await;
+        expect(WorkError::AssigneeNotMember, invalid, "invalid_request").await;
+        expect(WorkError::NotFound, missing, "not_found").await;
+        expect(LibraryError::Encrypted, invalid, "invalid_request").await;
+        expect(LibraryError::KeyTaken, conflict, "conflict").await;
+        expect(LibraryError::NotFound, missing, "not_found").await;
+        expect(LibraryError::NoOcr, internal, "internal").await;
+    }
+
+    #[test]
+    fn a_sentence_starts_with_a_capital_and_ends_with_a_period() {
+        assert_eq!(sentence("the name is empty"), "The name is empty.");
+        assert_eq!(sentence("Done."), "Done.");
+        assert_eq!(sentence(""), "");
+    }
+}
