@@ -981,4 +981,157 @@ mod tests {
             "chapters/one.typ"
         );
     }
+
+    fn console_text(write: impl FnOnce(&mut Console<'_>, &Places<'_>)) -> Vec<String> {
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let places = Places {
+            folder: Path::new("."),
+            main: Path::new("main.typ"),
+            text: "Text.",
+        };
+        let mut console = Console {
+            localizer: Localizer::english(),
+            out: &mut out,
+            err: &mut err,
+        };
+        write(&mut console, &places);
+        String::from_utf8(err)
+            .unwrap()
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn problem(kind: ProblemKind) -> Problem {
+        Problem {
+            page: None,
+            kind,
+            source: None,
+            area: None,
+        }
+    }
+
+    #[test]
+    fn each_layout_and_print_problem_has_its_message() {
+        let kinds = [
+            ProblemKind::LowResolution {
+                ppi: 150,
+                minimum: 300,
+            },
+            ProblemKind::MissingGlyphs {
+                characters: "\u{2192}".to_owned(),
+            },
+            ProblemKind::GradientSpace {
+                space: "oklab".to_owned(),
+                permitted: Colors::Gray,
+            },
+            ProblemKind::Widow,
+            ProblemKind::Orphan,
+            ProblemKind::StackedHyphens { lines: 4 },
+            ProblemKind::LooseLine { spacing: 180 },
+        ];
+
+        let lines = console_text(|console, places| {
+            for kind in kinds {
+                console.problem(places, &problem(kind), "print");
+            }
+        });
+
+        assert_eq!(
+            lines,
+            [
+                "warning: The image has 150 ppi. The profile print needs 300 ppi.",
+                "warning: No font has these characters: \u{2192}",
+                "warning: A gradient uses the color space oklab. The profile print permits only gray colors.",
+                "warning: The last line of a paragraph is alone at the top of a page or column.",
+                "warning: The first line of a paragraph is alone at the bottom of a page or column.",
+                "warning: 4 lines in sequence end with a hyphen.",
+                "warning: The word spaces in this line are 180% of their normal width.",
+            ]
+        );
+    }
+
+    #[test]
+    fn each_house_style_error_has_its_message() {
+        let errors = [
+            StyleError::File("expected a table".to_owned()),
+            StyleError::Rule {
+                rule: 2,
+                problem: RuleProblem::Both,
+            },
+            StyleError::Rule {
+                rule: 3,
+                problem: RuleProblem::Empty,
+            },
+            StyleError::Rule {
+                rule: 4,
+                problem: RuleProblem::Pattern("unclosed group".to_owned()),
+            },
+        ];
+
+        let lines = console_text(|console, _| {
+            for error in &errors {
+                console.style_error(error);
+            }
+        });
+
+        assert_eq!(
+            lines,
+            [
+                format!("error: The house style file {HOUSE_STYLE} is not valid: expected a table"),
+                format!(
+                    "error: Rule 2 in {HOUSE_STYLE} has a text and a pattern. Use only one of them."
+                ),
+                format!("error: Rule 3 in {HOUSE_STYLE} has an empty text or pattern."),
+                format!(
+                    "error: The pattern of rule 4 in {HOUSE_STYLE} is not valid: unclosed group."
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn each_export_and_project_error_has_its_message() {
+        let profile = ExportProfile::named("print", presswork_project::ExportFormat::Pdf);
+        let errors = [
+            ProfileError::Write {
+                path: PathBuf::from("out/print.pdf"),
+                source: std::io::Error::other("the disk is full"),
+            },
+            ProfileError::Export(presswork_typst::ExportError::UnknownStandard(
+                "x-1".to_owned(),
+            )),
+        ];
+        let projects = [
+            ProjectError::InvalidManifest("missing name".to_owned()),
+            ProjectError::MainOutside(PathBuf::from("../main.typ")),
+            ProjectError::MainMissing(PathBuf::from("main.typ")),
+            ProjectError::Io {
+                path: PathBuf::from("presswork.toml"),
+                source: std::io::Error::other("access denied"),
+            },
+        ];
+
+        let lines = console_text(|console, places| {
+            for error in &errors {
+                console.export_error(places, &profile, error);
+            }
+            for error in &projects {
+                console.project_error(error);
+            }
+        });
+
+        let main = Path::new("../main.typ").display().to_string();
+        assert_eq!(
+            lines,
+            [
+                "error: Presswork cannot write out/print.pdf. the disk is full".to_owned(),
+                "error: Presswork cannot export the profile print. the PDF standard x-1 is not known".to_owned(),
+                "error: The presswork.toml file is not correct: missing name".to_owned(),
+                format!("error: The main file {main} must be in the project folder."),
+                "error: The main file main.typ does not exist.".to_owned(),
+                "error: Presswork cannot read presswork.toml. access denied".to_owned(),
+            ]
+        );
+    }
 }
