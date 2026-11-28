@@ -9,6 +9,7 @@ mod examples;
 mod file_panel;
 mod files;
 mod find_bar;
+mod home_view;
 mod i18n;
 mod icons;
 mod library_view;
@@ -23,6 +24,7 @@ mod packages_view;
 mod problems;
 mod proofreading;
 mod publish_view;
+mod recent;
 #[cfg(test)]
 mod screens;
 mod server_dialog;

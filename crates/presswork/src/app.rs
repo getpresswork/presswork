@@ -52,6 +52,7 @@ use crate::packages_view::{self, PackagesView};
 use crate::problems::problem_sentence;
 use crate::proofreading::{self, Correction, Proofreader};
 use crate::publish_view::{self, PublishView};
+use crate::recent::RecentProjects;
 use crate::server_dialog::{self, ServerDialog};
 use crate::sidecar;
 use crate::source_map::SourceMap;
@@ -94,6 +95,7 @@ pub(crate) struct App {
     others: BTreeMap<PathBuf, OpenFile>,
     removed_files: Vec<PathBuf>,
     discard: files::Discard,
+    recent: RecentProjects,
     find: FindBar,
     publish: PublishView,
     quality: Vec<Problem>,
@@ -246,6 +248,8 @@ pub(crate) enum Message {
     OpenFolder,
     FolderPicked(Option<PathBuf>),
     NewProjectPicked(Option<PathBuf>),
+    OpenRecent(PathBuf),
+    ForgetRecent(PathBuf),
     Save,
     ToggleSuggesting,
     Key(keyboard::Event),
@@ -269,6 +273,8 @@ impl App {
     pub(crate) fn new(store: LogStore) -> Self {
         let mut app = Self::with_toolchains(store, toolchain_directory());
         app.discard = files::to_trash;
+        app.recent = RecentProjects::load(crate::recent::recent_projects_file());
+        app.workspace = Workspace::Home;
         app.proofreader
             .set_personal_list(proofreading::personal_word_list());
         app.packages = Packages::in_typst_cache(&toolchain_panel::user_agent());
@@ -307,6 +313,7 @@ impl App {
             others: BTreeMap::new(),
             removed_files: Vec::new(),
             discard: files::remove,
+            recent: RecentProjects::default(),
             find: FindBar::default(),
             publish: PublishView::default(),
             quality: Vec::new(),
@@ -610,6 +617,16 @@ impl App {
         self.move_cursor(map.to_editor(start, true));
     }
 
+    fn open_recent(&mut self, folder: PathBuf) -> Task<Message> {
+        if folder.is_dir() {
+            return self.update(Message::FolderPicked(Some(folder)));
+        }
+        let mut args = FluentArgs::new();
+        args.set("folder", folder.display().to_string());
+        self.notice = Some(self.localizer.format("home-folder-missing", &args));
+        Task::none()
+    }
+
     fn open_folder(&self) -> Task<Message> {
         let title = self.localizer.text("open-folder-title");
         Task::perform(files::pick_folder(title), Message::FolderPicked)
@@ -625,6 +642,7 @@ impl App {
                 self.tasks = None;
                 self.library = None;
                 let root = opened.project.root().to_path_buf();
+                self.recent.add(&opened.project.manifest().name, &root);
                 let main = opened.project.manifest().main.clone();
                 let (editor, suggestions_notice) = self.restored_editor(&root, &main, &opened.text);
                 self.editor = editor;
@@ -2795,6 +2813,8 @@ impl App {
                 return self.after_question(Pending::NewProject(root));
             }
             Message::FolderPicked(None) | Message::NewProjectPicked(None) => {}
+            Message::OpenRecent(folder) => return self.open_recent(folder),
+            Message::ForgetRecent(folder) => self.recent.remove(&folder),
             Message::DismissNotice => self.notice = None,
         }
         Task::none()
@@ -3140,6 +3160,9 @@ impl App {
 
     fn workspace_area(&self) -> Element<'_, Message> {
         let workspace = self.workspace;
+        if workspace == Workspace::Home {
+            return crate::home_view::view(&self.localizer, self.recent.projects());
+        }
         if workspace == Workspace::Plan
             && let Some(tasks) = &self.tasks
         {
@@ -5651,6 +5674,65 @@ mod tests {
         assert!(!folder.path().join("cover.png").exists());
         assert_eq!(app.file_panel.selected(), None);
         assert_eq!(editor_text(&app), CHAPTERED_MAIN);
+    }
+
+    #[test]
+    fn an_opened_project_goes_to_the_top_of_the_recent_projects() {
+        let first = chaptered();
+        let second = book();
+        let mut app = app();
+
+        open(&mut app, &first);
+        open(&mut app, &second);
+
+        let names: Vec<&str> = app
+            .recent
+            .projects()
+            .iter()
+            .map(|project| project.name.as_str())
+            .collect();
+        assert_eq!(names, ["The Book", "Field Notes"]);
+        assert_eq!(app.recent.projects()[1].folder, first.path());
+    }
+
+    #[test]
+    fn a_recent_project_opens_from_the_home() {
+        let first = chaptered();
+        let second = book();
+        let mut app = app();
+        open(&mut app, &first);
+        open(&mut app, &second);
+        send(&mut app, Message::SelectWorkspace(Workspace::Home));
+
+        send(&mut app, Message::OpenRecent(first.path().to_path_buf()));
+
+        assert_eq!(
+            app.project
+                .as_ref()
+                .map(|project| project.manifest().name.as_str()),
+            Some("Field Notes")
+        );
+        assert_eq!(app.workspace, Workspace::Write);
+    }
+
+    #[test]
+    fn a_recent_project_without_its_folder_gives_a_note_and_can_leave_the_list() {
+        let mut app = app();
+        let missing = PathBuf::from("books").join("gone");
+        app.recent.add("Gone", &missing);
+
+        send(&mut app, Message::OpenRecent(missing.clone()));
+
+        assert!(app.project.is_none());
+        assert!(
+            app.notice
+                .as_deref()
+                .is_some_and(|notice| notice.contains("gone")),
+            "{:?}",
+            app.notice
+        );
+        send(&mut app, Message::ForgetRecent(missing));
+        assert_eq!(app.recent.projects().len(), 0);
     }
 
     #[test]

@@ -110,6 +110,7 @@ unsaved-save = Save
 unsaved-discard = Do not save
 unsaved-cancel = Cancel
 
+workspace-home = Home
 workspace-plan = Plan
 workspace-research = Research
 workspace-write = Write
@@ -118,7 +119,17 @@ workspace-review = Review
 workspace-typeset = Typeset
 workspace-publish = Publish
 
-workspace-plan-description = This workspace shows the tasks, the schedules, the budgets, and the reports of your publications.
+workspace-home-description = This workspace shows your recent projects and the start of your work.
+home-start = Start
+home-open-folder = Open folder…
+home-new-project = New project…
+home-connect = Connect to a server…
+home-recent = Recent projects
+home-no-recent = The projects that you open show here.
+home-missing = The folder is not there.
+home-remove = Remove from the list
+home-folder-missing = Presswork cannot find the folder { $folder }. Remove the project from the list or open the folder again.
+workspace-plan-description =This workspace shows the tasks, the schedules, the budgets, and the reports of your publications.
 workspace-research-description = This workspace shows the team library, the annotations, and the research notes.
 workspace-write-description = This workspace shows the outline, the editor, and the preview of your project.
 workspace-translate-description = This workspace shows the source text and its translation side by side.

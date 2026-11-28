@@ -2,6 +2,7 @@ use presswork_ui::icon::Icon;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum Workspace {
+    Home,
     Plan,
     Research,
     #[default]
@@ -13,7 +14,8 @@ pub(crate) enum Workspace {
 }
 
 impl Workspace {
-    pub(crate) const ALL: [Self; 7] = [
+    pub(crate) const ALL: [Self; 8] = [
+        Self::Home,
         Self::Plan,
         Self::Research,
         Self::Write,
@@ -25,6 +27,7 @@ impl Workspace {
 
     pub(crate) fn text_id(self) -> &'static str {
         match self {
+            Self::Home => "workspace-home",
             Self::Plan => "workspace-plan",
             Self::Research => "workspace-research",
             Self::Write => "workspace-write",
@@ -37,6 +40,7 @@ impl Workspace {
 
     pub(crate) fn description_id(self) -> &'static str {
         match self {
+            Self::Home => "workspace-home-description",
             Self::Plan => "workspace-plan-description",
             Self::Research => "workspace-research-description",
             Self::Write => "workspace-write-description",
@@ -49,6 +53,7 @@ impl Workspace {
 
     pub(crate) fn icon(self) -> Icon {
         match self {
+            Self::Home => Icon::House,
             Self::Plan => Icon::CalendarRange,
             Self::Research => Icon::LibraryBig,
             Self::Write => Icon::PenLine,
@@ -75,6 +80,7 @@ mod tests {
         assert_eq!(
             Workspace::ALL,
             [
+                Workspace::Home,
                 Workspace::Plan,
                 Workspace::Research,
                 Workspace::Write,
