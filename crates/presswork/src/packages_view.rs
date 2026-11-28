@@ -421,6 +421,7 @@ mod tests {
     use presswork_ui::theme as ui_theme;
 
     use super::*;
+    use crate::testing::{Route, run_task, serve};
 
     fn info(name: &str, version: &str, description: &str, authors: &[&str]) -> PackageInfo {
         PackageInfo {
@@ -591,5 +592,164 @@ mod tests {
 
         assert_eq!(view.selected.as_deref(), Some("cetz-plot"));
         assert_eq!(view.query, "cetz-plot");
+    }
+
+    const INDEX: &str = r#"[
+        {
+            "name": "greeting",
+            "version": "0.1.5",
+            "description": "Says hello.",
+            "authors": ["Ann"],
+            "license": "MIT",
+            "repository": "https://example.com/greeting",
+            "compiler": "0.13.0"
+        },
+        { "name": "plain", "version": "1.0.0" }
+    ]"#;
+
+    fn served(root: &std::path::Path) -> Packages {
+        let readme = root.join("preview").join("greeting").join("0.1.5");
+        std::fs::create_dir_all(&readme).unwrap();
+        std::fs::write(readme.join("README.md"), "Say hello to the reader.").unwrap();
+        let base = serve(vec![Route::new("GET /preview/index.json", INDEX)]);
+        Packages::new(Client::new("Presswork tests").unwrap(), root.to_path_buf())
+            .with_server(&base)
+    }
+
+    #[test]
+    fn the_list_and_the_readme_come_from_the_package_server() {
+        let root = tempfile::tempdir().unwrap();
+        let packages = served(root.path());
+        let mut view = PackagesView::default();
+
+        let loaded = run_task(view.open(Some(&packages)));
+        let [Message::Loaded(Ok(index))] = loaded.as_slice() else {
+            panic!("{loaded:?}");
+        };
+        let _ = view.update(Message::Loaded(Ok(Arc::clone(index))), Some(&packages));
+        let (task, _) = view.update(Message::Select("greeting".to_owned()), Some(&packages));
+        let found = run_task(task);
+        let [found] = <[Message; 1]>::try_from(found).unwrap();
+        let _ = view.update(found, Some(&packages));
+
+        assert!(matches!(&view.readme, Readme::Loaded { key, .. } if key == "greeting:0.1.5"));
+        let mut ui = simulate(&view);
+        for words in ["License: MIT", "Needs Typst 0.13.0 or later", "Repository"] {
+            assert!(ui.find(words).is_ok(), "{words} is not in the view");
+        }
+        drop(ui);
+        assert!(matches!(
+            view.update(Message::Link("https://example.com/greeting".to_owned()), None).1,
+            Some(Request::Open(url)) if url == "https://example.com/greeting"
+        ));
+    }
+
+    #[test]
+    fn a_package_without_a_readme_file_says_so() {
+        let root = tempfile::tempdir().unwrap();
+        let packages = served(root.path());
+        let mut view = PackagesView::default();
+        let loaded = run_task(view.open(Some(&packages)));
+        let [loaded] = <[Message; 1]>::try_from(loaded).unwrap();
+        let _ = view.update(loaded, Some(&packages));
+
+        let (task, _) = view.update(Message::Select("plain".to_owned()), Some(&packages));
+        assert!(
+            simulate(&view)
+                .find("Presswork gets the README of the package.")
+                .is_ok()
+        );
+        let found = run_task(task);
+
+        assert!(
+            matches!(found.as_slice(), [Message::Readme { result: Err(_), .. }]),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn a_missing_or_failed_readme_shows_a_note() {
+        let mut view = selected("tablex");
+
+        let _ = view.update(
+            Message::Readme {
+                name: "tablex".to_owned(),
+                version: "0.0.9".to_owned(),
+                result: Ok(None),
+            },
+            None,
+        );
+        assert!(
+            simulate(&view)
+                .find("The package has no README file.")
+                .is_ok()
+        );
+        let _ = view.update(
+            Message::Readme {
+                name: "tablex".to_owned(),
+                version: "0.0.9".to_owned(),
+                result: Err("the server answered with the HTTP status 404".to_owned()),
+            },
+            None,
+        );
+
+        assert!(
+            simulate(&view)
+                .find(
+                    "Presswork cannot get the README: the server answered with the HTTP status 404"
+                )
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn retry_loads_the_list_again() {
+        let mut view = PackagesView::default();
+        let packages = packages();
+        let _ = view.update(Message::Loaded(Err("timeout".to_owned())), Some(&packages));
+
+        let (task, _) = view.update(Message::Retry, Some(&packages));
+
+        assert!(task.units() > 0);
+        assert!(
+            simulate(&view)
+                .find("Presswork gets the list of packages from Typst Universe.")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn without_a_package_folder_the_list_is_not_available() {
+        let mut view = PackagesView::default();
+
+        let task = view.open(None);
+        let (readme, _) = view.update(Message::Select("cetz".to_owned()), None);
+
+        assert_eq!(task.units(), 0);
+        assert_eq!(readme.units(), 0);
+        assert!(
+            simulate(&view)
+                .find("The list of packages is not available.")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_long_list_shows_only_the_first_packages() {
+        let mut view = PackagesView::default();
+        let infos = (0..=SHOWN)
+            .map(|number| info(&format!("package-{number}"), "1.0.0", "A package.", &[]))
+            .collect();
+
+        let _ = view.update(
+            Message::Loaded(Ok(Arc::new(PackageIndex::new(infos)))),
+            None,
+        );
+
+        assert!(
+            simulate(&view)
+                .find("The list shows the first 100. Type more words to find a package.")
+                .is_ok()
+        );
     }
 }
