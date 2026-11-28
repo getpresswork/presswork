@@ -1062,6 +1062,7 @@ mod tests {
     use presswork_client::Api;
 
     use super::*;
+    use crate::testing::{Route, run_task, serve};
 
     const PRESS: Uuid = Uuid::from_u128(1);
     const NOTES: Uuid = Uuid::from_u128(10);
@@ -1552,5 +1553,266 @@ mod tests {
         };
         assert!(!view.changed(elsewhere));
         assert_eq!(view.works().unwrap().len(), 1);
+    }
+
+    fn json(value: impl serde::Serialize) -> serde_json::Value {
+        serde_json::to_value(value).unwrap()
+    }
+
+    fn both_editions() -> Work {
+        let mut notes = work(NOTES, "field-notes", "Field Notes");
+        notes
+            .editions
+            .push(edition(NOTES_1922, 1922, false, Some(ready_file())));
+        notes
+    }
+
+    fn server() -> Connection {
+        let notes = || work(NOTES, "field-notes", "Field Notes");
+        let base = serve(vec![
+            Route::json(
+                &format!("GET /api/v1/organizations/{PRESS}/works"),
+                &json([notes()]),
+            ),
+            Route::json(
+                &format!("GET /api/v1/organizations/{PRESS}/library/search"),
+                &json([hit(true)]),
+            ),
+            Route::json(
+                &format!("POST /api/v1/organizations/{PRESS}/works"),
+                &json(notes()),
+            ),
+            Route::json(
+                &format!("POST /api/v1/works/{NOTES}/editions"),
+                &json(edition(NOTES_1922, 1922, false, None)),
+            ),
+            Route::json(
+                &format!("PUT /api/v1/editions/{NOTES_1455}/file"),
+                &json(notes()),
+            ),
+            Route::json(
+                &format!("PUT /api/v1/editions/{NOTES_1922}/file"),
+                &json(both_editions()),
+            ),
+            Route::json(
+                &format!("POST /api/v1/editions/{NOTES_1922}/standard"),
+                &json(both_editions()),
+            ),
+            Route::json(
+                &format!("PUT /api/v1/editions/{NOTES_1455}/page-map"),
+                &json(notes()),
+            ),
+        ]);
+        Connection {
+            api: Api::new(&base).unwrap(),
+            token: "pws_ann".to_owned(),
+            user_name: "Ann".to_owned(),
+        }
+    }
+
+    #[test]
+    fn the_works_come_from_the_server() {
+        let connection = server();
+        let view = LibraryView::new(PRESS, "Field Press".to_owned());
+
+        let loaded = run_task(view.load(&connection));
+
+        assert!(
+            matches!(loaded.as_slice(), [Message::Loaded(Ok(works))] if works.len() == 1),
+            "{loaded:?}"
+        );
+    }
+
+    #[test]
+    fn a_search_asks_the_server_and_an_empty_search_clears_the_hits() {
+        let connection = server();
+        let mut view = loaded();
+        let _ = view.update(Message::Query("grain".to_owned()), &connection);
+
+        let found = run_task(view.update(Message::Search, &connection));
+        let [Message::Found(Ok(hits))] = found.as_slice() else {
+            panic!("{found:?}");
+        };
+        assert_eq!(*hits, [hit(true)]);
+        let _ = view.update(Message::Found(Ok(hits.clone())), &connection);
+        let _ = view.update(Message::Query("  ".to_owned()), &connection);
+        let cleared = run_task(view.update(Message::Search, &connection));
+
+        assert_eq!(cleared.len(), 0);
+        assert!(view.hits.is_none());
+    }
+
+    #[test]
+    fn a_new_work_goes_to_the_server_and_then_its_file() {
+        let connection = server();
+        let mut view = LibraryView::new(PRESS, "Field Press".to_owned());
+        let _ = view.update(picked(Target::Work, "Field_Notes.PDF", 10), &connection);
+        let _ = view.update(Message::Year("1455".to_owned()), &connection);
+
+        let created = run_task(view.update(Message::Upload, &connection));
+        let [Message::Created(Ok(work))] = created.as_slice() else {
+            panic!("{created:?}");
+        };
+        assert_eq!(run_task(view.update(Message::Upload, &connection)).len(), 0);
+        let uploaded = run_task(view.update(Message::Created(Ok(work.clone())), &connection));
+        let [Message::Uploaded(Ok(work))] = uploaded.as_slice() else {
+            panic!("{uploaded:?}");
+        };
+        let _ = view.update(Message::Uploaded(Ok(work.clone())), &connection);
+
+        assert!(view.draft.is_none());
+        assert_eq!(view.works().map(<[Work]>::len), Some(1));
+    }
+
+    #[test]
+    fn a_new_edition_goes_to_the_server_and_then_its_file() {
+        let connection = server();
+        let mut view = loaded();
+        let _ = view.update(
+            picked(Target::Edition(NOTES), "notes-1922.pdf", 10),
+            &connection,
+        );
+        let _ = view.update(Message::Year("1922".to_owned()), &connection);
+
+        let added = run_task(view.update(Message::Upload, &connection));
+        let [Message::EditionAdded(Ok(added))] = added.as_slice() else {
+            panic!("{added:?}");
+        };
+        let uploaded = run_task(view.update(Message::EditionAdded(Ok(added.clone())), &connection));
+
+        assert_eq!(view.works().unwrap()[0].editions.len(), 2);
+        assert!(
+            matches!(uploaded.as_slice(), [Message::Uploaded(Ok(work))] if *work == both_editions()),
+            "{uploaded:?}"
+        );
+    }
+
+    #[test]
+    fn a_failed_file_can_go_again_without_a_new_work() {
+        let connection = server();
+        let mut view = loaded();
+        let _ = view.update(picked(Target::Work, "Field_Notes.pdf", 10), &connection);
+        let _ = view.update(Message::Year("1455".to_owned()), &connection);
+        let _ = view.update(
+            Message::Created(Ok(work(NOTES, "field-notes", "Field Notes"))),
+            &connection,
+        );
+        let _ = view.update(Message::Uploaded(Err(Problem::Unreachable)), &connection);
+
+        let again = run_task(view.update(Message::Upload, &connection));
+
+        assert!(
+            matches!(again.as_slice(), [Message::Uploaded(Ok(_))]),
+            "{again:?}"
+        );
+    }
+
+    #[test]
+    fn make_standard_asks_the_server() {
+        let connection = server();
+        let mut view = loaded();
+
+        let changed = run_task(view.update(Message::MakeStandard(NOTES_1922), &connection));
+        let [Message::Changed(Ok(work))] = changed.as_slice() else {
+            panic!("{changed:?}");
+        };
+        let _ = view.update(Message::Changed(Ok(work.clone())), &connection);
+
+        assert_eq!(view.works().unwrap()[0].editions.len(), 2);
+    }
+
+    #[test]
+    fn the_page_map_goes_to_the_server() {
+        let connection = server();
+        let mut view = loaded();
+        let _ = view.update(Message::EditPageMap(NOTES_1455), &connection);
+        let _ = view.update(Message::CorrectionPage("3".to_owned()), &connection);
+        let _ = view.update(Message::AddCorrection, &connection);
+
+        let saved = run_task(view.update(Message::SavePageMap, &connection));
+        let [Message::PageMapSaved(Ok(work))] = saved.as_slice() else {
+            panic!("{saved:?}");
+        };
+        let _ = view.update(Message::PageMapSaved(Ok(work.clone())), &connection);
+
+        assert!(view.page_form.is_none());
+        assert_eq!(
+            run_task(view.update(Message::SavePageMap, &connection)).len(),
+            0
+        );
+    }
+
+    #[test]
+    fn a_failed_page_map_keeps_the_form_and_shows_the_problem() {
+        let mut view = loaded();
+        let _ = view.update(Message::EditPageMap(NOTES_1455), &connection());
+        let _ = view.update(Message::SavePageMap, &connection());
+
+        let _ = view.update(
+            Message::PageMapSaved(Err(Problem::Status(500))),
+            &connection(),
+        );
+
+        assert!(view.page_form.as_ref().is_some_and(|form| !form.sending));
+        assert!(shows(&view, "The server answered with the status 500."));
+        let _ = view.update(Message::Cancel, &connection());
+        assert!(view.page_form.is_none());
+    }
+
+    #[test]
+    fn a_correction_can_be_removed() {
+        let mut view = loaded();
+        let _ = view.update(Message::EditPageMap(NOTES_1455), &connection());
+        let _ = view.update(Message::CorrectionPage("3".to_owned()), &connection());
+        let _ = view.update(Message::AddCorrection, &connection());
+
+        let _ = view.update(Message::RemoveCorrection(5), &connection());
+        assert_eq!(view.page_form.as_ref().unwrap().corrections.len(), 1);
+        let _ = view.update(Message::RemoveCorrection(0), &connection());
+
+        assert_eq!(view.page_form.as_ref().unwrap().corrections.len(), 0);
+    }
+
+    #[test]
+    fn an_unknown_edition_opens_no_page_form() {
+        let mut view = loaded();
+
+        let _ = view.update(Message::EditPageMap(Uuid::nil()), &connection());
+        let _ = view.update(Message::AddCorrection, &connection());
+
+        assert!(view.page_form.is_none());
+    }
+
+    #[test]
+    fn a_failed_list_and_a_failed_change_show_the_problem() {
+        let mut view = loaded();
+
+        let _ = view.update(Message::Changed(Err(Problem::Status(409))), &connection());
+        assert!(shows(&view, "The server answered with the status 409."));
+        let _ = view.update(Message::Loaded(Err(Problem::Status(503))), &connection());
+
+        assert!(shows(&view, "The server answered with the status 503."));
+    }
+
+    #[test]
+    fn a_work_of_another_organization_is_not_kept() {
+        let mut view = loaded();
+        let mut other = work(Uuid::from_u128(99), "other", "Other");
+        other.organization_id = Uuid::nil();
+
+        assert!(!view.changed(other));
+        assert_eq!(view.works().map(<[Work]>::len), Some(1));
+    }
+
+    #[test]
+    fn a_cancelled_pick_and_a_citation_change_nothing() {
+        let mut view = loaded();
+
+        let _ = view.update(Message::Picked(Target::Work, None), &connection());
+        let _ = view.update(Message::Cite(hit(true)), &connection());
+        let _ = view.update(Message::Title("Ignored".to_owned()), &connection());
+
+        assert!(view.draft.is_none());
+        assert!(view.free());
     }
 }
