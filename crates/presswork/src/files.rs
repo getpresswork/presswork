@@ -325,6 +325,29 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "moves a file to the trash of the system and then removes it from the trash"]
+    fn a_real_file_goes_to_the_trash_of_the_system() {
+        let folder = tempfile::tempdir().unwrap();
+        let name = format!("presswork-trash-test-{}.typ", std::process::id());
+        let path = folder.path().join(&name);
+        fs::write(&path, "Trash.").unwrap();
+
+        to_trash(&path).unwrap();
+
+        assert!(!path.exists());
+        #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+        {
+            let items: Vec<trash::TrashItem> = trash::os_limited::list()
+                .unwrap()
+                .into_iter()
+                .filter(|item| item.name == name.as_str() && item.original_parent == folder.path())
+                .collect();
+            assert_eq!(items.len(), 1);
+            trash::os_limited::purge_all(items).unwrap();
+        }
+    }
+
+    #[test]
     fn a_file_that_the_trash_does_not_take_stays_with_its_suggestions() {
         let folder = tempfile::tempdir().unwrap();
         let file = Path::new("one.typ");
