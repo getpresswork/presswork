@@ -1722,3 +1722,13 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The tests do not use the trash of the system. The test application deletes from the disk.
 - **Reason:** A delete in the files panel removes a chapter. A wrong click must not lose the work of days.
 - **Other options:** A permanent delete as before. A permanent delete when the trash does not take the file. A trash folder in the project.
+
+## D214. The first home dashboard
+
+- **Status:** Accepted, 2026-11-28. **Origin:** Default, from a requirement of the project owner.
+- **Decision:**
+  - The home dashboard (D62) is the first tab of the workspace bar, **Home**, and not a page that shows only without a project. Thus you can go back to it at all times. Presswork starts with the Home tab.
+  - The first version has the start buttons (open a folder, make a new project, connect to a server) and the last 10 local projects. The tasks, the inbox, the deadlines, and the activity of the teams come with milestone 3. The scratchpad and the integration with the operating system come next.
+  - The list is in `recent-projects.json` in the local data folder. A project goes to the top of the list when it opens. A project with a missing folder stays in the list until you remove it, because the folder can be on a drive that is not connected.
+- **Reason:** A person who starts Presswork mostly opens one of a few projects. The list makes this one click.
+- **Other options:** A start page only without a project. The list in the roaming data folder. Automatic removal of missing folders.

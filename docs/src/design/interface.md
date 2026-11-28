@@ -308,6 +308,13 @@ From the home dashboard, you can also:
 - Connect to a server and open a server project.
 - Open the Typst scratchpad. Refer to [Typesetting tools](typesetting-tools.md).
 
+In milestone 2, the home dashboard has these parts (D214):
+
+- **Home** is the first tab of the workspace bar. Presswork starts with it.
+- **Start** has the buttons **Open folder…**, **New project…**, and **Connect to a server…**. They do the same as the items of the Presswork menu.
+- **Recent projects** shows the last 10 local projects that you opened, the newest first, with the name and the folder. A click opens the project and asks about the changes that are not saved, as **Open folder…** does. If the folder is not there, the row tells it, and a click gives a note. The **X** button removes a project from the list. The folder stays on the disk.
+- Presswork keeps the list in the file `recent-projects.json` in the local data folder, because the paths belong to the computer.
+
 ## Operating system integration
 
 - Presswork registers itself for `.typ` files and for `presswork.toml` files.
