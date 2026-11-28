@@ -284,6 +284,8 @@ fn render_screens() {
     render_server_suggestions(&mut app);
     render_packages(&mut app);
     render_files(&mut app);
+    send(&mut app, Message::SelectWorkspace(Workspace::Home));
+    render(&mut app, "home");
 }
 
 fn render_files(app: &mut App) {
