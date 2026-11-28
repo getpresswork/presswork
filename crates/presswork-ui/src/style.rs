@@ -572,4 +572,80 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn disabled_buttons_use_the_faint_ink() {
+        let theme = light();
+
+        for style in [
+            tab(false)(&theme, button::Status::Disabled),
+            ghost(&theme, button::Status::Disabled),
+            list_item(false)(&theme, button::Status::Disabled),
+            menu_item(&theme, button::Status::Disabled),
+        ] {
+            assert_eq!(style.text_color, LIGHT.ink_faint);
+            assert_eq!(style.background, None);
+        }
+    }
+
+    #[test]
+    fn a_pressed_window_button_is_darker_than_a_hovered_one() {
+        let theme = light();
+
+        let pressed = window_button(&theme, button::Status::Pressed);
+        let close = close_button(&theme, button::Status::Pressed);
+        let quiet = menu_item(&theme, button::Status::Active);
+
+        assert_eq!(
+            pressed.background,
+            Some(Background::Color(LIGHT.rule_strong))
+        );
+        assert_eq!(
+            close.background,
+            Some(Background::Color(Color {
+                a: PRESSED_CLOSE,
+                ..LIGHT.close
+            }))
+        );
+        assert_eq!((quiet.background, quiet.text_color), (None, LIGHT.ink));
+    }
+
+    #[test]
+    fn surfaces_use_their_colors_of_the_theme() {
+        let theme = dark();
+
+        let page = page(&theme);
+        let code = code_block(&theme);
+        let mark = mark(&theme);
+        let line = hairline(&theme);
+
+        assert_eq!(page.background, Some(Background::Color(DARK.page)));
+        assert_eq!(page.text_color, Some(DARK.ink));
+        assert_eq!(code.background, Some(Background::Color(DARK.chrome)));
+        assert_eq!(code.border.color, DARK.rule);
+        assert_eq!(mark.background, Some(Background::Color(DARK.accent)));
+        assert_eq!(line.color, DARK.rule);
+    }
+
+    #[test]
+    fn a_tone_gives_the_color_of_its_text() {
+        let theme = light();
+
+        assert_eq!(
+            tone(Tone::Danger)(&theme).color,
+            Some(Tone::Danger.color(&LIGHT))
+        );
+        assert_eq!(tone(Tone::Accent)(&theme).color, Some(LIGHT.accent));
+    }
+
+    #[test]
+    fn a_field_border_shows_the_pointer_and_stays_quiet_otherwise() {
+        let theme = light();
+
+        let hovered = field(&theme, text_input::Status::Hovered);
+        let active = field(&theme, text_input::Status::Active);
+
+        assert_eq!(hovered.border.color, LIGHT.rule_strong);
+        assert_eq!(active.border.color, LIGHT.rule);
+    }
 }
