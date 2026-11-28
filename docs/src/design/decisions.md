@@ -1743,3 +1743,14 @@ Do not change what an accepted decision says. You can correct its language. To c
   - The tests use a scratchpad without a file, so that they do not change the file of the user.
 - **Reason:** A person who tests an idea must find it again after a restart.
 - **Other options:** A scratchpad next to the open project. More than one scratchpad. A save only when Presswork closes.
+
+## D216. Line coverage in CI
+
+- **Status:** Accepted, 2026-11-28. **Origin:** Default, from a requirement of the project owner.
+- **Decision:**
+  - The CI job "Coverage" measures the line coverage of the workspace with `cargo llvm-cov`. It has the PostgreSQL service and the OCR tools, thus the database tests and the OCR tests also count.
+  - The script `.github/scripts/coverage.sh` sets a floor. The job fails when the coverage is less than the floor. The floor starts at the measured value and goes up step by step to 95 %.
+  - These files do not count: `main.rs` files, which only start a program; `screens.rs`, which draws the screenshots of the documentation; and `testing.rs` files, which help the tests.
+  - The job writes the table of the coverage for each file into the summary of the run.
+- **Reason:** The owner wants 95 % line coverage. A floor in CI stops a decrease. A table in the run shows the files with the most lines without tests.
+- **Other options:** A coverage service such as Codecov. Coverage only on a developer computer, without the PostgreSQL service.
