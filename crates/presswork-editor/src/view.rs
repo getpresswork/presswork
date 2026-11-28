@@ -2342,4 +2342,255 @@ mod tests {
 
         assert_eq!(ui.into_messages().count(), 0);
     }
+
+    fn jump() -> Modifiers {
+        if cfg!(target_os = "macos") {
+            Modifiers::ALT
+        } else {
+            Modifiers::CTRL
+        }
+    }
+
+    fn key_command(key: &Key, modifiers: Modifiers, text: Option<&str>) -> Option<Command> {
+        let physical = match key {
+            Key::Character(letter) => match letter.as_str() {
+                "c" => Physical::Code(Code::KeyC),
+                "v" => Physical::Code(Code::KeyV),
+                "x" => Physical::Code(Code::KeyX),
+                "y" => Physical::Code(Code::KeyY),
+                _ => Physical::Code(Code::KeyQ),
+            },
+            _ => Physical::Code(Code::F24),
+        };
+        command(key, physical, modifiers, text)
+    }
+
+    #[test]
+    fn the_key_map_gives_the_commands() {
+        let none = Modifiers::empty();
+        let named = Key::Named;
+        let letter = |text: &str| Key::Character(text.into());
+        let step = |motion| {
+            Some(Command::Act(Action::Move {
+                motion,
+                extend: false,
+            }))
+        };
+
+        assert_eq!(
+            key_command(&named(Named::Tab), none, None),
+            Some(Command::Act(Action::Insert(TAB.to_owned())))
+        );
+        assert_eq!(
+            key_command(&named(Named::Backspace), jump(), None),
+            Some(Command::Act(Action::Delete(Deletion::WordBackward)))
+        );
+        assert_eq!(
+            key_command(&named(Named::ArrowRight), jump(), None),
+            step(Motion::WordRight)
+        );
+        assert_eq!(
+            key_command(&named(Named::ArrowLeft), jump(), None),
+            step(Motion::WordLeft)
+        );
+        assert_eq!(
+            key_command(&named(Named::ArrowUp), Modifiers::SHIFT, None),
+            Some(Command::Vertical {
+                rows: -1.0,
+                extend: true
+            })
+        );
+        assert_eq!(
+            key_command(&named(Named::Home), Modifiers::COMMAND, None),
+            step(Motion::DocumentStart)
+        );
+        assert_eq!(
+            key_command(&named(Named::End), Modifiers::COMMAND, None),
+            step(Motion::DocumentEnd)
+        );
+        assert_eq!(
+            key_command(&named(Named::Home), none, None),
+            step(Motion::LineStart)
+        );
+        assert_eq!(
+            key_command(&named(Named::PageUp), Modifiers::SHIFT, None),
+            Some(Command::Page {
+                down: false,
+                extend: true
+            })
+        );
+        assert_eq!(
+            key_command(&named(Named::PageDown), none, None),
+            Some(Command::Page {
+                down: true,
+                extend: false
+            })
+        );
+        assert_eq!(
+            key_command(&letter("c"), Modifiers::COMMAND, None),
+            Some(Command::Copy)
+        );
+        assert_eq!(
+            key_command(&letter("x"), Modifiers::COMMAND, None),
+            Some(Command::Cut)
+        );
+        assert_eq!(
+            key_command(&letter("v"), Modifiers::COMMAND, None),
+            Some(Command::Paste)
+        );
+        assert_eq!(
+            key_command(&letter("y"), Modifiers::COMMAND, None),
+            Some(Command::Act(Action::Redo))
+        );
+    }
+
+    #[test]
+    fn only_printable_text_without_a_shortcut_key_is_typed() {
+        let none = Modifiers::empty();
+        let letter = |text: &str| Key::Character(text.into());
+
+        assert_eq!(
+            key_command(&letter("é"), none, Some("é")),
+            Some(Command::Act(Action::Insert("é".to_owned())))
+        );
+        assert_eq!(
+            key_command(&letter("@"), Modifiers::COMMAND | Modifiers::ALT, Some("@")),
+            Some(Command::Act(Action::Insert("@".to_owned())))
+        );
+        assert_eq!(
+            key_command(&letter("v"), Modifiers::COMMAND | Modifiers::ALT, None),
+            None
+        );
+        assert_eq!(
+            key_command(&letter("q"), Modifiers::COMMAND, Some("q")),
+            None
+        );
+        assert_eq!(key_command(&letter("q"), none, Some("\u{1}")), None);
+        assert_eq!(key_command(&letter("q"), none, Some("")), None);
+        assert_eq!(key_command(&Key::Unidentified, none, None), None);
+    }
+
+    #[test]
+    fn cut_deletes_the_selection_and_copy_changes_nothing() {
+        let mut editor = Editor::new("ab");
+        editor.perform(Action::SelectAll, Instant::now()).unwrap();
+
+        let actions = actions_on(&editor, |ui| {
+            ui.simulate([
+                shortcut("c", Code::KeyC, Modifiers::COMMAND),
+                shortcut("x", Code::KeyX, Modifiers::COMMAND),
+            ]);
+        });
+
+        assert_eq!(actions, [Action::Delete(Deletion::Backward)]);
+    }
+
+    #[test]
+    fn copy_and_cut_without_a_selection_do_nothing() {
+        let actions = actions("ab", |ui| {
+            ui.simulate([
+                shortcut("c", Code::KeyC, Modifiers::COMMAND),
+                shortcut("x", Code::KeyX, Modifiers::COMMAND),
+            ]);
+        });
+
+        assert_eq!(actions, Vec::<Action>::new());
+    }
+
+    #[test]
+    fn page_down_moves_the_cursor_down() {
+        let text = "line\n".repeat(200);
+
+        let actions = actions(&text, |ui| {
+            ui.tap_key(Named::PageDown);
+        });
+
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [Action::MoveTo { position, extend: false, .. }] if position.offset() > 5
+            ),
+            "{actions:?}"
+        );
+    }
+
+    #[test]
+    fn a_second_and_a_third_click_select_the_word_and_the_line() {
+        let point = first_line(30.0);
+
+        let actions = actions(ALPHABET, |ui| {
+            press(point)(ui);
+            press(point)(ui);
+            press(point)(ui);
+        });
+
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [
+                    Action::MoveTo { .. },
+                    Action::SelectWord(_),
+                    Action::SelectLine(_)
+                ]
+            ),
+            "{actions:?}"
+        );
+    }
+
+    #[test]
+    fn a_drag_extends_the_selection() {
+        let actions = actions(ALPHABET, |ui| {
+            ui.point_at(first_line(10.0));
+            ui.simulate([
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                Event::Mouse(mouse::Event::CursorMoved {
+                    position: first_line(200.0),
+                }),
+            ]);
+        });
+
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [
+                    Action::MoveTo { extend: false, .. },
+                    Action::MoveTo { extend: true, .. }
+                ]
+            ),
+            "{actions:?}"
+        );
+    }
+
+    #[test]
+    fn the_input_method_inserts_its_text() {
+        let actions = actions("", |ui| {
+            ui.simulate([Event::InputMethod(input_method::Event::Commit(
+                "ü".to_owned(),
+            ))]);
+        });
+
+        assert_eq!(actions, [Action::Insert("ü".to_owned())]);
+    }
+
+    #[test]
+    fn the_wheel_and_the_window_focus_give_no_actions() {
+        let text = "line\n".repeat(200);
+
+        let actions = actions(&text, |ui| {
+            ui.point_at(first_line(10.0));
+            ui.simulate([
+                Event::Mouse(mouse::Event::WheelScrolled {
+                    delta: mouse::ScrollDelta::Lines { x: 0.0, y: -3.0 },
+                }),
+                Event::Mouse(mouse::Event::WheelScrolled {
+                    delta: mouse::ScrollDelta::Pixels { x: 0.0, y: 40.0 },
+                }),
+                Event::Window(window::Event::Unfocused),
+                Event::Window(window::Event::Focused),
+                Event::Mouse(mouse::Event::CursorLeft),
+            ]);
+        });
+
+        assert_eq!(actions, Vec::<Action>::new());
+    }
 }
