@@ -1,4 +1,76 @@
 # Changelog
+## 0.2.0 (2026-11-28)
+
+### New functions
+- **text:** keep the suggestions of other persons on undo and redo
+- **editor:** apply the suggestions of remote changes
+- **sync:** keep suggestions as marks in the Loro document
+- **app:** keep the suggestions of server documents
+- **app:** add suggestion mode to server documents
+- **app:** compile with the unsaved text of other open files
+- **app:** edit each file of a project from the files panel
+- **typst:** read installed packages from the Typst package folders
+- **typst:** give page sizes and page keys without page images
+- **app:** make a new project from the menu
+- **app:** make, rename, and delete files in the files panel
+- **app:** show editor help and proofreading in each open file
+- **typst:** ask a downloader for missing preview packages
+- **toolchain:** download and unpack Typst Universe packages
+- **app:** download imported packages in the app and the CLI
+- **toolchain:** search the package index and read package READMEs
+- **typst:** give the package of a definition in a package
+- **app:** search Typst packages and read their READMEs
+- **typst:** build a reference of the Typst library for the docs
+- **app:** show the Typst documentation next to the editor
+- **typst:** render the examples of the reference
+- **app:** show the results of the examples in the Docs tab
+- **typst:** find the paths to a renamed file
+- **app:** change the paths to a renamed file in the project
+- **app:** rename and delete images in the files panel
+- **app:** open the personal dictionary from the menu
+- **app:** move deleted files to the trash of the system
+
+
+### Corrections
+- **app:** ask about unsaved changes before another project opens
+- **app:** keep the side panels at their width when both show
+- **preview:** let render_now draw the pages of an unfinished render
+
+
+### Performance
+- **app:** compile without page images and draw the pages on demand
+- **app:** run the QA report, the grid, and preflight off the UI thread
+
+
+### Documentation
+- **design:** describe suggestions in server documents
+- keep the command-line tool out of the release packages
+- **design:** describe page images on demand, packages, and files
+- **design:** describe new projects and file actions
+- **design:** describe package downloads, the docs, and the packages
+- **design:** tell when Presswork connects to packages.typst.org
+- **design:** describe the results of the documentation examples
+- **design:** describe the paths after a rename
+- **design:** describe files that are not text in the files panel
+- **design:** describe the command for the personal dictionary
+- **design:** describe deletes to the trash of the system
+
+
+### Tests
+- **app:** render suggestions in a server document
+- **typst:** time the compile and the page images of a large book
+- **typst:** time the first pages, the changed pages, and the checks
+- **typst:** time the page point of the cursor
+- **app:** render the packages pane and answer the unsaved question
+- **toolchain:** check the index and a package of the real server
+- **app:** render a docs page with an example
+- **app:** render the files panel with a selected image
+- **app:** check a real move to the trash of the system
+
+
+### Build and CI
+- **deps:** update sha2 to 0.11.1
+
 ## 0.1.0 (2026-11-23)
 
 ### New functions
@@ -428,4 +500,5 @@
 - add issue templates
 - add pull request template
 - add version bump rules to git-cliff configuration
+- **release:** 0.1.0
 
