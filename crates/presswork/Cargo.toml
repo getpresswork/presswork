@@ -43,6 +43,7 @@ uuid.workspace = true
 unic-langid = { workspace = true, features = ["macros"] }
 
 [dev-dependencies]
+iced_runtime.workspace = true
 iced_test.workspace = true
 resvg.workspace = true
 tempfile.workspace = true

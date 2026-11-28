@@ -5383,6 +5383,7 @@ dependencies = [
  "fluent-bundle",
  "futures",
  "iced",
+ "iced_runtime",
  "iced_test",
  "jiff",
  "png",
